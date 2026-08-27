@@ -109,6 +109,7 @@ class ProductionRuntimeV4:
             effect_scope_for=effect_scope_for,
             providers=providers,
             profile_id=str(self.composition.profile["profile_id"]),
+            profile_revision=str(self.composition.plan["profile_revision"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
             authority_control=authority_control,
             current_capture_check=current_capture_check,
@@ -128,6 +129,7 @@ class V4DispatchSession:
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
+    profile_revision: str = ""
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
@@ -255,6 +257,10 @@ class CapturedDispatchSession(Protocol):
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
 
+    @property
+    def profile_revision(self) -> str:
+        """Return the exact captured Profile document revision."""
+
 
 def install_dispatch_session(
     container: DispatchContainer, session: CapturedDispatchSession
@@ -264,6 +270,8 @@ def install_dispatch_session(
         raise ValueError("v4 dispatch session profile_id must be non-empty")
     if not session.plan_digest.startswith("sha256:"):
         raise ValueError("v4 dispatch session plan_digest must be canonical")
+    if session.profile_revision and not session.profile_revision.startswith("sha256:"):
+        raise ValueError("v4 dispatch session profile_revision must be canonical")
     container.set_instance("v4_dispatch_session", session)
 
 

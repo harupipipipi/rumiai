@@ -423,7 +423,14 @@ def _declared_descriptors(
     manifest: Mapping[str, Any], pack_root: Path
 ) -> list[tuple[Path, str]]:
     descriptors: list[tuple[Path, str]] = []
-    resources = manifest.get("resources")
+    if manifest.get("pack_api_version") == "io.tobkiri.pack.v4":
+        resources = manifest.get("artifacts")
+        path_field = "path"
+        digest_field = "digest"
+    else:
+        resources = manifest.get("resources")
+        path_field = "id"
+        digest_field = "content_hash"
     if not isinstance(resources, list):
         return descriptors
     for resource in resources:
@@ -431,8 +438,8 @@ def _declared_descriptors(
             continue
         if resource.get("kind") != "ui.contribution":
             continue
-        resource_id = str(resource.get("id") or "").strip()
-        content_hash = str(resource.get("content_hash") or "").strip()
+        resource_id = str(resource.get(path_field) or "").strip()
+        content_hash = str(resource.get(digest_field) or "").strip()
         if not resource_id or not content_hash:
             continue
         descriptors.append((pack_root / resource_id, content_hash))

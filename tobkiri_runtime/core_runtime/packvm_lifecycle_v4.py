@@ -440,14 +440,39 @@ class PackVMLifecycleV4:
                 ):
                     raise ValueError("PackVM failed-provision cleanup source is invalid")
                 bound_cleanup = source.get("cleanup_operation_id")
-                if bound_cleanup is not None and bound_cleanup != operation_id:
+                if not _cleanup_binding_is_retryable(
+                    self._operations, bound_cleanup, operation_id
+                ):
                     raise ValueError("PackVM failed-provision cleanup is already bound")
                 source["cleanup_operation_id"] = operation_id
                 proof = dict(source["recovery_proof"])
                 plan_digest = str(source["plan_digest"])
                 mode = "failed_provision"
             elif not self._provisioner.state_path.exists():
-                raise ValueError("PackVM cleanup requires failed-provision recovery evidence")
+                # A Launcher restart rotates the authenticated panel session,
+                # so the new UI cannot read the prior session's operation.
+                # Recover only when the durable journal contains exactly one
+                # unfinished failed provision with its Host-created proof.
+                recoverable = [
+                    (source_id, source)
+                    for source_id, source in self._operations.items()
+                    if source.get("operation_kind") == "provision"
+                    and source.get("state") in {"failed", "interrupted"}
+                    and isinstance(source.get("recovery_proof"), dict)
+                    and _cleanup_binding_is_retryable(
+                        self._operations,
+                        source.get("cleanup_operation_id"),
+                        operation_id,
+                    )
+                ]
+                if len(recoverable) != 1:
+                    raise ValueError("PackVM cleanup requires failed-provision recovery evidence")
+                recovered_source_id, recovered_source = recoverable[0]
+                recovered_source["cleanup_operation_id"] = operation_id
+                source_operation_id = recovered_source_id
+                proof = dict(recovered_source["recovery_proof"])
+                plan_digest = str(recovered_source["plan_digest"])
+                mode = "failed_provision"
             record: dict[str, Any] = {
                 "operation_id": operation_id,
                 "operation_kind": "cleanup",
@@ -1168,6 +1193,23 @@ def _session_digest(session_id: str | None) -> str:
 
 def _canonical_operation_id(value: str) -> bool:
     return re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) is not None
+
+
+def _cleanup_binding_is_retryable(
+    operations: Mapping[str, Mapping[str, Any]],
+    bound_cleanup: object,
+    operation_id: str,
+) -> bool:
+    if bound_cleanup is None or bound_cleanup == operation_id:
+        return True
+    if not isinstance(bound_cleanup, str):
+        return False
+    record = operations.get(bound_cleanup)
+    return bool(
+        isinstance(record, Mapping)
+        and record.get("operation_kind") == "cleanup"
+        and record.get("state") in {"failed", "interrupted", "cancelled"}
+    )
 
 
 def _operation_failure(error: Exception) -> dict[str, Any]:

@@ -426,7 +426,11 @@ pub async fn launch_selected_presentation(
     })?;
     launch_result.map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
-        "selected presentation could not be launched".to_string()
+        if cfg!(debug_assertions) {
+            format!("selected presentation could not be launched: {error:#}")
+        } else {
+            "selected presentation could not be launched".to_string()
+        }
     })
 }
 
@@ -704,9 +708,23 @@ fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyRes
 }
 
 fn build_state(config: &AppConfig) -> AnyResult<PresentationState> {
-    let catalog = load_catalog(config)?;
+    let mut catalog = load_catalog(config)?;
+    // Saved development selections bind the digest computed from the staged
+    // checkout artifact, while the immutable source catalog intentionally has
+    // no production digest. Resolve it before validating persisted state.
+    if cfg!(debug_assertions) && config.is_dev_workspace() {
+        for shell in &mut catalog.shell_providers {
+            shell.artifact = Some(resolve_artifact(config, shell)?);
+        }
+    }
     let selection = read_selection(config, &catalog)?;
     build_state_from_catalog(config, catalog, selection)
+}
+
+pub(crate) fn has_valid_saved_selection(config: &AppConfig) -> bool {
+    build_state(config)
+        .map(|state| state.selection.is_some())
+        .unwrap_or(false)
 }
 
 fn build_state_from_catalog(
@@ -1424,6 +1442,35 @@ fn resolve_artifact(
         status_detail: "Artifact has not passed production verification.".to_string(),
     };
 
+    // Development builds materialize the Shell beneath the ignored checkout
+    // runtime. Verify those exact bytes at selection time instead of requiring
+    // a production signing key merely to exercise the Launcher locally.
+    if cfg!(debug_assertions)
+        && config.is_dev_workspace()
+        && artifact.path.is_none()
+        && artifact.sha256.is_none()
+    {
+        let relative = Path::new("bundled")
+            .join("dev-shell")
+            .join(&variant.artifact_ref);
+        let relative_string = relative.to_string_lossy().into_owned();
+        let path = safe_artifact_path(config, &relative_string)?;
+        if path.exists() {
+            let (digest, size) = artifact_integrity::digest_and_size(&path)
+                .context("development Shell artifact could not be hashed or measured")?;
+            artifact.path = Some(relative_string);
+            artifact.sha256 = Some(normalize_digest(&digest));
+            artifact.size = Some(size);
+            artifact.source_identity = Some("development-checkout".to_string());
+            artifact.source_revision = Some(variant.descriptor_digest.clone());
+            artifact.status = "verified".to_string();
+            artifact.status_detail =
+                "Unsigned development artifact verified against the current checkout bytes."
+                    .to_string();
+            return Ok(artifact);
+        }
+    }
+
     if artifact
         .development_command
         .as_deref()
@@ -1750,7 +1797,17 @@ fn read_selection(
             }) else {
                 return Ok(None);
             };
-            if variant.sha256.as_deref() != Some(stored.shell_artifact_digest.as_str()) {
+            let catalog_digest_matches =
+                variant.sha256.as_deref() == Some(stored.shell_artifact_digest.as_str());
+            let development_digest_matches = cfg!(debug_assertions)
+                && config.is_dev_workspace()
+                && variant.sha256.is_none()
+                && shell.artifact.as_ref().is_some_and(|artifact| {
+                    artifact.artifact_id == stored.shell_artifact_id
+                        && artifact.status == "verified"
+                        && artifact.sha256.as_deref() == Some(stored.shell_artifact_digest.as_str())
+                });
+            if !catalog_digest_matches && !development_digest_matches {
                 return Ok(None);
             }
             Ok(Some(PresentationSelection {

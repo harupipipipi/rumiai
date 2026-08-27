@@ -56,6 +56,7 @@ const EXACT_NON_MAP_API_ROUTES = [
   {method: 'POST', path: PANEL_AUTH_EXCHANGE_PATH},
   {method: 'GET', path: '/api/setup/packs'},
   {method: 'POST', path: '/api/setup/packs/install'},
+  {method: 'POST', path: '/api/setup/runtime/reconcile'},
   {method: 'POST', path: '/api/v4/packvm/prepare'},
   {method: 'POST', path: '/api/v4/packvm/consent'},
   {method: 'POST', path: '/api/v4/packvm/provision'},
@@ -1011,6 +1012,10 @@ export function restartKernel(): Promise<KernelRestartResponseData> {
 
 export function checkHealth(): Promise<HealthResponseData> {
   return apiFetch<unknown>('/health').then(parseHealthResponse);
+}
+
+export async function reconcileDefaultsRuntime(): Promise<void> {
+  await apiFetch<unknown>('/api/setup/runtime/reconcile', {method: 'POST'});
 }
 
 export {getRuntimeDispatchStatus, setRuntimeDispatchStatus} from './runtimeDispatchGate';

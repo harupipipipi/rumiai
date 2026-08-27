@@ -975,6 +975,14 @@ pub(crate) fn spawn_defaultspack_local_server(
                         .join("frontend_settings.json"),
                 )
                 .env("RUMI_LOG_DIR", &config.log_dir)
+                .env(
+                    "RUMI_ENVIRONMENT",
+                    if cfg!(debug_assertions) || config.is_dev_workspace() {
+                        "development"
+                    } else {
+                        "production"
+                    },
+                )
                 .env("PYTHONDONTWRITEBYTECODE", "1")
                 .env(
                     viewer_host_broker_connection_env_key(),

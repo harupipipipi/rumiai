@@ -74,6 +74,8 @@ const DEFAULTS_CONSOLE_WINDOW_TITLE: &str = "詳細ログ";
 const HOST_PERMISSIONS_WINDOW_LABEL: &str = "host-permissions";
 const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Rumi Host Permissions";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
+const PANEL_SESSION_CALLER_DENIED: &str =
+    "panel session renewal is unavailable from this Launcher window";
 #[cfg(any(debug_assertions, test))]
 const DEBUG_INSTANCE_ID_ENV: &str = "RUMI_VIEWER_DEBUG_INSTANCE_ID";
 #[cfg(any(debug_assertions, test))]
@@ -356,9 +358,11 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
 
 #[tauri::command]
 fn reauthorize_panel_session(
+    window: tauri::WebviewWindow,
     config: tauri::State<'_, AppConfig>,
     km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
 ) -> Result<String, String> {
+    validate_panel_session_caller(&window, config.inner())?;
     request_fresh_panel_session_code(&config, km.inner())
         .map_err(|error| format!("panel reauthorization failed: {error}"))
 }
@@ -1369,6 +1373,51 @@ fn navigation_is_allowed(
         && port.is_some_and(|candidate| allowed_ports.contains(&candidate))
 }
 
+/// The session-renewal IPC endpoint returns a bootstrap credential.  Tauri's
+/// capability is the first gate, while this live caller check prevents another
+/// allowed loopback document or a misconfigured capability from minting one.
+fn validate_panel_session_caller_context(
+    window_label: &str,
+    url: &Url,
+    configured_port: u16,
+) -> Result<(), &'static str> {
+    if window_label != "main"
+        || configured_port == 0
+        || url.scheme() != "http"
+        || !matches!(url.host_str(), Some("127.0.0.1") | Some("localhost"))
+        || url.port_or_known_default() != Some(configured_port)
+        || (url.path() != "/panel" && !url.path().starts_with("/panel/"))
+    {
+        return Err(PANEL_SESSION_CALLER_DENIED);
+    }
+    Ok(())
+}
+
+fn validate_panel_session_caller(
+    window: &tauri::WebviewWindow,
+    config: &AppConfig,
+) -> Result<(), String> {
+    let url = window.url().map_err(|error| {
+        // Never include the URL in diagnostics: it can carry a short-lived
+        // bootstrap code while the panel is exchanging its session.
+        warn!("panel session renewal caller inspection failed: {error}");
+        PANEL_SESSION_CALLER_DENIED.to_string()
+    })?;
+    validate_panel_session_caller_context(window.label(), &url, config.kernel_port).map_err(
+        |message| {
+            warn!(
+                "panel session renewal denied: caller_class={}",
+                if window.label() == "main" {
+                    "main"
+                } else {
+                    "non_main"
+                }
+            );
+            message.to_string()
+        },
+    )
+}
+
 fn panel_session_url_for_current(
     current: Option<&Url>,
     port: u16,
@@ -1399,6 +1448,19 @@ fn panel_session_url_for_current(
     }
 
     Url::parse_with_params(
+        &format!("http://127.0.0.1:{port}/panel/"),
+        [("code", panel_code)],
+    )
+    .map_err(tauri::Error::InvalidUrl)
+}
+
+fn panel_setup_session_url(port: u16, panel_code: &str) -> Result<Url, tauri::Error> {
+    Url::parse_with_params(
+        // The Kernel only exposes the authenticated panel mount at `/panel/`.
+        // Once the bootstrap code is exchanged, the frontend selects its
+        // setup screen from canonical lifecycle state. `/panel/setup` is not
+        // a public mount and is correctly rejected as an unauthenticated
+        // static path by the Kernel.
         &format!("http://127.0.0.1:{port}/panel/"),
         [("code", panel_code)],
     )
@@ -1450,11 +1512,16 @@ fn navigate_window_to_panel_session(
     window: &tauri::WebviewWindow,
     port: u16,
     panel_code: &str,
+    open_setup: bool,
 ) -> Result<(), tauri::Error> {
     // On macOS a WebView can exist before WKWebView has a URL. Calling
     // `window.url()` during that short window panics in Wry, so always use the
     // stable panel entry point for a fresh authenticated session.
-    let panel_url = panel_session_url_for_current(None, port, panel_code)?;
+    let panel_url = if open_setup {
+        panel_setup_session_url(port, panel_code)?
+    } else {
+        panel_session_url_for_current(None, port, panel_code)?
+    };
     // `WebviewWindow::navigate` can return success on macOS while a WebView
     // booted from the bundled splash page remains on `tauri://`. Changing the
     // active document location reliably completes the same guarded local
@@ -1473,8 +1540,9 @@ fn navigate_and_show_window_to_panel_session(
     window: &tauri::WebviewWindow,
     port: u16,
     panel_code: &str,
+    open_setup: bool,
 ) -> Result<(), tauri::Error> {
-    navigate_window_to_panel_session(window, port, panel_code)?;
+    navigate_window_to_panel_session(window, port, panel_code, open_setup)?;
     show_and_focus_window(window)
 }
 
@@ -1488,9 +1556,12 @@ pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &s
         move || match request_fresh_panel_session_code(&config, &km) {
             Ok(panel_code) => {
                 if let Some(win) = handle.get_webview_window(&label) {
-                    if let Err(error) =
-                        navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
-                    {
+                    if let Err(error) = navigate_window_to_panel_session(
+                        &win,
+                        config.kernel_port,
+                        &panel_code,
+                        !presentation::has_valid_saved_selection(&config),
+                    ) {
                         error!("Failed to refresh panel session for {label}: {error}");
                     }
                 }
@@ -1698,9 +1769,12 @@ fn spawn_kernel_exit_monitor(
             }) {
                 Ok(panel_code) => {
                     if let Some(win) = app.get_webview_window("main") {
-                        if let Err(error) =
-                            navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
-                        {
+                        if let Err(error) = navigate_window_to_panel_session(
+                            &win,
+                            config.kernel_port,
+                            &panel_code,
+                            !presentation::has_valid_saved_selection(&config),
+                        ) {
                             error!("Failed to refresh panel after Kernel restart: {error}");
                         }
                     }
@@ -2373,7 +2447,12 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                             update_setup_progress(Some(&handle), &progress_arc, "Ready");
                             if let Some(win) = handle.get_webview_window("main") {
                                 if let Err(e) =
-                                    navigate_and_show_window_to_panel_session(&win, port, &panel_code)
+                                    navigate_and_show_window_to_panel_session(
+                                        &win,
+                                        port,
+                                        &panel_code,
+                                        !presentation::has_valid_saved_selection(&config),
+                                    )
                                 {
                                     error!("Failed to navigate to panel: {e}");
                                 }
@@ -2423,7 +2502,12 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                 update_setup_progress(Some(&handle), &progress_arc, "Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
-                    if let Err(e) = navigate_and_show_window_to_panel_session(&win, port, &panel_code) {
+                    if let Err(e) = navigate_and_show_window_to_panel_session(
+                        &win,
+                        port,
+                        &panel_code,
+                        !presentation::has_valid_saved_selection(&config),
+                    ) {
                         error!("Failed to navigate to panel: {e}");
                     }
                 }
@@ -3285,6 +3369,34 @@ mod tests {
         let url = panel_session_url_for_current(Some(&current), 8765, "fresh").unwrap();
 
         assert_eq!(url.as_str(), "http://127.0.0.1:8765/panel/?code=fresh");
+    }
+
+    #[test]
+    fn panel_session_renewal_accepts_only_the_live_launcher_panel() {
+        for url in [
+            "http://127.0.0.1:8765/panel",
+            "http://localhost:8765/panel/",
+            "http://127.0.0.1:8765/panel/packs/defaults?code=secret",
+        ] {
+            validate_panel_session_caller_context("main", &Url::parse(url).unwrap(), 8765).unwrap();
+        }
+    }
+
+    #[test]
+    fn panel_session_renewal_rejects_wrong_window_origin_port_and_route() {
+        for (label, url, port) in [
+            ("defaultspack-main", "http://127.0.0.1:8765/panel/", 8765),
+            ("main", "tauri://localhost/panel/", 8765),
+            ("main", "http://example.invalid:8765/panel/", 8765),
+            ("main", "http://127.0.0.1:8766/panel/", 8765),
+            ("main", "http://127.0.0.1:8765/approval", 8765),
+            ("main", "http://127.0.0.1:8765/panel/", 0),
+        ] {
+            assert_eq!(
+                validate_panel_session_caller_context(label, &Url::parse(url).unwrap(), port),
+                Err(PANEL_SESSION_CALLER_DENIED)
+            );
+        }
     }
 
     fn isolated_app_config(prefix: &str) -> (PathBuf, AppConfig) {
