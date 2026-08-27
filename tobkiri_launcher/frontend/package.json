@@ -20,7 +20,7 @@
     "generate:defaults-setup-contract:check": "node scripts/generate-defaults-setup-contract.mjs --check",
     "measure:build": "node scripts/measure-build.mjs",
     "pretest": "npm run generate:contract-map:check && npm run generate:defaults-setup-contract:check",
-    "audit": "npm audit --audit-level=high",
+    "audit": "node scripts/audit.mjs",
     "test": "node --test-concurrency=1 --import tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\" \"scripts/**/*.test.mjs\"",
     "tauri": "cd .. && npm exec --prefix frontend -- tauri"
   },
