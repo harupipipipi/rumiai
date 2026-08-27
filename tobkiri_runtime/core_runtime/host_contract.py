@@ -44,14 +44,16 @@ def _load_contract_file() -> Mapping[str, Any] | None:
         return None
     path = Path(raw_path)
     try:
-        configured_root = os.getenv("RUMI_USER_DATA", "").strip()
+        configured_root = (
+            os.getenv("TOBKIRI_USER_DATA") or os.getenv("RUMI_USER_DATA") or ""
+        ).strip()
         user_data_root = (
-            Path(configured_root)
+            Path(configured_root).expanduser().resolve()
             if configured_root
-            else Path(__file__).resolve().parents[1] / "user_data"
+            else (Path(__file__).resolve().parents[1] / "user_data").resolve()
         )
         expected = user_data_root / "host_contract.json"
-        if path.absolute() != expected.absolute() or path.is_symlink():
+        if path.expanduser().resolve() != expected or path.is_symlink():
             return None
         root_metadata = user_data_root.stat()
         if not stat.S_ISDIR(root_metadata.st_mode) or root_metadata.st_mode & 0o077:

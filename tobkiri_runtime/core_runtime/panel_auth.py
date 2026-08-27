@@ -23,6 +23,7 @@ class PanelAuthManager:
     """Issue one-time bootstrap codes and validate panel sessions."""
 
     DEFAULT_CODE_TTL_SECONDS = 90
+    DEFAULT_CEREMONY_TTL_SECONDS = 120
     DEFAULT_SESSION_TTL_SECONDS = 8 * 60 * 60
 
     def __init__(
@@ -30,13 +31,16 @@ class PanelAuthManager:
         *,
         bootstrap_secret: Optional[str] = None,
         code_ttl_seconds: int = DEFAULT_CODE_TTL_SECONDS,
+        ceremony_ttl_seconds: int = DEFAULT_CEREMONY_TTL_SECONDS,
         session_ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS,
     ) -> None:
         self._bootstrap_secret = bootstrap_secret or ""
         self._code_ttl_seconds = max(15, int(code_ttl_seconds))
+        self._ceremony_ttl_seconds = max(15, int(ceremony_ttl_seconds))
         self._session_ttl_seconds = max(300, int(session_ttl_seconds))
         self._lock = threading.Lock()
         self._active_codes: Dict[str, Dict[str, Any]] = {}
+        self._active_ceremonies: Dict[str, Dict[str, Any]] = {}
         self._active_sessions: Dict[str, Dict[str, Any]] = {}
 
     @staticmethod
@@ -55,6 +59,14 @@ class PanelAuthManager:
         ]
         for key_hash in expired_codes:
             del self._active_codes[key_hash]
+
+        expired_ceremonies = [
+            key_hash
+            for key_hash, info in self._active_ceremonies.items()
+            if info.get("expires_at", 0.0) <= now
+        ]
+        for key_hash in expired_ceremonies:
+            del self._active_ceremonies[key_hash]
 
         expired_sessions = [
             session_hash
@@ -84,6 +96,36 @@ class PanelAuthManager:
             "code": code,
             "expires_in": self._code_ttl_seconds,
         }
+
+    def issue_ceremony_credential(self) -> Dict[str, Any]:
+        """Issue a short-lived credential for one first-start activation."""
+
+        now = time.time()
+        credential = self._generate_secret_token()
+        credential_hash = self._hash_value(credential)
+        expires_at = now + self._ceremony_ttl_seconds
+        with self._lock:
+            self._cleanup_locked(now)
+            self._active_ceremonies[credential_hash] = {
+                "issued_at": now,
+                "expires_at": expires_at,
+            }
+        return {
+            "ceremony_credential": credential,
+            "expires_in": self._ceremony_ttl_seconds,
+        }
+
+    def consume_ceremony_credential(self, candidate: str) -> bool:
+        """Consume one valid activation credential exactly once."""
+
+        if not isinstance(candidate, str) or not candidate:
+            return False
+        now = time.time()
+        credential_hash = self._hash_value(candidate)
+        with self._lock:
+            self._cleanup_locked(now)
+            info = self._active_ceremonies.pop(credential_hash, None)
+            return bool(info is not None and info.get("expires_at", 0.0) > now)
 
     def exchange_code(self, code: str) -> Optional[Dict[str, Any]]:
         if not code:

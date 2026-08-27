@@ -70,6 +70,7 @@ class HostProviderCaptureContextV4:
     catalog_bindings: tuple[ResolvedOperationBinding, ...]
     domain_ids: Mapping[tuple[str, str, str], str]
     user_data_root: Path | None = None
+    profile_revision: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,6 +107,7 @@ class ExactHostProviderBackendV4:
         invocation_context: Callable[
             [RequestEnvelope], HostProviderInvocationContextV4
         ],
+        profile_revision: str = "",
     ) -> None:
         if not contributions:
             raise ValueError("Host Provider backend requires contributions")
@@ -118,6 +120,7 @@ class ExactHostProviderBackendV4:
                 "backend": "tobkiri.exact-host-provider.v4",
                 "backend_id": backend_id,
                 "profile_id": profile_id,
+                "profile_revision": profile_revision,
                 "plan_digest": plan_digest,
                 "security_epoch": security_epoch,
                 "contributions": [

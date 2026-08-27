@@ -29,8 +29,14 @@ class ProfileWorkspacePaths:
 
 def _default_user_data_root() -> Path:
     base_dir = Path(__file__).resolve().parent.parent
-    configured = os.environ.get("RUMI_USER_DATA")
-    return Path(configured) if configured else base_dir / "user_data"
+    configured = os.environ.get("TOBKIRI_USER_DATA") or os.environ.get(
+        "RUMI_USER_DATA"
+    )
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else (base_dir / "user_data").resolve()
+    )
 
 
 def validate_profile_id(profile_id: str) -> str:
@@ -53,7 +59,11 @@ class ProfileWorkspaceManager:
     """Create non-authoritative state directories for one v4 Profile."""
 
     def __init__(self, user_data_root: Path | None = None) -> None:
-        self.user_data_root = Path(user_data_root) if user_data_root is not None else _default_user_data_root()
+        self.user_data_root = (
+            Path(user_data_root).expanduser().resolve()
+            if user_data_root is not None
+            else _default_user_data_root()
+        )
 
     def root_for_profile(self, profile_id: str) -> Path:
         return self.user_data_root / "workspaces" / validate_profile_id(profile_id)

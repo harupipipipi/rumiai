@@ -85,7 +85,15 @@ class SetupHandlersMixin:
             ProfileResolutionDenied,
         )
 
-        preview = self._recommended_default_profile_preview()
+        try:
+            preview = self._recommended_default_profile_preview()
+        except ProfileResolutionDenied as error:
+            return {
+                "error": str(error),
+                "status_code": 409,
+                "state": "activation_denied",
+                "write_set": [],
+            }
         state = "review_required"
         denial_diagnostic: str | None = None
         if active_default_profile_exists():
@@ -119,6 +127,8 @@ class SetupHandlersMixin:
     def _setup_install_pack(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Complete the explicitly confirmed Defaults v4 activation transaction."""
 
+        from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
+
         expected_keys = {
             "setup_api_version",
             "operation_id",
@@ -132,7 +142,15 @@ class SetupHandlersMixin:
             or body.get("operation_id") != "defaults.activate"
         ):
             return self._retired_state()
-        preview = self._recommended_default_profile_preview()
+        try:
+            preview = self._recommended_default_profile_preview()
+        except ProfileResolutionDenied as error:
+            return {
+                "error": str(error),
+                "status_code": 409,
+                "state": "activation_denied",
+                "write_set": [],
+            }
         confirmation = body.get("confirmation")
         if not isinstance(confirmation, dict) or confirmation != preview["confirmation"]:
             return {

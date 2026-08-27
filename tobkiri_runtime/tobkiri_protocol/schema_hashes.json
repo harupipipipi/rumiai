@@ -15,7 +15,7 @@
     "inventory_v1.schema.json": "sha256:2cd124a405d451cd0858ee10a72e031cd34a5cfa5787ba93ed3b5e29123e1156",
     "pack_artifact_index_v4.schema.json": "sha256:861c30621208af2aac98c2e8c678171c6aba493d8fcec4d37b6ed00d769af305",
     "pack_contract_catalog_v4.schema.json": "sha256:132c18aeb94952853a914a3bb962150898dd2f8f9d24ec245b7252012603eebf",
-    "pack_manifest_v4.schema.json": "sha256:38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
+    "pack_manifest_v4.schema.json": "sha256:98e039485400b9cc8e5dbc8b163ce1b91929e87e42847e88529a4355b9f18606",
     "profile_lock_v4.schema.json": "sha256:879f2e8b975b9877a59f057e686b785ab4dd81357df688e6efa07927ec89e45e",
     "profile_lock_v5.schema.json": "sha256:571fe5f18b269159c3336b0b8eb5daa9e16d8b2440bbbe495551a5b9c4cc47b9",
     "profile_v4.schema.json": "sha256:b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
@@ -27,7 +27,8 @@
     "resolved_plan_v1.schema.json": "sha256:c02a20f1c851ffd0957ee88bf0e1da914f45fef033cdc1f472a93ffbe41fde16",
     "resolved_plan_v2.schema.json": "sha256:335d22467c2a13de341eb65f6fc47fc487d4f655cc064f0873989d3eef73c8b5",
     "shell_definition_v4.schema.json": "sha256:c1e4b4005b4c3267f33a72b9348b9777a3386279283390c4a12e9d9da55f2e81",
-    "shell_definition_v5.schema.json": "sha256:24ab2058a7dbe24018481a9ce06fc951211ebe9a84525da3a23aeed1df12daf6"
+    "shell_definition_v5.schema.json": "sha256:24ab2058a7dbe24018481a9ce06fc951211ebe9a84525da3a23aeed1df12daf6",
+    "ui_contribution_v4.schema.json": "sha256:132b16d9164ecf85e0bd38e872f69bcbdf743e3e59b0cb153f57dc991edb680a"
   },
   "generator": "tobkiri-protocol",
   "generator_version": "1.0.0",

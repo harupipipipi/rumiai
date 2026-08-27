@@ -28,10 +28,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _resolve_user_data_dir() -> Path:
-    configured = os.environ.get("RUMI_USER_DATA")
+    configured = os.environ.get("TOBKIRI_USER_DATA") or os.environ.get(
+        "RUMI_USER_DATA"
+    )
     if configured:
-        return Path(configured)
-    return BASE_DIR / "user_data"
+        return Path(configured).expanduser().resolve()
+    return (BASE_DIR / "user_data").resolve()
 
 
 USER_DATA_DIR = _resolve_user_data_dir()

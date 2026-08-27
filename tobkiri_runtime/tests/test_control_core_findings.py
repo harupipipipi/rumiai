@@ -58,6 +58,7 @@ def _begin(store: ControlReconciliationStore, index: int) -> str:
 
 class _Dispatch:
     profile_id = "defaults"
+    profile_revision = "sha256:" + "b" * 64
     plan_digest = "sha256:" + "a" * 64
 
     def __init__(self) -> None:
@@ -75,6 +76,7 @@ class _Dispatch:
                 "provider_id": "test.provider",
                 "operation_id": "test.write",
                 "profile_id": self.profile_id,
+                "profile_revision": self.profile_revision,
                 "plan_digest": self.plan_digest,
             },
         )

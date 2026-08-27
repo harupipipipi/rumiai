@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 
 from cryptography.hazmat.primitives import serialization
@@ -32,6 +33,8 @@ def verify_declared_artifacts(
     )
     if signature_diagnostics:
         return False, signature_diagnostics
+    if ecosystem_manifest.get("pack_api_version") == "io.tobkiri.pack.v4":
+        return _verify_v4_artifacts(pack_root, ecosystem_manifest)
     relative = str(integrity.get("artifact_manifest") or "").strip()
     if not relative:
         return True, ()
@@ -76,6 +79,93 @@ def verify_declared_artifacts(
         if actual_hash != expected_hash:
             diagnostics.append(f"artifact hash mismatch: {path_value}")
     return not diagnostics, tuple(diagnostics)
+
+
+def _verify_v4_artifacts(
+    pack_root: Path,
+    ecosystem_manifest: Mapping[str, Any],
+) -> tuple[bool, tuple[str, ...]]:
+    """Verify every typed SHA-256 artifact declared by a Pack v4 manifest."""
+
+    artifacts = ecosystem_manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return False, ("Pack v4 manifest has no artifacts list",)
+    try:
+        root = pack_root.resolve(strict=True)
+    except OSError as exc:
+        return False, (f"Pack v4 root is unavailable: {type(exc).__name__}",)
+    if pack_root.is_symlink():
+        return False, ("Pack v4 root must not be a symbolic link",)
+
+    diagnostics: list[str] = []
+    seen_paths: set[str] = set()
+    for item in artifacts:
+        if not isinstance(item, Mapping):
+            diagnostics.append("Pack v4 artifact entry is not an object")
+            continue
+        path_value = item.get("path")
+        digest_value = item.get("digest")
+        if not isinstance(path_value, str) or not _safe_v4_artifact_path(path_value):
+            diagnostics.append("Pack v4 artifact path is unsafe")
+            continue
+        if path_value in seen_paths:
+            diagnostics.append(f"Pack v4 artifact path is duplicated: {path_value}")
+            continue
+        seen_paths.add(path_value)
+        if not isinstance(digest_value, str) or not _is_sha256_digest(digest_value):
+            diagnostics.append(f"Pack v4 artifact digest is invalid: {path_value}")
+            continue
+        candidate = root.joinpath(*PurePosixPath(path_value).parts)
+        if not _is_regular_pack_file(candidate, root):
+            diagnostics.append(f"Pack v4 artifact is unavailable: {path_value}")
+            continue
+        try:
+            actual_digest = "sha256:" + hashlib.sha256(candidate.read_bytes()).hexdigest()
+        except OSError:
+            diagnostics.append(f"Pack v4 artifact is unreadable: {path_value}")
+            continue
+        if actual_digest != digest_value:
+            diagnostics.append(f"Pack v4 artifact hash mismatch: {path_value}")
+    return not diagnostics, tuple(diagnostics)
+
+
+def _safe_v4_artifact_path(value: str) -> bool:
+    """Return whether a Pack v4 path is a relative, normalized POSIX path."""
+
+    if not value or "\\" in value or "\x00" in value:
+        return False
+    path = PurePosixPath(value)
+    return (
+        str(path) == value
+        and not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _is_regular_pack_file(candidate: Path, root: Path) -> bool:
+    """Reject symlinked ancestors and non-regular Pack artifact targets."""
+
+    try:
+        candidate.relative_to(root)
+        relative_parts = candidate.relative_to(root).parts
+        current = root
+        for part in relative_parts[:-1]:
+            current = current / part
+            if current.is_symlink() or not current.is_dir():
+                return False
+        return not candidate.is_symlink() and candidate.is_file()
+    except (OSError, ValueError):
+        return False
+
+
+def _is_sha256_digest(value: str) -> bool:
+    """Return whether *value* is a typed lowercase SHA-256 digest."""
+
+    return (
+        len(value) == len("sha256:") + 64
+        and value.startswith("sha256:")
+        and all(character in "0123456789abcdef" for character in value[7:])
+    )
 
 
 def _verify_declared_publisher_signature(

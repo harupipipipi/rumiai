@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from core_runtime.authority.v4 import AuthorityStore
+from tobkiri_protocol.ids import validate_artifact_digest
 
 from .artifact_compiler import CompiledPack, compile_pack_root, routes_for_plan
 from .backends import BackendRegistry
@@ -109,6 +110,7 @@ class ProductionRuntimeV4:
             effect_scope_for=effect_scope_for,
             providers=providers,
             profile_id=str(self.composition.profile["profile_id"]),
+            profile_revision=str(self.composition.plan["profile_revision"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
             authority_control=authority_control,
             current_capture_check=current_capture_check,
@@ -128,6 +130,7 @@ class V4DispatchSession:
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
+    profile_revision: str = ""
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
@@ -197,6 +200,7 @@ class V4DispatchSession:
             "backend_id": backend.status.backend_id,
             "backend_digest": backend.status.backend_digest,
             "profile_id": self.profile_id,
+            "profile_revision": self.profile_revision,
             "plan_digest": self.plan_digest,
         }
         if any(provider.get(key) != value for key, value in expected.items()):
@@ -255,6 +259,10 @@ class CapturedDispatchSession(Protocol):
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
 
+    @property
+    def profile_revision(self) -> str:
+        """Return the exact captured Profile document revision."""
+
 
 def install_dispatch_session(
     container: DispatchContainer, session: CapturedDispatchSession
@@ -262,8 +270,11 @@ def install_dispatch_session(
     """Publish the exact captured activation to worker, HTTP, and chat code."""
     if not session.profile_id.strip():
         raise ValueError("v4 dispatch session profile_id must be non-empty")
-    if not session.plan_digest.startswith("sha256:"):
-        raise ValueError("v4 dispatch session plan_digest must be canonical")
+    try:
+        validate_artifact_digest(session.plan_digest, field="plan_digest")
+        validate_artifact_digest(session.profile_revision, field="profile_revision")
+    except Exception as error:
+        raise ValueError("v4 dispatch session digests must be canonical") from error
     container.set_instance("v4_dispatch_session", session)
 
 

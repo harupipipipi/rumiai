@@ -43,9 +43,17 @@ from .migration import (
     migrate_legacy_profile_or_raise,
 )
 from .validation import validate_document
+from .authority_binding import (
+    AUTHORITY_EDGE_SCHEMA,
+    authority_edge_key,
+    authority_reference,
+)
 
 __all__ = [
     "CanonicalizationError",
+    "AUTHORITY_EDGE_SCHEMA",
+    "authority_edge_key",
+    "authority_reference",
     "CompositionError",
     "MAX_CANONICAL_JSON_BYTES",
     "MigrationBlockedError",

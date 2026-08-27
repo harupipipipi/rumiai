@@ -46,7 +46,7 @@ def _prepend_runtime_python_to_path(env: Dict[str, str]) -> None:
 def _ensure_log_dir_env(env: Dict[str, str]) -> None:
     if env.get("RUMI_LOG_DIR"):
         return
-    user_data = env.get("RUMI_USER_DATA")
+    user_data = env.get("TOBKIRI_USER_DATA") or env.get("RUMI_USER_DATA")
     if user_data:
         env["RUMI_LOG_DIR"] = str(Path(user_data).expanduser().parent / "logs")
 
@@ -75,9 +75,13 @@ def _default_repo_dir() -> str:
 
 def _default_apps_dir(repo_dir: str) -> str:
     """Resolve durable app metadata storage, falling back to a development repo."""
-    user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+    user_data = (
+        os.environ.get("TOBKIRI_USER_DATA")
+        or os.environ.get("RUMI_USER_DATA")
+        or ""
+    ).strip()
     if user_data:
-        return str(Path(user_data).expanduser() / "apps")
+        return str(Path(user_data).expanduser().resolve() / "apps")
     return os.path.join(repo_dir, _APPS_SUBDIR)
 
 

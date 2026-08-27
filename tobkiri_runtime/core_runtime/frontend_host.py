@@ -19,6 +19,12 @@ from .paths import PackLocation, resolve_pack_locations
 from .resolved_profile import ResolvedProfile
 
 CONTRIBUTION_VERSION = "rumi.ui.contribution.v1"
+V4_CONTRIBUTION_VERSIONS = frozenset(
+    {
+        "io.tobkiri.ui.contribution.v1",
+        "io.tobkiri.ui.contribution.v4",
+    }
+)
 _PACK_QUARANTINE_CODES = {
     "frontend_manifest_invalid",
     "frontend_build_identity_missing",
@@ -33,6 +39,12 @@ SCHEMA_PATH = (
     Path(__file__).resolve().parents[1]
     / "schemas"
     / "frontend_contribution.schema.json"
+)
+V4_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "tobkiri_protocol"
+    / "schemas"
+    / "ui_contribution_v4.schema.json"
 )
 
 
@@ -108,8 +120,14 @@ class FrontendHostRegistry:
             str(ecosystem_dir) if ecosystem_dir is not None else None
         )
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        v4_schema = json.loads(V4_SCHEMA_PATH.read_text(encoding="utf-8"))
         self._validator = (
             Draft202012Validator(schema)
+            if Draft202012Validator is not None
+            else None
+        )
+        self._v4_validator = (
+            Draft202012Validator(v4_schema)
             if Draft202012Validator is not None
             else None
         )
@@ -196,7 +214,15 @@ class FrontendHostRegistry:
             ]
         provenance = manifest.get("provenance")
         provenance = provenance if isinstance(provenance, dict) else {}
-        if str(provenance.get("content_hash") or "") != expected_pack_hash:
+        is_v4_manifest = manifest.get("pack_api_version") == "io.tobkiri.pack.v4"
+        manifest_pack = manifest.get("pack")
+        manifest_pack = manifest_pack if isinstance(manifest_pack, dict) else {}
+        declared_pack_hash = (
+            str(manifest_pack.get("artifact_digest") or "")
+            if is_v4_manifest
+            else str(provenance.get("content_hash") or "")
+        )
+        if declared_pack_hash != expected_pack_hash:
             return [], [
                 _diagnostic(
                     "frontend_pack_hash_mismatch",
@@ -219,7 +245,16 @@ class FrontendHostRegistry:
                     location.pack_id,
                 )
             ]
-        build_identity = str(provenance.get("build_identity") or "").strip()
+        manifest_integrity = manifest.get("integrity")
+        manifest_integrity = (
+            manifest_integrity if isinstance(manifest_integrity, Mapping) else {}
+        )
+        build_identity = str(
+            provenance.get("build_identity")
+            or provenance.get("source_digest")
+            or manifest_integrity.get("source_identity")
+            or ""
+        ).strip()
         descriptors = _declared_descriptors(manifest, location.pack_subdir)
         if not descriptors:
             return [], []
@@ -242,6 +277,7 @@ class FrontendHostRegistry:
                 expected_pack_hash,
                 build_identity,
                 verified_trust_class,
+                is_v4_manifest,
             )
             diagnostics.extend(item_diagnostics)
             if contribution is not None:
@@ -256,6 +292,7 @@ class FrontendHostRegistry:
         expected_pack_hash: str,
         build_identity: str,
         trust_class: str,
+        v4_manifest: bool,
     ) -> tuple[
         VerifiedFrontendContribution | None,
         list[FrontendDiagnostic],
@@ -292,7 +329,24 @@ class FrontendHostRegistry:
                     str(payload.get("id") or "") if isinstance(payload, dict) else None,
                 )
             ]
-        if self._validator is None:
+        is_v4_descriptor = (
+            isinstance(payload, dict)
+            and payload.get("version") in V4_CONTRIBUTION_VERSIONS
+        )
+        if v4_manifest and not is_v4_descriptor:
+            return None, [
+                _diagnostic(
+                    "frontend_descriptor_invalid",
+                    "error",
+                    "Pack v4 UI contributions require the typed io.tobkiri schema",
+                    location.pack_id,
+                    str(payload.get("id") or "")
+                    if isinstance(payload, dict)
+                    else None,
+                )
+            ]
+        validator = self._v4_validator if is_v4_descriptor else self._validator
+        if validator is None:
             return None, [
                 _diagnostic(
                     "frontend_descriptor_invalid",
@@ -305,7 +359,7 @@ class FrontendHostRegistry:
                 )
             ]
         errors = sorted(
-            self._validator.iter_errors(payload),
+            validator.iter_errors(payload),
             key=lambda item: tuple(str(part) for part in item.absolute_path),
         )
         if errors:
@@ -349,7 +403,8 @@ class FrontendHostRegistry:
             module_hash = "sha256:" + hashlib.sha256(
                 module_path.read_bytes()
             ).hexdigest()
-            if module_hash != str(module.get("content_hash")):
+            module_hash_field = "digest" if is_v4_descriptor else "content_hash"
+            if module_hash != str(module.get(module_hash_field)):
                 return None, [
                     _diagnostic(
                         "frontend_module_hash_mismatch",
@@ -423,7 +478,14 @@ def _declared_descriptors(
     manifest: Mapping[str, Any], pack_root: Path
 ) -> list[tuple[Path, str]]:
     descriptors: list[tuple[Path, str]] = []
-    resources = manifest.get("resources")
+    if manifest.get("pack_api_version") == "io.tobkiri.pack.v4":
+        resources = manifest.get("artifacts")
+        path_field = "path"
+        digest_field = "digest"
+    else:
+        resources = manifest.get("resources")
+        path_field = "id"
+        digest_field = "content_hash"
     if not isinstance(resources, list):
         return descriptors
     for resource in resources:
@@ -431,8 +493,8 @@ def _declared_descriptors(
             continue
         if resource.get("kind") != "ui.contribution":
             continue
-        resource_id = str(resource.get("id") or "").strip()
-        content_hash = str(resource.get("content_hash") or "").strip()
+        resource_id = str(resource.get(path_field) or "").strip()
+        content_hash = str(resource.get(digest_field) or "").strip()
         if not resource_id or not content_hash:
             continue
         descriptors.append((pack_root / resource_id, content_hash))
@@ -515,10 +577,10 @@ def _module_source_path(
     location: PackLocation,
 ) -> Path | None:
     prefix = f"/static/packs/{location.pack_id}/"
-    if not public_path.startswith(prefix):
+    if not public_path.startswith(prefix) or "\\" in public_path:
         return None
     relative = Path(public_path.removeprefix(prefix))
-    if ".." in relative.parts:
+    if not relative.parts or "." in relative.parts or ".." in relative.parts:
         return None
     candidate = location.pack_subdir / relative
     return candidate if _is_within(candidate, location.pack_subdir) else None

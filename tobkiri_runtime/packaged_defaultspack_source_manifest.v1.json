@@ -1265,8 +1265,15 @@
     {
       "path": "tobkiri_protocol/__init__.py",
       "type": "regular-file",
-      "size": 1919,
-      "sha256": "1d43814ec10f4c1ac262fc0f744f31399068cb6218668e3c589815326745194a",
+      "size": 2112,
+      "sha256": "4611feccc3f402b5161c6d82de272cc4bce61453992017ce004dba151882ca36",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/authority_binding.py",
+      "type": "regular-file",
+      "size": 2121,
+      "sha256": "05eff617137bdddfa26e920821e29292391f8d32cf992ef69946b0ef64d46fcc",
       "executable": false
     },
     {
@@ -1419,8 +1426,8 @@
     {
       "path": "tobkiri_protocol/schema_hashes.json",
       "type": "regular-file",
-      "size": 3259,
-      "sha256": "f81649ac6ab0752e194db3f20e405fa01e3e34d455eeed528e3c1aab7f84e2d9",
+      "size": 3372,
+      "sha256": "d2dd3ea468414f54a9b30465138375f4a3b36135c8b2c482c319a26ca2ffb2e1",
       "executable": false
     },
     {
@@ -1531,8 +1538,8 @@
     {
       "path": "tobkiri_protocol/schemas/pack_manifest_v4.schema.json",
       "type": "regular-file",
-      "size": 7822,
-      "sha256": "38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
+      "size": 7841,
+      "sha256": "98e039485400b9cc8e5dbc8b163ce1b91929e87e42847e88529a4355b9f18606",
       "executable": false
     },
     {
@@ -1620,6 +1627,13 @@
       "executable": false
     },
     {
+      "path": "tobkiri_protocol/schemas/ui_contribution_v4.schema.json",
+      "type": "regular-file",
+      "size": 4010,
+      "sha256": "132b16d9164ecf85e0bd38e872f69bcbdf743e3e59b0cb153f57dc991edb680a",
+      "executable": false
+    },
+    {
       "path": "tobkiri_protocol/secure_persistence.py",
       "type": "regular-file",
       "size": 35315,
@@ -1636,8 +1650,8 @@
     {
       "path": "tobkiri_protocol/validation.py",
       "type": "regular-file",
-      "size": 20127,
-      "sha256": "d9359b13b939298d91114d33ccc06805f9029341f03b3316cdf12e1d2288adf7",
+      "size": 20244,
+      "sha256": "cd6941f93f44097ba04c5de299e51b829ba4beba486fa74287e557497b773b73",
       "executable": false
     }
   ]

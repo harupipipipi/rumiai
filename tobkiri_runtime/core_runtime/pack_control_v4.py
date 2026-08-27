@@ -188,6 +188,10 @@ class CapturedPackControlSession:
         return self._binding.profile_id
 
     @property
+    def profile_revision(self) -> str:
+        return self._binding.profile_revision
+
+    @property
     def plan_digest(self) -> str:
         return self._binding.plan_digest
 
@@ -200,6 +204,7 @@ class CapturedPackControlSession:
                     "contract_id": CONTROL_PRESENTATION_CONTRACT,
                     "operations": sorted(CONTROL_PRESENTATION_OPERATIONS),
                     "profile_id": self.profile_id,
+                    "profile_revision": self._binding.profile_revision,
                     "plan_digest": self.plan_digest,
                 },
             )
@@ -211,6 +216,7 @@ class CapturedPackControlSession:
                 "contract_id": PACK_CONTROL_CONTRACT,
                 "operations": sorted(PACK_CONTROL_OPERATIONS),
                 "profile_id": self.profile_id,
+                "profile_revision": self._binding.profile_revision,
                 "plan_digest": self.plan_digest,
             },
         )
@@ -1049,6 +1055,7 @@ def resolve_profile_pack_set(
         _authority_reference,
         _authority_snapshot_digest,
         _bundle_root,
+        _edge_scope_digest,
         _edge_key,
     )
 
@@ -1149,7 +1156,11 @@ def resolve_profile_pack_set(
         )
         snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
         bindings = {
-            _edge_key(edge): _authority_reference(edge, snapshot_digest)
+            _edge_key(edge): _authority_reference(
+                edge,
+                snapshot_digest,
+                scope_digest=_edge_scope_digest(catalog, edge),
+            )
             for edge in source["requested_edges"]
         }
         verified_digests = {
@@ -1178,7 +1189,11 @@ def resolve_profile_pack_set(
         # The resolver derives only the selected Pack/dependency closure and
         # binds every operation to the selected Shell caller.
         for edge in dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
-            bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
+            bindings[_edge_key(edge)] = _authority_reference(
+                edge,
+                snapshot_digest,
+                scope_digest=_edge_scope_digest(catalog, edge),
+            )
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state("defaults")
         binding = _capture_binding()

@@ -49,6 +49,8 @@ SCHEMA_ALIASES = {
     "executable_catalog": "executable_catalog_v4.schema.json",
     "external_pack_catalog": "external_normal_pack_catalog_v4.schema.json",
     "defaults_setup": "defaults_setup_v4.schema.json",
+    "ui_contribution": "ui_contribution_v4.schema.json",
+    "ui_contribution_v4": "ui_contribution_v4.schema.json",
 }
 
 _ID_FIELDS = {

@@ -1178,8 +1178,16 @@ def _trace_path() -> Path | None:
     configured = str(os.environ.get("RUMI_COMPUTER_USE_TRACE_PATH") or "").strip()
     if configured:
         return Path(configured).expanduser()
-    user_data = str(os.environ.get("RUMI_USER_DATA") or "").strip()
-    return Path(user_data).expanduser() / "logs" / "computer_use_trace.jsonl" if user_data else None
+    user_data = str(
+        os.environ.get("TOBKIRI_USER_DATA")
+        or os.environ.get("RUMI_USER_DATA")
+        or ""
+    ).strip()
+    return (
+        Path(user_data).expanduser().resolve() / "logs" / "computer_use_trace.jsonl"
+        if user_data
+        else None
+    )
 
 
 def _append_jsonl(path: Path, event: dict[str, Any]) -> None:
