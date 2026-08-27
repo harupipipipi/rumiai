@@ -507,9 +507,7 @@ def test_agent_http_blocks_attach_status_and_resume_completion_gate(
     route = next(
         value
         for key, value, _meta in route_registry.entries
-        if key == "io.http.route"
-        and value["method"] == "POST"
-        and value["pattern"] == route_path
+        if key == "io.http.route" and value["method"] == "POST" and value["pattern"] == route_path
     )
     assert route["path_inject"] == {"id": "execution_id"}
     missing = route["handler"]({"execution_id": "missing"}, {})
