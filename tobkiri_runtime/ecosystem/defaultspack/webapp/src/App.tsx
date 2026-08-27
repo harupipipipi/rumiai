@@ -2603,6 +2603,7 @@ function ChatApp() {
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
+  const browserApprovalTokenRef = useRef<Map<string, string>>(new Map());
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
@@ -5509,11 +5510,12 @@ function ChatApp() {
     if (!browserApproval) return;
     if (!activeConversationId) return;
     const currentApproval = browserApproval;
+    const actionKey = browserApprovalSettlementKey(currentApproval);
+    if (activeBrowserApprovalActionRef.current === actionKey) return;
+    activeBrowserApprovalActionRef.current = actionKey;
     setError(null);
     setIsGenerating(true);
-    const approvalToolIds = selectedToolIds.length
-      ? selectedToolIds
-      : [currentApproval.toolName].filter(Boolean);
+    const approvalToolIds = [currentApproval.toolName].filter(Boolean);
     rememberPendingRequest({
       conversationId: activeConversationId,
       startedAt: Date.now(),
@@ -5522,14 +5524,19 @@ function ChatApp() {
     });
     try {
       const approvalWorkspace = workspaceContextFromConversation(activeConversation);
-      let approvalToken = currentApproval.token ?? "";
-      if (currentApproval.requestId) {
+      let approvalToken = currentApproval.requestId
+        ? browserApprovalTokenRef.current.get(actionKey) ?? ""
+        : currentApproval.token ?? "";
+      if (currentApproval.requestId && !approvalToken) {
         const decision = await api.approveCodingApproval(currentApproval.requestId);
         if (!decision.approved) {
           throw new Error(decision.reason || "approval failed");
         }
         approvalToken = decision.token ?? "";
-        settleBrowserApproval(currentApproval);
+        if (!approvalToken) {
+          throw new Error("approval did not issue a continuation token");
+        }
+        browserApprovalTokenRef.current.set(actionKey, approvalToken);
       }
       await api.streamMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
@@ -5564,6 +5571,8 @@ function ChatApp() {
           selected_tools: approvalToolIds,
         },
       });
+      browserApprovalTokenRef.current.delete(actionKey);
+      settleBrowserApproval(currentApproval);
       forgetPendingRequest(activeConversationId);
       replaceChatIdInUrl(activeConversationId, false);
       await loadConversation(activeConversationId, false);
@@ -5572,6 +5581,7 @@ function ChatApp() {
       forgetPendingRequest(activeConversationId);
       const staleMessage = currentApproval.requestId ? approvalStaleUiMessage(approvalError) : null;
       if (staleMessage) {
+        browserApprovalTokenRef.current.delete(actionKey);
         settleBrowserApproval(currentApproval);
         setError(staleMessage);
       } else {
@@ -5579,6 +5589,7 @@ function ChatApp() {
         setError("許可を保存できませんでした。リクエストの状態を更新して再試行してください。");
       }
     } finally {
+      activeBrowserApprovalActionRef.current = null;
       setIsGenerating(false);
     }
   };
