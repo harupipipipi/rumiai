@@ -329,12 +329,12 @@
     {
       "path": "packs/rumi_model_catalog_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:a7a44cb84a8785541cac8d4bb51ad3d28d3d65bc2b26672aa260eb8f4359f81b"
+      "digest": "sha256:37d15f011e796a33585e9e8ee3a904fe7923d0f39489b12c75994c77ae05e6e7"
     },
     {
       "path": "packs/rumi_model_catalog_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:b06e0cb38447a28ee65af0359255856304abb83f6231679e06634eb9fd2c6c4d"
+      "digest": "sha256:75fd09116e6973e236065c7843a49aa617c9f8710cb1adf217d9351759df51ba"
     },
     {
       "path": "packs/rumi_model_evals_pack.executables.v4.json",
