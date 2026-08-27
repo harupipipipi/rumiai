@@ -5,6 +5,7 @@ export type PendingChatRequest = {
   operationId?: string;
   requestFingerprint?: string;
   startedAt: number;
+  updatedAt?: number;
   status: string;
   toolNames: string[];
   toolStartedAt?: Record<string, number>;
