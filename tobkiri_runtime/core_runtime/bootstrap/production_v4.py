@@ -578,6 +578,8 @@ def _commit_pack_control_authority(
     ).timestamp()
     identity_suffix = str(activation["activation_id"]).replace(":", ".")
     operation_suffix = target.operation_id.replace(".", "-")
+    caller_suffix = caller.principal_id.removeprefix("sha256:")[:24]
+    operation_suffix = f"{operation_suffix}.{caller_suffix}"
     authority_label = authority_label.replace("/", "-").replace(".", "-")
     approval_identity = (
         pack_approval_revision.removeprefix("sha256:")[:24]
@@ -1134,16 +1136,39 @@ def capture_production_dispatch(
     # Dispatch must follow the persisted immutable Profile, including exact
     # operation edges contributed by an enabled/approved optional Pack.
     edges = profile["requested_edges"]
-    binding_by_key = {
-        (item["contract_id"], item["operation_id"]): item for item in plan["bindings"]
-    }
+    binding_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    binding_by_edge: dict[tuple[str, str, str, str], Mapping[str, Any]] = {}
+    for item in plan["bindings"]:
+        key = (str(item["contract_id"]), str(item["operation_id"]))
+        binding_by_key.setdefault(key, item)
+        target = FunctionPrincipal.from_dict(item["function_principal"])
+        edge_key = (
+            str(item["caller_function_id"]),
+            target.function_id,
+            key[0],
+            key[1],
+        )
+        if edge_key in binding_by_edge:
+            raise AuthorityDenied("ResolvedPlan contains a duplicate operation edge")
+        binding_by_edge[edge_key] = item
     ceilings: dict[tuple[str, str], AuthorityCeilings] = {}
     caller_by_operation: dict[tuple[str, str], FunctionPrincipal] = {}
     scope_by_operation: dict[tuple[str, str], AuthorityScope] = {}
+    callers_by_operation: dict[
+        tuple[str, str], dict[str, FunctionPrincipal]
+    ] = {}
+    scopes_by_operation: dict[
+        tuple[str, str], dict[str, AuthorityScope]
+    ] = {}
     for edge in edges:
-        key = (edge["contract_id"], edge["operation_id"])
-        binding = binding_by_key[key]
-        caller = principals[str(edge["caller_function_id"])]
+        key = (str(edge["contract_id"]), str(edge["operation_id"]))
+        caller_function_id = str(edge["caller_function_id"])
+        target_function_id = str(edge["target_provider_id"])
+        edge_key = (caller_function_id, target_function_id, key[0], key[1])
+        binding = binding_by_edge.get(edge_key)
+        if binding is None:
+            raise AuthorityDenied("Profile edge is absent from the captured ResolvedPlan")
+        caller = principals[caller_function_id]
         target = FunctionPrincipal.from_dict(binding["function_principal"])
         scope = _committed_operation_scope(edge, target)
         if binding["requested_scope_digest"] != canonical_digest(scope.to_dict()):
@@ -1153,8 +1178,16 @@ def capture_production_dispatch(
             runtime_safety=scope,
             profile_admin=scope,
         )
-        caller_by_operation[key] = caller
-        scope_by_operation[key] = scope
+        callers_by_operation.setdefault(key, {})[caller.principal_id] = caller
+        scopes_by_operation.setdefault(key, {})[caller.principal_id] = scope
+    for key, callers in callers_by_operation.items():
+        if len(callers) == 1:
+            caller_by_operation[key] = next(iter(callers.values()))
+    for key, scopes in scopes_by_operation.items():
+        scope_values = tuple(scopes.values())
+        if not scope_values or any(scope != scope_values[0] for scope in scope_values[1:]):
+            raise AuthorityDenied("shared operation edges have conflicting authority scopes")
+        scope_by_operation[key] = scope_values[0]
 
     binding_pack_ids = {str(item["pack_id"]) for item in plan["bindings"]}
     pack_roots = resolve_admitted_pack_roots(
@@ -1191,17 +1224,17 @@ def capture_production_dispatch(
         verified_effective_artifacts=effective,
         authority_ceilings=ceilings,
     )
-    catalog_bindings = tuple(
-        runtime.composition.catalog.resolve_pinned(
-            str(binding["contract_id"]),
-            str(binding["operation_id"]),
-        )
-        for binding in plan["bindings"]
-    )
-    resolved_binding_by_key = {
-        (binding.operation.contract_id, binding.operation.operation_id): binding
-        for binding in catalog_bindings
-    }
+    resolved_binding_by_key: dict[
+        tuple[str, str], ResolvedOperationBinding
+    ] = {}
+    for binding in plan["bindings"]:
+        key = (str(binding["contract_id"]), str(binding["operation_id"]))
+        resolved_binding = runtime.composition.catalog.resolve_pinned(*key)
+        existing = resolved_binding_by_key.get(key)
+        if existing is not None and existing != resolved_binding:
+            raise AuthorityDenied("ResolvedPlan operation route changed during capture")
+        resolved_binding_by_key[key] = resolved_binding
+    catalog_bindings = tuple(resolved_binding_by_key.values())
     registered_backends = tuple((backends or BackendRegistry(())).registered)
     if backends is None:
         authenticated_backend = _authenticated_packvm_backend(packvm_provisioner)
@@ -1421,17 +1454,26 @@ def capture_production_dispatch(
             session_id=f"session.provider.built-in.{target_suffix}.{activation_suffix}",
             principal=target,
         )
-        _commit_pack_control_authority(
-            authority_store,
-            authority_control,
-            active=active,
-            caller=caller_by_operation[key],
-            target=target,
-            target_domain=target_domain,
-            scope=scope_by_operation[key],
-            authority_label=f"built-in-{host_binding['pack_id']}",
-            host_extension_binding=resolved_host_binding,
+        callers = tuple(
+            sorted(
+                callers_by_operation.get(key, {}).values(),
+                key=lambda principal: principal.principal_id,
+            )
         )
+        if not callers:
+            raise AuthorityDenied("built-in Host Provider caller edge is unavailable")
+        for caller in callers:
+            _commit_pack_control_authority(
+                authority_store,
+                authority_control,
+                active=active,
+                caller=caller,
+                target=target,
+                target_domain=target_domain,
+                scope=scope_by_operation[key],
+                authority_label=f"built-in-{host_binding['pack_id']}",
+                host_extension_binding=resolved_host_binding,
+            )
         approved_host_binding_keys.add(key)
         dynamic_domain_ids[(key[0], key[1], target.principal_id)] = target_domain.domain_id
 
@@ -1682,11 +1724,7 @@ def capture_production_dispatch(
     if control_backend is not None:
         registered_backends += (control_backend,)
     binding_by_function: dict[str, list[ResolvedOperationBinding]] = {}
-    for resolved_binding in catalog_bindings:
-        key = (
-            resolved_binding.operation.contract_id,
-            resolved_binding.operation.operation_id,
-        )
+    for key, resolved_binding in resolved_binding_by_key.items():
         if key in approved_host_binding_keys:
             binding_by_function.setdefault(
                 resolved_binding.function.function_id,
@@ -1884,19 +1922,39 @@ def capture_production_dispatch(
     )
     activation_digest = canonical_digest(active.activation)
     target_by_operation = {
-        (item["contract_id"], item["operation_id"]): FunctionPrincipal.from_dict(
-            item["function_principal"]
-        )
-        for item in plan["bindings"]
+        key: _binding_principal(binding)
+        for key, binding in binding_by_key.items()
     }
 
     caller_sessions: set[str] = set()
     caller_sessions_lock = threading.RLock()
 
+    def caller_for_operation(
+        key: tuple[str, str],
+        session_id: str,
+    ) -> FunctionPrincipal:
+        caller = caller_by_operation.get(key)
+        if caller is not None:
+            return caller
+        if not session_id.startswith("session.host-provider."):
+            raise AuthorityDenied("shared operation caller identity is unavailable")
+        caller_suffix = session_id.rsplit(".", 1)[-1]
+        matches = [
+            candidate
+            for candidate in callers_by_operation.get(key, {}).values()
+            if candidate.principal_id.removeprefix("sha256:")[:24]
+            == caller_suffix
+        ]
+        if len(matches) != 1:
+            raise AuthorityDenied("shared operation caller identity is invalid")
+        return matches[0]
+
     def context_for(contract_id: str, operation_id: str, session_id: str) -> RequestContext:
         key = (contract_id, operation_id)
-        caller = caller_by_operation[key]
-        target = target_by_operation[key]
+        caller = caller_for_operation(key, session_id)
+        target = target_by_operation.get(key)
+        if target is None:
+            raise AuthorityDenied("operation target is outside the captured plan")
         target_suffix = target.principal_id.removeprefix("sha256:")[:24]
         # One authenticated panel session may invoke operations whose
         # resolved Shell caller principals differ.  Authority session
@@ -1955,7 +2013,7 @@ def capture_production_dispatch(
         return context
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}
-    for binding in plan["bindings"]:
+    for key, binding in sorted(binding_by_key.items()):
         resolved_binding = broker._catalog.resolve_pinned(
             binding["contract_id"],
             binding["operation_id"],
