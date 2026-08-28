@@ -100,9 +100,9 @@
           "authoritative_owner": true,
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:2ec5f84cb655635c4dbf601f79d383d420613ce41655f753ac7d0cd1ede59627",
+            "artifact_digest": "sha256:9288183ef1164de6f43cfc7d5252e241aafb96651ea8ed08d8fd2eb54895caca",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b"
+            "source_identity": "sha256:a335e165c5afa339445c0e4dda00b3100ca754a90ea192163ef17394bf0082e9"
           },
           "owner_surfaces": [
             "mobile_pairing_nonce_ledger"
@@ -144,7 +144,7 @@
       "owner": "rumi_mobile_pairing_connector_pack",
       "runtime_executable": false,
       "source": "pack.v4.json",
-      "source_identity": "sha256:6d88e518267df71cb8dcf9bb5dd704a334bdb83556fe08ac5af6ca889129037b"
+      "source_identity": "sha256:a335e165c5afa339445c0e4dda00b3100ca754a90ea192163ef17394bf0082e9"
     }
   },
   "migration": {

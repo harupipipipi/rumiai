@@ -115,9 +115,9 @@
           "authoritative_owner": true,
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:5d3b69b5258e320b73c23efa3ca44575321bfb848d51bc306a5d1dedd12b6334",
+            "artifact_digest": "sha256:e0e1b00191aee0069ccdea457f5e303a6c24b92c6024f05f2bb3a3b45c1be64a",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
+            "source_identity": "sha256:0a26836a9e87e8792abbaa7de196a76e22a57884b4fde738ffbb053a8706636c"
           },
           "owner_surfaces": [
             "kanban_boards",
@@ -161,7 +161,7 @@
       "owner": "rumi_kanban_state_store_pack",
       "runtime_executable": false,
       "source": "pack.v4.json",
-      "source_identity": "sha256:3c67862413398cd57e25a7266efc914c64781b821ebaa51f1b64b893e51e5e3c"
+      "source_identity": "sha256:0a26836a9e87e8792abbaa7de196a76e22a57884b4fde738ffbb053a8706636c"
     }
   },
   "migration": {

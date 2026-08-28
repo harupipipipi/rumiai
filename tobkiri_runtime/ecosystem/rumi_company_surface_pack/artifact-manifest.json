@@ -3,7 +3,7 @@
     {
       "path": "frontend/contributions/companies.json",
       "role": "ui_contribution",
-      "sha256": "sha256:0c501ba874d90285ae699aa8bd3b2d2ae390309d944997bd21efcdb610d0fef7"
+      "sha256": "sha256:f7d571b533d2ff0bddff858f25163f86ab41c4ee94f05ac35c38aae8ce2ba3c2"
     },
     {
       "path": "ui/app.js",

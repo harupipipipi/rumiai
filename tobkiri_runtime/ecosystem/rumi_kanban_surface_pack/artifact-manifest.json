@@ -3,7 +3,7 @@
     {
       "path": "frontend/contributions/kanban.json",
       "role": "ui_contribution",
-      "sha256": "sha256:5e2f74830566e7205145902e53cd755a53dbece1a9fe3539297c5f2eed4beb80"
+      "sha256": "sha256:88e4001ab5715da62ae79176887b0e8391a436083d67f018a1b809e0d5c943ef"
     },
     {
       "path": "ui/app.js",

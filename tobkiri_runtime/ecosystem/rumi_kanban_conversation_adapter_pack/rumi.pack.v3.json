@@ -105,9 +105,9 @@
           "authoritative_owner": false,
           "canonical_v4": {
             "artifact": "pack.v4.json",
-            "artifact_digest": "sha256:a7d9809777a75d9b99ac09638b0bb90eb735e8964b03126a5d1c60954af57bd1",
+            "artifact_digest": "sha256:249969c6cd175a6d5fc491c4e709a36d809abebbc8f48825796234d977b97620",
             "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-            "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
+            "source_identity": "sha256:375a2e06866a52f89762f17d3eb6391d122765777adf0d0bf61491aeba698aa8"
           },
           "chat_imports": false,
           "integrity": {
@@ -152,7 +152,7 @@
       "owner": "rumi_kanban_conversation_adapter_pack",
       "runtime_executable": false,
       "source": "pack.v4.json",
-      "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
+      "source_identity": "sha256:375a2e06866a52f89762f17d3eb6391d122765777adf0d0bf61491aeba698aa8"
     }
   },
   "migration": {

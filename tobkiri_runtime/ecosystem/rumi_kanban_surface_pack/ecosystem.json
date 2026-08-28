@@ -15,9 +15,9 @@
     "authoritative_owner": false,
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:6776cec2583ef3ffe10c2258b9a5c33c4283642f6495c9846761f3e37a1ccae3",
+      "artifact_digest": "sha256:d0f050e5c132dbb0f0136d2cd66e854d05ff92c782d6e41bc92dc5e4971167be",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:74e0ccd856ee27de9d8544dcb7303656b4dcecbf88c6406eb8a090afd7215741"
+      "source_identity": "sha256:d783ea83db57761098482907353d48a8f07d8f8eb652998862ea628065bb73ab"
     },
     "executable_code": true,
     "format": "rumi.ecosystem.v1",
@@ -26,7 +26,7 @@
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "historical_format": "rumi.pack.v3.json",
       "source": "pack.v4.json",
-      "source_content_hash": "sha256:74e0ccd856ee27de9d8544dcb7303656b4dcecbf88c6406eb8a090afd7215741"
+      "source_content_hash": "sha256:d783ea83db57761098482907353d48a8f07d8f8eb652998862ea628065bb73ab"
     },
     "integrity": {
       "artifact_manifest": "artifact-manifest.json"
@@ -44,7 +44,7 @@
   "pack_identity": "rumi:ecosystem/rumi_kanban_surface_pack",
   "provenance": {
     "build_identity": "rumi_kanban_surface_pack:1.0.0",
-    "content_hash": "sha256:c51f2cb992b2406d2ecee2eb51d21ef55d8541e8d4381c82d1a6caf043b490c9",
+    "content_hash": "sha256:f90b3f29cad6005c50b4f5050786b86e619591a95bfc4dc622a5b76535e9ef52",
     "signature": null,
     "trust_class": "local"
   },

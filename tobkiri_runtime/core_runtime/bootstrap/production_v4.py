@@ -1789,9 +1789,13 @@ def capture_production_dispatch(
         ) -> Mapping[str, Any]:
             if not dispatch_holder:
                 raise AuthorityDenied("Host Provider dispatch is not initialized")
+            caller_suffix = (
+                self._envelope.context.caller_principal.value
+                .removeprefix("sha256:")[:24]
+            )
             nested_session_id = (
                 f"session.host-provider.{self._envelope.context.request_id}."
-                f"{self._envelope.target_principal.value.removeprefix('sha256:')[:24]}"
+                f"{caller_suffix}"
             )
             return dispatch_holder[0].invoke(
                 contract_id,

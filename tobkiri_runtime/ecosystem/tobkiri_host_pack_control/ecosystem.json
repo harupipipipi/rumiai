@@ -7,9 +7,9 @@
     "authoritative_owner": true,
     "canonical_v4": {
       "artifact": "pack.v4.json",
-      "artifact_digest": "sha256:fffbf39da451dd066338191b891e85667f25acfb2099eb6257baf75deb032777",
+      "artifact_digest": "sha256:7684614cf47b8580ea63dfc3e0378b117228073f8ef97356e49f356a7d513f08",
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
-      "source_identity": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa"
+      "source_identity": "sha256:5ee35a6dbe038a7f45bbfb8ebdab7c4efe1d9b75857d9f12a1c0b089648fccf0"
     },
     "format": "rumi.ecosystem.v1",
     "generated": true,
@@ -17,7 +17,7 @@
       "generator": "tobkiri.scripts.migrate_manifest_authority/v2",
       "historical_format": "ecosystem.json",
       "source": "pack.v4.json",
-      "source_content_hash": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa"
+      "source_content_hash": "sha256:5ee35a6dbe038a7f45bbfb8ebdab7c4efe1d9b75857d9f12a1c0b089648fccf0"
     },
     "manifest_authority": "v4-authoritative",
     "owner_surfaces": [
@@ -35,7 +35,7 @@
   "pack_identity": "tobkiri:ecosystem/tobkiri_host_pack_control",
   "provenance": {
     "build_identity": "tobkiri_host_pack_control:1.0.0",
-    "content_hash": "sha256:fffbf39da451dd066338191b891e85667f25acfb2099eb6257baf75deb032777",
+    "content_hash": "sha256:7684614cf47b8580ea63dfc3e0378b117228073f8ef97356e49f356a7d513f08",
     "signature": null,
     "trust_class": "local"
   },

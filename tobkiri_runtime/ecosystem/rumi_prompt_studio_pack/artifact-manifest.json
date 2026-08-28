@@ -30,7 +30,7 @@
     },
     {
       "path": "frontend/contributions/prompt-studio.json",
-      "sha256": "sha256:7a21d786ce90d54f615b7e85a7317ff7556d82a49a79070407ac65a50b3c6484"
+      "sha256": "sha256:9212d1c9fed5143d5407b037415c261accd7d6112fd16c5256af5ab5304590b5"
     },
     {
       "path": "catalog/prompt_studio_prompt_library.yaml",
