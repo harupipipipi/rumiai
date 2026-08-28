@@ -229,7 +229,11 @@ class _PlanAdmission(RequestAdmissionPort):
         )
         self._ledger = DurableResourceLedger(
             runtime_limit=ResourceAmount(memory_bytes=runtime_limit),
-            host_free_guard=ResourceAmount(memory_bytes=guard),
+            host_free_guard=ResourceAmount(
+                memory_bytes=guard,
+                process_slots=0,
+                start_slots=0,
+            ),
             profile_limits={profile_id: ResourceAmount(memory_bytes=profile_limit)},
             state_path=state_path,
             identity={
