@@ -694,6 +694,20 @@ def _commit_pack_control_authority(
             provider_authorities=(provider,),
             grants=(grant,),
         )
+    elif (
+        host_extension_trust is not None
+        and existing[0] == host_extension_trust
+        and existing[1:] == (None, None, None)
+    ):
+        # A Host Extension trust record is shared by every caller edge that
+        # reaches the same verified provider.  Keep that immutable record and
+        # atomically add only the caller-specific approval/provider/Grant
+        # bundle; the kernel revalidates the persisted trust by its ID.
+        control.commit_approval_bundle(
+            approval,
+            provider_authorities=(provider,),
+            grants=(grant,),
+        )
     elif existing != expected:
         raise AuthorityDenied("Pack catalog authority snapshot changed")
 
