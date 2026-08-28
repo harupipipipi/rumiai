@@ -18,7 +18,7 @@ from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import validate_document
 
 from .authority_v4 import AuthorityV4Adapter, PrincipalReferenceResolver
-from .contracts import OperationCatalog, OperationRoute
+from .contracts import OperationCatalog, OperationRoute, unique_operation_routes
 from .errors import ResolutionError
 from .models import OpaqueAuthorityRef, PackArtifact
 from .tauri_roles import validate_production_tauri_roles
@@ -159,7 +159,8 @@ class HostV4Composition:
                         raise ResolutionError("duplicate Function principal in inventory")
                     principals[principal.principal_id] = principal
 
-        catalog = OperationCatalog(artifacts, routes)
+        canonical_routes = unique_operation_routes(routes)
+        catalog = OperationCatalog(artifacts, canonical_routes)
         expected_bindings: set[tuple[str, str, str, str, str]] = set()
         for item in checked_plan["bindings"]:
             principal = FunctionPrincipal.from_dict(item["function_principal"])
@@ -182,9 +183,9 @@ class HostV4Composition:
                 route.function_id,
                 route.target_principal_ref.value,
             )
-            for route in routes
+            for route in canonical_routes
         }
-        if actual_bindings != expected_bindings or len(actual_bindings) != len(routes):
+        if actual_bindings != expected_bindings or len(actual_bindings) != len(canonical_routes):
             raise ResolutionError("OperationCatalog routes must exactly equal ResolvedPlan")
 
         unknown_edges = {

@@ -258,6 +258,7 @@ def routes_for_plan(
     if len(by_digest) != len(compiled):
         raise ResolutionError("duplicate compiled artifact digest")
     routes: list[OperationRoute] = []
+    routes_by_key: dict[tuple[str, str], OperationRoute] = {}
     for binding in plan["bindings"]:
         item = by_digest.get(binding["artifact_digest"])
         if item is None:
@@ -312,25 +313,30 @@ def routes_for_plan(
             binding[field] != value for field, value in expected_pin.items()
         ):
             raise ResolutionError("ResolvedPlan executable variant pin is stale")
-        routes.append(
-            OperationRoute(
-                contract_id=binding["contract_id"],
-                operation_id=binding["operation_id"],
-                artifact_digest=binding["artifact_digest"],
-                function_id=principal["function_id"],
-                variant_id=metadata["variant_id"],
-                execution_domain_profile=metadata["execution_domain_profile"],
-                materialization_mode=metadata["materialization_mode"],
-                target_principal_ref=OpaqueAuthorityRef(canonical_digest(principal)),
-                catalog_digest=metadata["catalog_digest"],
-                platform=metadata["platform"],
-                architecture=metadata["architecture"],
-                runtime_abi=metadata["runtime_abi"],
-                backend=metadata["backend"],
-                execution_kind=metadata["execution_kind"],
-                domain_kind=metadata["domain_kind"],
-            )
+        route = OperationRoute(
+            contract_id=binding["contract_id"],
+            operation_id=binding["operation_id"],
+            artifact_digest=binding["artifact_digest"],
+            function_id=principal["function_id"],
+            variant_id=metadata["variant_id"],
+            execution_domain_profile=metadata["execution_domain_profile"],
+            materialization_mode=metadata["materialization_mode"],
+            target_principal_ref=OpaqueAuthorityRef(canonical_digest(principal)),
+            catalog_digest=metadata["catalog_digest"],
+            platform=metadata["platform"],
+            architecture=metadata["architecture"],
+            runtime_abi=metadata["runtime_abi"],
+            backend=metadata["backend"],
+            execution_kind=metadata["execution_kind"],
+            domain_kind=metadata["domain_kind"],
         )
+        existing_route = routes_by_key.get(key)
+        if existing_route is not None:
+            if existing_route != route:
+                raise ResolutionError("ResolvedPlan contains conflicting operation route")
+            continue
+        routes_by_key[key] = route
+        routes.append(route)
     return tuple(routes)
 
 

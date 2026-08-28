@@ -83,9 +83,17 @@ class OperationCatalog:
             raise ResolutionError("duplicate artifact digest")
         for route in routes:
             key = (route.contract_id, route.operation_id)
-            if key in self._bindings:
-                raise ResolutionError(f"ambiguous operation route: {key}")
-            self._bindings[key] = self._bind(route)
+            binding = self._bind(route)
+            existing = self._bindings.get(key)
+            if existing is not None:
+                if existing != binding:
+                    raise ResolutionError(f"ambiguous operation route: {key}")
+                # Multiple Profile edges may intentionally share one exact
+                # target operation.  The catalog is keyed by operation, so
+                # retain one verified route after checking the duplicate is
+                # byte-for-byte equivalent.
+                continue
+            self._bindings[key] = binding
 
     def _bind(self, route: OperationRoute) -> ResolvedOperationBinding:
         artifact = self._artifacts.get(route.artifact_digest)
@@ -209,6 +217,25 @@ class OperationCatalog:
     ) -> None:
         """Validate untrusted provider output before returning it."""
         _validate_schema(binding.operation.output_schema, payload, "output")
+
+
+def unique_operation_routes(
+    routes: Sequence[OperationRoute],
+) -> tuple[OperationRoute, ...]:
+    """Collapse exact shared-target routes while rejecting conflicts."""
+
+    unique: list[OperationRoute] = []
+    by_key: dict[tuple[str, str], OperationRoute] = {}
+    for route in routes:
+        key = (route.contract_id, route.operation_id)
+        existing = by_key.get(key)
+        if existing is not None:
+            if existing != route:
+                raise ResolutionError(f"ambiguous operation route: {key}")
+            continue
+        by_key[key] = route
+        unique.append(route)
+    return tuple(unique)
 
 
 def _validate_schema(

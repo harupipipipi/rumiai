@@ -933,7 +933,21 @@ def _validate_captured_authority_graph(
     ):
         raise AuthorityDenied("captured Profile authority graph is incomplete")
 
-    binding_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    bindings_by_key: dict[
+        tuple[str, str], list[tuple[Mapping[str, Any], FunctionPrincipal]]
+    ] = {}
+    binding_identity_fields = (
+        "pack_id",
+        "artifact_digest",
+        "executable_catalog_digest",
+        "variant_id",
+        "platform",
+        "architecture",
+        "runtime_abi",
+        "backend",
+        "execution_kind",
+        "domain_kind",
+    )
     for binding in raw_bindings:
         if not isinstance(binding, Mapping):
             raise AuthorityDenied("captured ResolvedPlan binding is invalid")
@@ -941,11 +955,38 @@ def _validate_captured_authority_graph(
             str(binding.get("contract_id") or ""),
             str(binding.get("operation_id") or ""),
         )
-        if not all(key) or key in binding_by_key:
-            raise AuthorityDenied("captured ResolvedPlan contains duplicate operation bindings")
-        binding_by_key[key] = binding
+        if not all(key):
+            raise AuthorityDenied("captured ResolvedPlan binding key is invalid")
+        principal_payload = binding.get("function_principal")
+        if not isinstance(principal_payload, Mapping):
+            raise AuthorityDenied("captured Provider principal is invalid")
+        try:
+            target = FunctionPrincipal.from_dict(principal_payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AuthorityDenied("captured Provider principal is invalid") from exc
+        bindings_by_key.setdefault(key, []).append((binding, target))
 
-    expected_keys: list[tuple[str, str]] = []
+    # A route is keyed by Contract/operation, while the immutable Profile
+    # graph may contain several caller edges to that same exact executable.
+    # Permit that intentional sharing, but never permit the shared operation
+    # to resolve to more than one artifact, principal, or executable variant.
+    for operation_key, binding_entries in bindings_by_key.items():
+        identities = {
+            (
+                canonical_json(target.to_dict()),
+                tuple(
+                    str(binding.get(field) or "")
+                    for field in binding_identity_fields
+                ),
+            )
+            for binding, target in binding_entries
+        }
+        if len(identities) != 1:
+            raise AuthorityDenied(
+                "captured ResolvedPlan contains conflicting operation bindings"
+            )
+
+    expected_edge_keys: list[tuple[str, str, str, str]] = []
     expected_references: list[str] = []
     for edge in raw_edges:
         if not isinstance(edge, Mapping):
@@ -954,24 +995,27 @@ def _validate_captured_authority_graph(
             str(edge.get("contract_id") or ""),
             str(edge.get("operation_id") or ""),
         )
-        if not all(key) or key in expected_keys:
+        caller_function_id = str(edge.get("caller_function_id") or "")
+        target_function_id = str(edge.get("target_provider_id") or "")
+        edge_key = (caller_function_id, target_function_id, *key)
+        if not all(key) or not caller_function_id or not target_function_id:
+            raise AuthorityDenied("captured Profile edge is invalid")
+        if edge_key in expected_edge_keys:
             raise AuthorityDenied("captured Profile contains duplicate operation edges")
-        expected_keys.append(key)
-        binding = binding_by_key.get(key)
-        if binding is None or binding.get("caller_function_id") != edge.get(
-            "caller_function_id"
-        ):
+        expected_edge_keys.append(edge_key)
+        candidates = [
+            (binding, target)
+            for binding, target in bindings_by_key.get(key, ())
+            if str(binding.get("caller_function_id") or "") == caller_function_id
+            and target.function_id == target_function_id
+        ]
+        if len(candidates) != 1:
             raise AuthorityDenied("captured Profile caller edge does not match its plan")
-        principal_payload = binding.get("function_principal")
-        if not isinstance(principal_payload, Mapping):
-            raise AuthorityDenied("captured Provider principal is invalid")
+        binding, target = candidates[0]
         try:
-            target = FunctionPrincipal.from_dict(principal_payload)
             scope = _committed_operation_scope(edge, target)
         except (AuthorityDenied, KeyError, TypeError, ValueError) as exc:
             raise AuthorityDenied("captured Profile scope is invalid") from exc
-        if target.function_id != edge.get("target_provider_id"):
-            raise AuthorityDenied("captured Profile target Provider does not match its plan")
         scope_digest = canonical_digest(scope.to_dict())
         if binding.get("requested_scope_digest") != scope_digest:
             raise AuthorityDenied("captured Profile scope digest changed")
@@ -990,7 +1034,25 @@ def _validate_captured_authority_graph(
             raise AuthorityDenied("captured Profile authority edge reference changed")
         expected_references.append(expected_reference)
 
-    if set(binding_by_key) != set(expected_keys) or references != expected_references:
+    actual_edge_keys: list[tuple[str, str, str, str]] = []
+    for key, binding_entries in bindings_by_key.items():
+        for binding, target in binding_entries:
+            edge_key = (
+                str(binding.get("caller_function_id") or ""),
+                target.function_id,
+                key[0],
+                key[1],
+            )
+            if not all(edge_key) or edge_key in actual_edge_keys:
+                raise AuthorityDenied(
+                    "captured ResolvedPlan contains duplicate operation bindings"
+                )
+            actual_edge_keys.append(edge_key)
+
+    if (
+        set(actual_edge_keys) != set(expected_edge_keys)
+        or references != expected_references
+    ):
         raise AuthorityDenied("captured Profile and ResolvedPlan operation sets differ")
 
 
