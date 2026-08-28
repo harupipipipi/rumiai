@@ -69,7 +69,7 @@ _CANDIDATE_TTL_SECONDS = 120.0
 # Keep the small RuntimeSurfaceService default strict for local callers, but
 # give the Host control provider a bounded budget that accommodates the
 # canonical generated catalog on slower development machines.
-_CONTROL_SURFACE_READ_TIMEOUT_SECONDS = 15.0
+_CONTROL_SURFACE_READ_TIMEOUT_SECONDS = 30.0
 _PERSISTENCE_STORES: dict[Path, SecureDirectory] = {}
 _PERSISTENCE_STORES_LOCK = threading.RLock()
 
