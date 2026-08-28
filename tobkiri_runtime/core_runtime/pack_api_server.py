@@ -1898,6 +1898,7 @@ class PackAPIHandler(
     def _serve_panel_bootstrap_page(self) -> None:
         document = b"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
 <script>
+document.addEventListener('DOMContentLoaded',()=>{
 const code=new URL(location.href).searchParams.get('code');
 if(!code){document.body.textContent='Tobkiri Launcher authentication required';}
 else fetch('/api/panel/auth/exchange',{method:'POST',credentials:'same-origin',
@@ -1905,6 +1906,7 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
 .then(r=>{if(!r.ok)throw new Error('authentication failed');return r.json()})
 .then(v=>{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('/panel/')})
 .catch(()=>{document.body.textContent='Tobkiri Launcher authentication failed';});
+});
 </script>"""
         try:
             self.send_response(200)
@@ -1922,6 +1924,7 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
         safe_target = target if target in {"/chat", "/panel/"} else "/panel/"
         document = f"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
 <script>
+document.addEventListener('DOMContentLoaded',()=>{{
 const code=new URL(location.href).searchParams.get('code');
 if(!code){{document.body.textContent='Tobkiri Launcher authentication required';}}
 else fetch('/api/panel/auth/exchange',{{method:'POST',credentials:'same-origin',
@@ -1929,6 +1932,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
 .then(r=>{{if(!r.ok)throw new Error('authentication failed');return r.json()}})
 .then(v=>{{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('{safe_target}')}})
 .catch(()=>{{document.body.textContent='Tobkiri Launcher authentication failed';}});
+}});
 </script>""".encode("utf-8")
         try:
             self.send_response(200)

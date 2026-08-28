@@ -1407,6 +1407,29 @@ def test_panel_bootstrap_rejects_wrong_secret(
     assert status == 401
 
 
+def test_panel_auth_shell_waits_for_dom_before_touching_body(
+    live_server: tuple[PackAPIServer, _Dispatch],
+) -> None:
+    """Serve the real unauthenticated panel shell with a usable DOM boundary."""
+
+    server, _ = live_server
+    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    connection.request("GET", "/panel/?code=one-time-bootstrap")
+    response = connection.getresponse()
+    document = response.read().decode("utf-8")
+    content_type = response.getheader("Content-Type")
+    connection.close()
+
+    assert response.status == 200
+    assert content_type == "text/html; charset=utf-8"
+    assert document.startswith("<!doctype html>")
+    event_boundary = "document.addEventListener('DOMContentLoaded',()=>{"
+    assert event_boundary in document
+    assert document.index(event_boundary) < document.index("document.body.textContent")
+    assert document.count("document.body.textContent") == 2
+    assert document.endswith("</script>")
+
+
 def test_panel_exchange_rejects_foreign_origin(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:
