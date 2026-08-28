@@ -73,7 +73,11 @@ def validate_defaults_setup_payload(payload: Mapping[str, Any]) -> dict[str, Any
     if (
         conversation["pack_id"] not in pack_ids
         or conversation["caller_function_id"] != profile["shell"]["provider_id"]
-        or conversation["domain_kind"] != "pack_vm"
+        # The production PackVM runs inside its dedicated process boundary.
+        # ``execution_kind`` is the executable placement contract; the
+        # resolved Function's ``domain_kind`` describes its isolation boundary.
+        or conversation["domain_kind"] not in {"pack_vm", "dedicated_process"}
+        or conversation["execution_kind"] != "pack_vm"
         or principal["function_id"] != profile["conversation_provider"]
     ):
         _fail("conversation binding does not match the recommended Profile")

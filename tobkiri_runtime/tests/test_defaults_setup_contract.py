@@ -69,6 +69,15 @@ def test_canonical_fixture_is_schema_and_semantically_exact() -> None:
     assert validate_defaults_setup_payload(fixture) == fixture
 
 
+def test_packvm_conversation_accepts_dedicated_process_domain() -> None:
+    payload = _fixture()
+    binding = payload["recommended_default_profile"]["confirmation"]["bindings"][0]
+    binding["domain_kind"] = "dedicated_process"
+    _resign(payload)
+
+    assert validate_defaults_setup_payload(payload) == payload
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
