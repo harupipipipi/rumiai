@@ -384,8 +384,13 @@ def prepare_default_profile_confirmation(
 def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
     """Return whether the canonical activation pointer physically exists."""
 
+    user_data = (
+        runtime_user_data_root()
+        if base_dir is None
+        else runtime_user_data_root(base_dir)
+    )
     pointer = (
-        runtime_user_data_root(base_dir)
+        user_data
         / "workspaces"
         / "defaults"
         / "activation"
@@ -397,7 +402,12 @@ def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
 def active_profile_exists(*, base_dir: Path | None = None) -> bool:
     """Return whether the Host-global Profile selection physically exists."""
 
-    return ActiveProfileStore(runtime_user_data_root(base_dir)).path.is_file()
+    user_data = (
+        runtime_user_data_root()
+        if base_dir is None
+        else runtime_user_data_root(base_dir)
+    )
+    return ActiveProfileStore(user_data).path.is_file()
 
 
 def activation_audit_receipt(
@@ -405,8 +415,13 @@ def activation_audit_receipt(
 ) -> dict[str, Any]:
     """Return the committed Authority reservation bound to an activation."""
 
+    user_data = (
+        runtime_user_data_root()
+        if base_dir is None
+        else runtime_user_data_root(base_dir)
+    )
     with AuthorityStore(
-        runtime_user_data_root(base_dir) / "authority" / "v4.sqlite3"
+        user_data / "authority" / "v4.sqlite3"
     ) as authority:
         reservation = authority.active_activation_reservation(
             str(active.activation["activation_id"])
@@ -449,11 +464,17 @@ def capture_active_profile(
         # Compatibility migration only: an existing pre-registry Defaults
         # activation is promoted once.  Absence of both pointers remains
         # fail-closed and never silently bootstraps Defaults here.
-        if pointers.path.is_file() or not active_default_profile_exists(
-            base_dir=base_dir
-        ):
+        has_legacy_default = (
+            active_default_profile_exists()
+            if base_dir is None
+            else active_default_profile_exists(base_dir=base_dir)
+        )
+        if pointers.path.is_file() or not has_legacy_default:
             raise
-        capture_default_profile(base_dir=base_dir)
+        if base_dir is None:
+            capture_default_profile()
+        else:
+            capture_default_profile(base_dir=base_dir)
         pointer = pointers.require(verify_snapshot=True)
     workspace = user_data / "workspaces" / pointer.profile_id
     if workspace.is_symlink() or not workspace.is_dir():
