@@ -2132,8 +2132,8 @@ mod tests {
             .canonicalize()
             .unwrap();
         let verified = verify_bundle_lock(&bundle).unwrap();
-        assert_eq!(verified.sidecar_digests.len(), 63);
-        assert_eq!(verified.authority_digests.len(), 72);
+        assert_eq!(verified.sidecar_digests.len(), 74);
+        assert_eq!(verified.authority_digests.len(), 79);
         assert!(verified
             .sidecar_digests
             .contains_key("packs/defaultspack.executables.v4.json"));
