@@ -1789,8 +1789,11 @@ def capture_production_dispatch(
         ) -> Mapping[str, Any]:
             if not dispatch_holder:
                 raise AuthorityDenied("Host Provider dispatch is not initialized")
+            # The authenticated outer Host Provider target is the caller of
+            # its nested contract request.  The panel caller remains bound to
+            # the outer envelope and must not be reused for this edge.
             caller_suffix = (
-                self._envelope.context.caller_principal.value
+                self._envelope.target_principal.value
                 .removeprefix("sha256:")[:24]
             )
             nested_session_id = (
