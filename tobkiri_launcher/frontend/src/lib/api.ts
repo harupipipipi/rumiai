@@ -45,6 +45,26 @@ import {
   removeSafeStorageValue,
   writeSafeStorageValue,
 } from './safeStorage';
+import {
+  parseNamedProfileRegistry,
+  validateNamedProfileMutation,
+  type CreateNamedProfileInput,
+  type DeleteNamedProfileInput,
+  type DuplicateNamedProfileInput,
+  type NamedProfileMutationInput,
+  type NamedProfileRecord,
+  type NamedProfileRegistry,
+  type UpdateNamedProfileInput,
+} from './profileRegistry';
+export type {
+  CreateNamedProfileInput,
+  DeleteNamedProfileInput,
+  DuplicateNamedProfileInput,
+  NamedProfileMutationInput,
+  NamedProfileRecord,
+  NamedProfileRegistry,
+  UpdateNamedProfileInput,
+} from './profileRegistry';
 
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
@@ -794,52 +814,31 @@ export function fetchDashboard(): Promise<ApiDashboard> {
   return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
 }
 
-export interface NamedProfileRecord {
-  profile_id: string;
-  profile_revision: string;
-  profile: Record<string, unknown>;
-  order: number;
-  parent_revision: string | null;
-  tombstone: boolean;
-  created_at: number;
-  updated_at: number;
-  legacy_ids: string[];
-}
-
-export interface NamedProfileRegistry {
-  profile_registry_api_version: 'io.tobkiri.profile-registry.v4';
-  generation: number;
-  active_profile_id: string | null;
-  active_profile_revision: string | null;
-  profiles: NamedProfileRecord[];
-  changed_profile?: NamedProfileRecord;
-  action?: 'create' | 'update' | 'duplicate' | 'delete';
-}
-
 export function fetchNamedProfiles(): Promise<NamedProfileRegistry> {
-  return apiFetch<NamedProfileRegistry>('/api/v4/profiles', {cache: 'no-store'});
+  return apiFetch<unknown>('/api/v4/profiles', {cache: 'no-store'}).then(parseNamedProfileRegistry);
 }
 
 function mutateNamedProfile(
   action: 'create' | 'update' | 'duplicate' | 'delete',
-  payload: Record<string, unknown>,
+  payload: NamedProfileMutationInput,
 ): Promise<NamedProfileRegistry> {
-  return apiFetch<NamedProfileRegistry>(`/api/v4/profiles/${action}`, {
+  const validated = validateNamedProfileMutation(action, payload);
+  return apiFetch<unknown>(`/api/v4/profiles/${action}`, {
     method: 'POST',
-    body: JSON.stringify(payload),
-  });
+    body: JSON.stringify(validated),
+  }).then(parseNamedProfileRegistry);
 }
 
-export const createNamedProfile = (payload: Record<string, unknown>) => (
+export const createNamedProfile = (payload: CreateNamedProfileInput) => (
   mutateNamedProfile('create', payload)
 );
-export const updateNamedProfile = (payload: Record<string, unknown>) => (
+export const updateNamedProfile = (payload: UpdateNamedProfileInput) => (
   mutateNamedProfile('update', payload)
 );
-export const duplicateNamedProfile = (payload: Record<string, unknown>) => (
+export const duplicateNamedProfile = (payload: DuplicateNamedProfileInput) => (
   mutateNamedProfile('duplicate', payload)
 );
-export const deleteNamedProfile = (payload: Record<string, unknown>) => (
+export const deleteNamedProfile = (payload: DeleteNamedProfileInput) => (
   mutateNamedProfile('delete', payload)
 );
 

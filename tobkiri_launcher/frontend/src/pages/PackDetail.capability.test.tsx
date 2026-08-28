@@ -199,7 +199,7 @@ test('PackDetail exposes required Profile Packs without revoke or toggle actions
 
   try {
     await renderDetail(root);
-    assert.match(container.textContent ?? '', /Required by Defaults Profile/);
+    assert.match(container.textContent ?? '', /Required by active Profile/);
     assert.equal(container.querySelector('[role="switch"]'), null);
     assert.equal(container.querySelector('[aria-label^="Revoke approval"]'), null);
   } finally {

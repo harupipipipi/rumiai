@@ -74,8 +74,29 @@ export function nextDuplicateProfileId(
   return candidate;
 }
 
+function profileDisplayName(entry: NamedProfileRecord): string {
+  return String(entry.profile.display_name ?? entry.profile_id);
+}
+
+function isActiveExecutionProfile(
+  registry: NamedProfileRegistry,
+  entry: NamedProfileRecord,
+): boolean {
+  // The registry's active revision is the resolved runtime plan revision. It
+  // intentionally differs from the immutable definition revision on a live
+  // registry record.
+  return registry.active_profile_id === entry.profile_id
+    && registry.active_profile_revision !== null;
+}
+
+function profileHref(profileId: string, hash?: string): string {
+  const query = `?profile_id=${encodeURIComponent(profileId)}`;
+  return `${panelRoutes.profile}${query}${hash ? `#${hash}` : ''}`;
+}
+
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
+  const showDialog = useAppStore((state) => state.showDialog);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
@@ -131,17 +152,25 @@ export function Dashboard() {
   const visibleProfiles = useMemo(() => {
     const query = profileQuery.trim().toLocaleLowerCase();
     return (registry?.profiles ?? []).filter((entry) => {
-      const name = String(entry.profile.display_name ?? entry.profile_id);
+      const name = profileDisplayName(entry);
       return !query
         || entry.profile_id.toLocaleLowerCase().includes(query)
         || name.toLocaleLowerCase().includes(query);
     });
   }, [profileQuery, registry]);
 
+  const activeProfile = useMemo(() => {
+    if (!registry || !registry.active_profile_id || !registry.active_profile_revision) {
+      return null;
+    }
+    return registry.profiles.find((entry) => isActiveExecutionProfile(registry, entry)) ?? null;
+  }, [registry]);
+
   const commitProfileMutation = async (
     key: string,
     operation: () => Promise<NamedProfileRegistry>,
     successMessage: string,
+    throwOnError = false,
   ) => {
     setProfileBusy(key);
     try {
@@ -152,19 +181,26 @@ export function Dashboard() {
       const message = error instanceof Error ? error.message : 'Profile mutation was rejected.';
       setProfileError(message);
       addToast(message, 'error');
+      if (throwOnError) throw error;
+      return false;
     } finally {
       setProfileBusy(null);
     }
+    return true;
   };
 
   const submitNewProfile = async (event: FormEvent) => {
     event.preventDefault();
     const profileId = newProfileId.trim();
     const displayName = newProfileName.trim();
-    if (!profileId || !displayName || !registry) return;
+    if (!registry) return;
+    if (!profileId || !displayName) {
+      setProfileError('Enter a Profile ID and display name before creating a Profile.');
+      return;
+    }
     const sourceProfileId = registry.active_profile_id ?? registry.profiles[0]?.profile_id;
     if (!sourceProfileId) return;
-    await commitProfileMutation(
+    const created = await commitProfileMutation(
       'create',
       () => createNamedProfile({
         profile_id: profileId,
@@ -174,6 +210,7 @@ export function Dashboard() {
       }),
       `Profile ${displayName} created.`,
     );
+    if (!created) return;
     setNewProfileId('');
     setNewProfileName('');
     setShowAddProfile(false);
@@ -184,7 +221,7 @@ export function Dashboard() {
     if (!registry) return;
     const displayName = editingProfileName.trim();
     if (!displayName) return;
-    await commitProfileMutation(
+    const updated = await commitProfileMutation(
       `edit:${entry.profile_id}`,
       () => updateNamedProfile({
         profile_id: entry.profile_id,
@@ -194,6 +231,7 @@ export function Dashboard() {
       }),
       `Profile ${displayName} updated.`,
     );
+    if (!updated) return;
     setEditingProfileId(null);
     setEditingProfileName('');
   };
@@ -218,17 +256,27 @@ export function Dashboard() {
     );
   };
 
-  const removeProfile = async (entry: NamedProfileRecord) => {
+  const removeProfile = (entry: NamedProfileRecord) => {
     if (!registry || registry.active_profile_id === entry.profile_id) return;
-    await commitProfileMutation(
-      `delete:${entry.profile_id}`,
-      () => deleteNamedProfile({
-        profile_id: entry.profile_id,
-        expected_profile_revision: entry.profile_revision,
-        expected_store_generation: registry.generation,
-      }),
-      `Profile ${String(entry.profile.display_name ?? entry.profile_id)} deleted.`,
-    );
+    const displayName = profileDisplayName(entry);
+    showDialog({
+      title: `Delete ${displayName}?`,
+      message: `This removes ${displayName} from the live Profile registry. Its immutable revision history remains retained by the Host, and the active execution Profile is not changed.`,
+      confirmText: 'Delete Profile',
+      cancelText: 'Keep Profile',
+      onConfirm: async () => {
+        await commitProfileMutation(
+          `delete:${entry.profile_id}`,
+          () => deleteNamedProfile({
+            profile_id: entry.profile_id,
+            expected_profile_revision: entry.profile_revision,
+            expected_store_generation: registry.generation,
+          }),
+          `Profile ${displayName} deleted.`,
+          true,
+        );
+      },
+    });
   };
 
   const copyRuntimeError = async () => {
@@ -240,60 +288,9 @@ export function Dashboard() {
     );
   };
 
-  if (runtimeStatus === 'error' && !dashboardLoading && !dashboard.activePacks && !dashboard.supervisor) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <div className="flex max-w-md flex-col gap-4 rounded-xl border border-red-200 bg-red-50 p-6 dark:border-red-900/40 dark:bg-red-950/20">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 text-red-500 shrink-0" />
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-text-main">Runtime could not finish starting</h2>
-              <div className="flex items-start gap-1">
-                <p className="text-sm text-text-muted">{runtimeError || 'The control panel opened, but the background runtime startup failed.'}</p>
-                <Button
-                  aria-label="Copy error message"
-                  className="h-7 w-7 shrink-0 p-0"
-                  onClick={() => void copyRuntimeError()}
-                  size="icon"
-                  title="Copy error message"
-                  variant="ghost"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={() => window.location.reload()} size="sm"><AlertCircle className="h-3.5 w-3.5" /> Reload</Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (dashboardLoading && !dashboard.activePacks && !dashboard.supervisor) {
+  if (dashboardLoading && !dashboard.activePacks && !dashboard.supervisor && !registry && !profileError) {
     return <DashboardSkeleton />;
   }
-
-  if (dashboardError && !dashboard.activePacks && !dashboard.supervisor) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6">
-        <div className="flex max-w-md flex-col gap-4 rounded-xl border border-border bg-bg-card p-6">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 h-5 w-5 text-red-500 shrink-0" />
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-text-main">Home could not load</h2>
-              <p className="text-sm text-text-muted">{dashboardError}</p>
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={() => void refreshDashboard()} size="sm"><Route className="h-3.5 w-3.5" /> Retry</Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto page-enter">
@@ -304,13 +301,25 @@ export function Dashboard() {
             <p className="mt-1 text-sm text-text-muted">Browse every Profile without changing the active execution Profile.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => setShowAddProfile((shown) => !shown)}>
+            <Button
+              aria-controls="add-profile-form"
+              aria-expanded={showAddProfile}
+              onClick={() => setShowAddProfile((shown) => !shown)}
+              type="button"
+            >
               <Plus className="h-4 w-4" /> Add Profile
             </Button>
-            <Button variant="outline" size="icon" title="Refresh" onClick={() => {
-              void refreshDashboard();
-              void refreshProfiles();
-            }}>
+            <Button
+              aria-label="Refresh Home and Profiles"
+              onClick={() => {
+                void refreshDashboard();
+                void refreshProfiles();
+              }}
+              size="icon"
+              title="Refresh Home and Profiles"
+              type="button"
+              variant="outline"
+            >
               <Route className="h-4 w-4" />
             </Button>
           </div>
@@ -326,12 +335,61 @@ export function Dashboard() {
           </div>
         )}
 
+        {runtimeStatus === 'error' && (
+          <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-medium">Runtime could not finish starting.</span>
+              <span>{runtimeError || 'Profile launch surfaces remain unavailable until runtime readiness returns.'}</span>
+            </div>
+            <Button
+              aria-label="Copy runtime error message"
+              className="h-7 w-7 shrink-0 p-0"
+              onClick={() => void copyRuntimeError()}
+              size="icon"
+              title="Copy runtime error message"
+              type="button"
+              variant="ghost"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+
         {!runtimeReady && runtimeStatus === 'panel_ready' && (
           <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
             <TobkiriLoadingMark />
             <span className="flex-1">Runtime is still preparing. Packs are available now, and launch surfaces will open after readiness.</span>
           </div>
         )}
+
+        <section className="rounded-xl border border-border bg-bg-card p-5" aria-labelledby="active-execution-title">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 id="active-execution-title" className="text-base font-semibold text-text-main">Active execution Profile</h2>
+              <p className="mt-1 text-sm text-text-muted">
+                This is the Profile used by runtime execution. Browsing another Profile below never changes it.
+              </p>
+            </div>
+            {activeProfile ? <Badge variant="success">Active execution</Badge> : <Badge variant="warning">Not published</Badge>}
+          </div>
+          {activeProfile ? (
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-bg-main px-4 py-3">
+              <span className="font-medium text-text-main">{profileDisplayName(activeProfile)}</span>
+              <span className="font-mono text-xs text-text-muted">{activeProfile.profile_id}</span>
+              <span className="font-mono text-xs text-text-muted" title={activeProfile.profile_revision}>
+                definition revision {activeProfile.profile_revision}
+              </span>
+              <span className="font-mono text-xs text-text-muted" title={registry.active_profile_revision}>
+                execution revision {registry.active_profile_revision}
+              </span>
+            </div>
+          ) : (
+            <p className="mt-4 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-text-muted" role="status">
+              No active execution Profile is published in the Host registry.
+            </p>
+          )}
+        </section>
 
         <section className="rounded-xl border border-border bg-bg-card p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -354,36 +412,55 @@ export function Dashboard() {
           </div>
 
           {showAddProfile && (
-            <form className="mt-4 grid gap-3 rounded-lg border border-border bg-bg-main p-4 sm:grid-cols-[1fr_1fr_auto]" onSubmit={submitNewProfile}>
-              <input
-                aria-label="New Profile ID"
-                className="h-9 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
-                onChange={(event) => setNewProfileId(event.target.value)}
-                placeholder="profile-id"
-                value={newProfileId}
-              />
-              <input
-                aria-label="New Profile name"
-                className="h-9 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
-                onChange={(event) => setNewProfileName(event.target.value)}
-                placeholder="Display name"
-                value={newProfileName}
-              />
-              <Button disabled={!registry || profileBusy === 'create'} size="sm" type="submit">
-                <Plus className="h-3.5 w-3.5" /> Create
-              </Button>
+            <form
+              aria-describedby="add-profile-help"
+              className="mt-4 grid gap-3 rounded-lg border border-border bg-bg-main p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+              id="add-profile-form"
+              onSubmit={submitNewProfile}
+            >
+              <label className="space-y-1.5 text-sm font-medium text-text-main">
+                <span>Profile ID <span className="text-destructive" aria-hidden="true">*</span></span>
+                <input
+                  aria-label="New Profile ID"
+                  className="h-9 w-full rounded-lg border border-border bg-bg-card px-3 text-sm font-normal text-text-main"
+                  maxLength={80}
+                  onChange={(event) => setNewProfileId(event.target.value)}
+                  pattern="[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*"
+                  placeholder="profile-id"
+                  required
+                  value={newProfileId}
+                />
+              </label>
+              <label className="space-y-1.5 text-sm font-medium text-text-main">
+                <span>Display name <span className="text-destructive" aria-hidden="true">*</span></span>
+                <input
+                  aria-label="New Profile name"
+                  className="h-9 w-full rounded-lg border border-border bg-bg-card px-3 text-sm font-normal text-text-main"
+                  maxLength={120}
+                  onChange={(event) => setNewProfileName(event.target.value)}
+                  placeholder="Display name"
+                  required
+                  value={newProfileName}
+                />
+              </label>
+              <div className="flex flex-col gap-2">
+                <span className="sr-only" id="add-profile-help">Create a named Profile from the active execution Profile.</span>
+                <Button disabled={!registry || profileBusy === 'create'} size="sm" type="submit">
+                  <Plus className="h-3.5 w-3.5" /> Create
+                </Button>
+              </div>
             </form>
           )}
 
           {profileError && (
-            <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200">
+            <div aria-live="assertive" className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span className="flex-1">{profileError}</span>
-              <Button onClick={() => void refreshProfiles()} size="sm" variant="ghost">Retry</Button>
+              <Button onClick={() => void refreshProfiles()} size="sm" type="button" variant="ghost">Retry</Button>
             </div>
           )}
 
-          <div className="mt-4 space-y-3">
+          <div aria-live="polite" className="mt-4 space-y-3">
             {!registry && !profileError && (
               <div className="flex items-center justify-center py-8"><TobkiriLoadingMark /></div>
             )}
@@ -391,37 +468,61 @@ export function Dashboard() {
               <p className="py-8 text-center text-sm text-text-muted">No Profiles match this search.</p>
             )}
             {visibleProfiles.map((entry) => {
-              const active = registry?.active_profile_id === entry.profile_id;
-              const displayName = String(entry.profile.display_name ?? entry.profile_id);
+              const active = registry ? isActiveExecutionProfile(registry, entry) : false;
+              const displayName = profileDisplayName(entry);
               const busy = profileBusy?.endsWith(entry.profile_id) ?? false;
+              const browseHref = profileHref(entry.profile_id);
+              const closureHref = profileHref(entry.profile_id, 'profile-closure');
+              const activationHref = profileHref(entry.profile_id, 'profile-ceremony');
               return (
-                <article className="rounded-lg border border-border bg-bg-main p-4" key={entry.profile_id}>
+                <article
+                  aria-labelledby={`profile-${entry.profile_id}-title`}
+                  className="rounded-lg border border-border bg-bg-main p-4"
+                  data-profile-id={entry.profile_id}
+                  key={entry.profile_id}
+                >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="truncate font-medium text-text-main">{displayName}</h3>
+                        <h3 className="truncate font-medium text-text-main" id={`profile-${entry.profile_id}-title`}>{displayName}</h3>
                         {active && <Badge variant="success">Active execution</Badge>}
+                        {!active && <Badge variant="outline">Browsing only</Badge>}
                         <Badge variant="outline">{entry.profile_id}</Badge>
                       </div>
                       <p className="mt-1 truncate font-mono text-[11px] text-text-muted" title={entry.profile_revision}>
                         revision {entry.profile_revision}
                       </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {active ? 'Runtime execution uses this Profile.' : 'Inspect and prepare this Profile without changing runtime execution.'}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Link
-                        className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover"
-                        to={`${panelRoutes.profile}?profile_id=${encodeURIComponent(entry.profile_id)}`}
+                        aria-label={`Browse and review ${displayName}`}
+                        className="inline-flex min-h-11 items-center justify-center rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                        to={browseHref}
                       >
-                        Browse &amp; review
+                        <span>Browse &amp; review</span>
                       </Link>
                       <Link
-                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover"
-                        to={`${panelRoutes.profile}?profile_id=${encodeURIComponent(entry.profile_id)}#profile-closure`}
+                        aria-label={`View Pack closure for ${displayName}`}
+                        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                        to={closureHref}
                       >
                         <Package className="h-3.5 w-3.5" /> Pack closure
                       </Link>
+                      {!active && (
+                        <Link
+                          aria-label={`Activate ${displayName}`}
+                          className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-3 text-xs font-medium text-accent-fg hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                          to={activationHref}
+                        >
+                          Activate
+                        </Link>
+                      )}
                       <Button
                         aria-label={`Edit ${displayName}`}
+                        className="min-h-11 min-w-11"
                         disabled={busy}
                         onClick={() => {
                           setEditingProfileId(entry.profile_id);
@@ -432,6 +533,7 @@ export function Dashboard() {
                       ><Pencil className="h-3.5 w-3.5" /></Button>
                       <Button
                         aria-label={`Duplicate ${displayName}`}
+                        className="min-h-11 min-w-11"
                         disabled={busy}
                         onClick={() => void duplicateProfile(entry)}
                         size="icon"
@@ -439,6 +541,7 @@ export function Dashboard() {
                       ><Copy className="h-3.5 w-3.5" /></Button>
                       <Button
                         aria-label={`Delete ${displayName}`}
+                        className="min-h-11 min-w-11"
                         disabled={active || busy}
                         onClick={() => void removeProfile(entry)}
                         size="icon"
@@ -448,26 +551,31 @@ export function Dashboard() {
                     </div>
                   </div>
                   {editingProfileId === entry.profile_id && (
-                    <form className="mt-3 flex gap-2 border-t border-border pt-3" onSubmit={(event) => void submitProfileName(event, entry)}>
-                      <input
-                        aria-label={`Display name for ${entry.profile_id}`}
-                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
-                        onChange={(event) => setEditingProfileName(event.target.value)}
-                        value={editingProfileName}
-                      />
+                    <form className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" onSubmit={(event) => void submitProfileName(event, entry)}>
+                      <label className="min-w-0 flex-1 space-y-1.5 text-sm font-medium text-text-main">
+                        <span>Display name</span>
+                        <input
+                          aria-label={`Display name for ${entry.profile_id}`}
+                          className="h-9 w-full rounded-lg border border-border bg-bg-card px-3 text-sm font-normal text-text-main"
+                          maxLength={120}
+                          onChange={(event) => setEditingProfileName(event.target.value)}
+                          required
+                          value={editingProfileName}
+                        />
+                      </label>
                       <Button disabled={busy} size="sm" type="submit">Save</Button>
                       <Button onClick={() => setEditingProfileId(null)} size="sm" type="button" variant="ghost">Cancel</Button>
                     </form>
                   )}
-                  {active && (
-                    <div className="mt-4 border-t border-border pt-4">
-                      <ShellLaunchCard
-                        profileDisplayName={displayName}
-                        profileId={entry.profile_id}
-                        runtimeReady={runtimeReady}
-                      />
-                    </div>
-                  )}
+                  <div className="mt-4 border-t border-border pt-4">
+                    <ShellLaunchCard
+                      activationHref={activationHref}
+                      active={active}
+                      profileDisplayName={displayName}
+                      profileId={entry.profile_id}
+                      runtimeReady={runtimeReady}
+                    />
+                  </div>
                 </article>
               );
             })}

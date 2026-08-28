@@ -12,7 +12,13 @@ import type {
   ProfileResolveResult,
   ProfileReviewResult,
 } from '@/src/lib/profileCeremony';
-import {RUNTIME_SURFACE_API_VERSION, type RuntimeSurfaceEnvelope} from '@/src/lib/runtimeSurface';
+import {
+  RUNTIME_SURFACE_API_VERSION,
+  type RuntimeProfileCatalogEntry,
+  type RuntimeProfileCatalogProjection,
+  type RuntimeSurfaceEnvelope,
+} from '@/src/lib/runtimeSurface';
+import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import type {Pack} from '@/src/store';
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
@@ -89,6 +95,99 @@ function surfaceState() {
   return {state, getRefreshCount: () => refreshCount};
 }
 
+function catalogEntry(
+  packIds = ['provider-pack', 'new-pack'],
+  profileId = 'defaults',
+  active = true,
+): RuntimeProfileCatalogEntry {
+  return {
+    profile_id: profileId,
+    display_name: active ? 'Defaults' : 'Alternate Profile',
+    active,
+    lifecycle_state: active ? 'active' : 'available',
+    available: true,
+    diagnostics: [],
+    definition: {
+      digest: digest('6'),
+      ref: `profile-v4://${profileId}/${digest('6')}`,
+      catalog_revision: digest('c'),
+      source_path: 'profiles/defaults.json',
+      provenance: {},
+    },
+    bindings: {
+      base: {
+        pack_id: 'base-pack',
+        definition_revision: digest('1'),
+        definition_digest: digest('1'),
+        artifact_digest: digest('1'),
+      },
+      shell: {
+        provider_id: 'shell-provider',
+        pack_id: 'shell-pack',
+        definition_revision: digest('1'),
+        definition_digest: digest('1'),
+        artifact_digest: digest('1'),
+      },
+      application: null,
+    },
+    pack_closure: packIds.map((packId) => ({
+      pack_id: packId,
+      role: 'provider',
+      version: '1.0.0',
+      artifact_digest: digest('1'),
+      artifact_ref: `pack-v4://${packId}@${digest('1')}`,
+    })),
+    records: {
+      profile_revision: active ? digest('a') : null,
+      profile_lock_digest: active ? digest('d') : null,
+      plan_digest: active ? digest('b') : null,
+    },
+    authority_snapshot: {
+      state: active ? 'active' : 'captured_on_resolve',
+      digest: active ? digest('e') : null,
+      ref: active ? `authority-snapshot-v4://${profileId}/${digest('e')}` : null,
+      definition_references: [],
+    },
+    candidate: {
+      state: 'not_staged',
+      candidate_id: null,
+      candidate_digest: null,
+      expires_at: null,
+    },
+  };
+}
+
+function catalogSurfaceState(entry = catalogEntry()): RuntimeSurfaceState<RuntimeProfileCatalogProjection> {
+  const profiles = entry.active
+    ? [entry]
+    : [catalogEntry(['provider-pack'], 'defaults'), entry];
+  const projection: RuntimeProfileCatalogProjection = {
+    catalog_api_version: 'io.tobkiri.profile-catalog-presentation.v4',
+    catalog_digest: digest('c'),
+    bundle_lock_digest: digest('d'),
+    catalog_ref: `profile-catalog-v4://bundle/${digest('c')}`,
+    active_profile_id: 'defaults',
+    count: profiles.length,
+    profiles,
+  };
+  return {
+    data: {...snapshot(), surface: 'profiles', data: projection} as RuntimeSurfaceEnvelope<RuntimeProfileCatalogProjection>,
+    status: 'ready',
+    error: null,
+    stale: false,
+    canMutate: false,
+    refresh: async () => {},
+  };
+}
+
+function authoritativeSelection(entry = catalogEntry()) {
+  return {
+    entry,
+    catalogDigest: digest('c'),
+    bundleLockDigest: digest('d'),
+  };
+}
+
 function createDom(): {dom: JSDOM; container: HTMLElement; root: Root} {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   Object.defineProperties(globalThis, {
@@ -108,11 +207,12 @@ function buttonContaining(container: HTMLElement, text: string): HTMLButtonEleme
   return button as HTMLButtonElement;
 }
 
-test('Profile closure candidates show new catalog Packs and execute resolve through activation', async () => {
+test('Profile closure candidates come from the authoritative catalog and execute resolve through activation', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const {dom, container, root} = createDom();
   const surface = surfaceState();
+  const selection = authoritativeSelection(catalogEntry(['provider-pack']));
   const calls: Array<{step: string; payload: Record<string, unknown>}> = [];
   let packRefreshes = 0;
   let activated = 0;
@@ -124,7 +224,17 @@ test('Profile closure candidates show new catalog Packs and execute resolve thro
         candidate_id: 'candidate-one',
         candidate_digest: digest('2'),
         expires_in: 60,
-        review: {profile: {}, profile_lock: {lock_digest: digest('d')}, resolved_plan: {plan_digest: digest('b')}, predecessor: {plan_digest: digest('b')}},
+        review: {
+          profile: {profile_id: 'defaults'},
+          profile_lock: {lock_digest: digest('d')},
+          resolved_plan: {plan_digest: digest('b')},
+          predecessor: {plan_digest: digest('b')},
+          catalog_binding: {
+            profile_definition_digest: digest('6'),
+            profile_catalog_digest: digest('c'),
+            bundle_lock_digest: digest('d'),
+          },
+        },
         next_action: 'review',
         write_set: [],
       };
@@ -157,19 +267,16 @@ test('Profile closure candidates show new catalog Packs and execute resolve thro
         <ProfileCeremonyPanel
           surface={surface.state}
           packs={[pack('provider-pack'), pack('new-pack'), pack('blocked-pack', false)]}
-          packsLoading={false}
           loadPacks={async () => { packRefreshes += 1; }}
           client={client}
           onActivated={async () => { activated += 1; }}
+          authoritativeSelection={selection}
+          catalogSurface={catalogSurfaceState(selection.entry)}
         />,
       );
     });
-    assert.match(container.textContent ?? '', /New Pack/);
-    const newPackButton = buttonContaining(container, 'new-pack');
-    assert.equal(newPackButton.disabled, false);
-    assert.equal(buttonContaining(container, 'blocked-pack').disabled, true);
-
-    await act(async () => { newPackButton.click(); });
+    assert.match(container.textContent ?? '', /Authoritative Pack closure/);
+    await act(async () => { buttonContaining(container, 'Add Pack · New Pack').click(); });
     await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
     await act(async () => { buttonContaining(container, 'Review exact candidate').click(); });
     await act(async () => { buttonContaining(container, 'Request Kernel approval').click(); });
@@ -193,6 +300,94 @@ test('Profile closure candidates show new catalog Packs and execute resolve thro
   }
 });
 
+test('a non-active Profile can stage and review a successor closure without activation', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const surface = surfaceState();
+  const alternate = catalogEntry(['provider-pack'], 'alternate', false);
+  const selection = authoritativeSelection(alternate);
+  const calls: string[] = [];
+  let approvalCalls = 0;
+  let activationCalls = 0;
+  const client: ProfileCeremonyClient = {
+    resolve: async (input): Promise<ProfileResolveResult> => {
+      calls.push('resolve');
+      assert.deepEqual(input.desired_pack_ids.sort(), ['new-pack', 'provider-pack']);
+      return {
+        state: 'resolved',
+        candidate_id: 'alternate-candidate',
+        candidate_digest: digest('2'),
+        expires_in: 60,
+        review: {
+          profile: {profile_id: 'alternate'},
+          profile_lock: {lock_digest: digest('d')},
+          resolved_plan: {profile_revision: digest('f'), plan_digest: digest('b')},
+          predecessor: {plan_digest: digest('b')},
+          catalog_binding: {
+            profile_definition_digest: digest('6'),
+            profile_catalog_digest: digest('c'),
+            bundle_lock_digest: digest('d'),
+          },
+        },
+        next_action: 'review',
+        write_set: [],
+      };
+    },
+    review: async (): Promise<ProfileReviewResult> => {
+      calls.push('review');
+      return {
+        state: 'reviewed',
+        candidate_id: 'alternate-candidate',
+        candidate_digest: digest('2'),
+        next_action: 'approval',
+        write_set: [],
+      };
+    },
+    approve: async (): Promise<ProfileApproveResult> => {
+      approvalCalls += 1;
+      throw new Error('approval must wait for the user');
+    },
+    activate: async (): Promise<ProfileActivateResult> => {
+      activationCalls += 1;
+      throw new Error('inactive Profile must not activate during browsing');
+    },
+  };
+
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCeremonyPanel
+          surface={surface.state}
+          packs={[pack('provider-pack'), pack('new-pack')]}
+          loadPacks={async () => {}}
+          client={client}
+          authoritativeSelection={selection}
+          catalogSurface={catalogSurfaceState(alternate)}
+        />,
+      );
+    });
+    assert.match(container.textContent ?? '', /Alternate Profile/);
+    const addPack = buttonContaining(container, 'Add Pack · New Pack');
+    assert.equal(addPack.getAttribute('aria-label'), 'Add Pack New Pack to Alternate Profile closure');
+    await act(async () => { addPack.click(); });
+    assert.match(container.textContent ?? '', /Successor staged/);
+    await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
+    await act(async () => { buttonContaining(container, 'Review exact candidate').click(); });
+
+    assert.deepEqual(calls, ['resolve', 'review']);
+    assert.equal(approvalCalls, 0);
+    assert.equal(activationCalls, 0);
+    assert.match(container.textContent ?? '', /Request Kernel approval/);
+    assert.doesNotMatch(container.textContent ?? '', /Activate approved Profile/);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
 test('Profile ceremony fails closed when a custom review client substitutes another candidate', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
@@ -205,7 +400,17 @@ test('Profile ceremony fails closed when a custom review client substitutes anot
       candidate_id: 'candidate-a',
       candidate_digest: digest('2'),
       expires_in: 60,
-      review: {profile: {}, profile_lock: {}, resolved_plan: {}, predecessor: {}},
+        review: {
+          profile: {profile_id: 'defaults'},
+          profile_lock: {},
+          resolved_plan: {},
+          predecessor: {},
+          catalog_binding: {
+            profile_definition_digest: digest('6'),
+            profile_catalog_digest: digest('c'),
+            bundle_lock_digest: digest('d'),
+          },
+        },
       next_action: 'review',
       write_set: [],
     }),
@@ -231,13 +436,13 @@ test('Profile ceremony fails closed when a custom review client substitutes anot
         <ProfileCeremonyPanel
           surface={surface.state}
           packs={[pack('provider-pack'), pack('new-pack')]}
-          packsLoading={false}
           loadPacks={async () => {}}
           client={client}
+          authoritativeSelection={authoritativeSelection()}
+          catalogSurface={catalogSurfaceState()}
         />,
       );
     });
-    await act(async () => { buttonContaining(container, 'new-pack').click(); });
     await act(async () => { buttonContaining(container, 'Resolve candidate').click(); });
     await act(async () => { buttonContaining(container, 'Review exact candidate').click(); });
 

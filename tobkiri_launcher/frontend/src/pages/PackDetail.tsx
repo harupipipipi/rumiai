@@ -213,7 +213,7 @@ export function PackDetail() {
                 </Button>
               </div>
             ) : pack.required ? (
-              <Badge variant="secondary">Required by Defaults Profile</Badge>
+              <Badge variant="secondary">Required by active Profile</Badge>
             ) : (
               <>
                 <Button

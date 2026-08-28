@@ -136,6 +136,141 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         authority.close()
 
 
+def test_named_profile_registry_crud_http_preserves_active_pointer_and_history(
+    production_server,
+) -> None:
+    """Exercise the authenticated Profile registry through its real HTTP surface."""
+
+    server, _session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    read_headers = {
+        "Cookie": cookie,
+        "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+    }
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+        "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+    }
+
+    status, initial, _ = _request(
+        server,
+        "GET",
+        "/api/v4/profiles",
+        headers=read_headers,
+    )
+    assert status == 200, initial
+    initial_registry = initial["data"]
+    assert initial_registry["active_profile_id"] == "defaults"
+    assert initial_registry["active_profile_revision"]
+    generation = initial_registry["generation"]
+
+    def mutate(action: str, body: dict[str, object]) -> dict[str, object]:
+        status_code, payload, _ = _request(
+            server,
+            "POST",
+            f"/api/v4/profiles/{action}",
+            body=body,
+            headers={
+                **mutation_headers,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status_code == 200, payload
+        return payload["data"]
+
+    created = mutate(
+        "create",
+        {
+            "profile_id": "profile-a",
+            "display_name": "Profile A",
+            "source_profile_id": "defaults",
+            "expected_store_generation": generation,
+        },
+    )
+    created_profile = next(
+        profile
+        for profile in created["profiles"]
+        if profile["profile_id"] == "profile-a"
+    )
+    assert created_profile["profile_revision"]
+    assert created_profile["parent_revision"] is None
+    assert created["active_profile_id"] == initial_registry["active_profile_id"]
+    assert created["active_profile_revision"] == initial_registry["active_profile_revision"]
+
+    updated = mutate(
+        "update",
+        {
+            "profile_id": "profile-a",
+            "display_name": "Profile A updated",
+            "expected_profile_revision": created_profile["profile_revision"],
+            "expected_store_generation": created["generation"],
+        },
+    )
+    updated_profile = next(
+        profile
+        for profile in updated["profiles"]
+        if profile["profile_id"] == "profile-a"
+    )
+    assert updated_profile["profile_revision"] != created_profile["profile_revision"]
+    assert updated_profile["parent_revision"] == created_profile["profile_revision"]
+    assert updated["active_profile_id"] == "defaults"
+    assert updated["active_profile_revision"] == initial_registry["active_profile_revision"]
+
+    duplicated = mutate(
+        "duplicate",
+        {
+            "profile_id": "profile-a",
+            "new_profile_id": "profile-b",
+            "display_name": "Profile B",
+            "expected_profile_revision": updated_profile["profile_revision"],
+            "expected_store_generation": updated["generation"],
+        },
+    )
+    duplicated_profile = next(
+        profile
+        for profile in duplicated["profiles"]
+        if profile["profile_id"] == "profile-b"
+    )
+    assert duplicated_profile["profile_revision"]
+    assert duplicated_profile["parent_revision"] is None
+    assert duplicated["active_profile_id"] == "defaults"
+
+    deleted = mutate(
+        "delete",
+        {
+            "profile_id": "profile-b",
+            "expected_profile_revision": duplicated_profile["profile_revision"],
+            "expected_store_generation": duplicated["generation"],
+        },
+    )
+    assert all(profile["profile_id"] != "profile-b" for profile in deleted["profiles"])
+    assert deleted["changed_profile"]["profile_id"] == "profile-b"
+    assert deleted["changed_profile"]["tombstone"] is True
+    assert deleted["action"] == "delete"
+    assert deleted["active_profile_id"] == "defaults"
+    assert deleted["active_profile_revision"] == initial_registry["active_profile_revision"]
+
+    stale_status, stale, _ = _request(
+        server,
+        "POST",
+        "/api/v4/profiles/update",
+        body={
+            "profile_id": "profile-a",
+            "display_name": "stale",
+            "expected_profile_revision": created_profile["profile_revision"],
+            "expected_store_generation": deleted["generation"],
+        },
+        headers={
+            **mutation_headers,
+            "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+        },
+    )
+    assert stale_status == 409
+    assert stale["success"] is False
+
+
 def test_home_and_pack_workflow_use_only_real_broker_contracts(
     production_server,
 ) -> None:

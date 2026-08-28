@@ -108,6 +108,6 @@ test('reconfirmation setup copy exposes only the Host-owned bootstrap ceremony',
 test('the current GUI has no dependency on retired setup-pack routing', () => {
   assert.doesNotMatch(setupSource, /setupPack|setup_pack|\/setup\?return_to/);
   assert.doesNotMatch(appSource, /hasSelectedSetupPack|setupPacks/);
-  assert.match(appSource, /fetchDefaultsSetupState/);
-  assert.match(appSource, /state\.state === 'active'/);
+  assert.doesNotMatch(appSource, /fetchDefaultsSetupState/);
+  assert.doesNotMatch(appSource, /profile_reconfirmation_required/);
 });

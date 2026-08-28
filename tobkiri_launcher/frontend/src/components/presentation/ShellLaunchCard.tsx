@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {MessageCircle, Monitor, Route} from 'lucide-react';
+import {Monitor, Route} from 'lucide-react';
+import {Link} from 'react-router';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
@@ -23,10 +24,14 @@ export function ShellLaunchCard({
   runtimeReady,
   profileId,
   profileDisplayName,
+  active = true,
+  activationHref,
 }: {
   runtimeReady: boolean;
   profileId: string;
   profileDisplayName: string;
+  active?: boolean;
+  activationHref?: string;
 }) {
   const addToast = useAppStore((state) => state.addToast);
   const [presentation, setPresentation] = useState<ApiPresentationState | null>(null);
@@ -51,10 +56,10 @@ export function ShellLaunchCard({
   }, []);
 
   useEffect(() => {
-    if (desktopShell && runtimeReady) {
+    if (active && desktopShell && runtimeReady) {
       void loadSurfaceState();
     }
-  }, [desktopShell, runtimeReady, loadSurfaceState]);
+  }, [active, desktopShell, runtimeReady, loadSurfaceState]);
 
   const selectedShell = presentation?.selection
     ? presentation.catalog.shell_providers.find(
@@ -62,7 +67,9 @@ export function ShellLaunchCard({
     )
     : null;
   const materialization = presentation?.materialization ?? null;
-  const blockedReason = !desktopShell
+  const blockedReason = !active
+    ? 'Activate this Profile before launching its Shell.'
+    : !desktopShell
     ? 'Profile launch is available in Tobkiri Launcher.'
     : !runtimeReady
     ? 'The selected Shell becomes available after Tobkiri runtime readiness.'
@@ -93,7 +100,7 @@ export function ShellLaunchCard({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
-            <MessageCircle className="h-4 w-4 text-accent" />
+            <Monitor className="h-4 w-4 text-accent" aria-hidden="true" />
             <CardTitle id={`shell-launch-title-${profileId}`}>{profileDisplayName} launch</CardTitle>
           </div>
           <Badge variant={blockedReason ? 'warning' : 'success'}>
@@ -101,8 +108,9 @@ export function ShellLaunchCard({
           </Badge>
         </div>
         <p className="text-sm leading-relaxed text-text-muted">
-          Launch this active execution Profile through its verified Tobkiri Shell binding.
-          The handoff remains bound to the Profile revision, activation, and Plan identity.
+          {active
+            ? 'Launch this active execution Profile through its verified Tobkiri Shell binding. The handoff remains bound to the Profile revision, activation, and Plan identity.'
+            : 'This Profile is browse-only until it completes the same resolve, review, Authority approval, and activation ceremony as every other Profile.'}
         </p>
       </CardHeader>
       <CardContent>
@@ -127,15 +135,26 @@ export function ShellLaunchCard({
                 <span>{blockedReason ?? 'Verified Profile handoff is ready.'}</span>
               </p>
             </div>
-            <Button
-              className="min-h-11 shrink-0"
-              disabled={Boolean(blockedReason) || launching}
-              loading={launching}
-              onClick={() => void launch()}
-              aria-busy={launching}
-            >
-              {launching ? 'Opening…' : `Launch ${profileDisplayName}`}
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                className="min-h-11"
+                disabled={Boolean(blockedReason) || launching}
+                loading={launching}
+                onClick={() => void launch()}
+                aria-busy={launching}
+                aria-label={`Launch ${profileDisplayName}`}
+              >
+                {launching ? 'Opening…' : `Launch ${profileDisplayName}`}
+              </Button>
+              {!active && activationHref ? (
+                <Link
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-main px-4 py-2 text-sm font-medium text-text-main transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                  to={activationHref}
+                >
+                  Activate first
+                </Link>
+              ) : null}
+            </div>
           </div>
         )}
       </CardContent>

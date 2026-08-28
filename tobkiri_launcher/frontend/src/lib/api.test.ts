@@ -7,6 +7,9 @@ import {
   bootstrapPanelSession,
   checkHealth,
   clearApiPrefetchCache,
+  createNamedProfile,
+  deleteNamedProfile,
+  duplicateNamedProfile,
   disablePack,
   enablePack,
   fetchDashboard,
@@ -14,6 +17,7 @@ import {
   fetchFrontendCatalog,
   fetchRuntimeOperationStatus,
   fetchPacks,
+  fetchNamedProfiles,
   fetchPresentationState,
   installPack,
   invokeFrontendCapability,
@@ -23,6 +27,7 @@ import {
   selectPresentation,
   parseHealthResponse,
   setRuntimeDispatchStatus,
+  updateNamedProfile,
 } from './api.ts';
 import {
   extractExactOperationDescriptors,
@@ -227,6 +232,111 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     'POST /api/pack-control/disable',
   ]);
   assert.equal(lastFetchInit?.method, 'POST');
+});
+
+test('Named Profile CRUD uses exact Host routes, payloads, and registry response validation', async () => {
+  const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+  const profile = (profileId: string, revision: string) => ({
+    profile_id: profileId,
+    profile_revision: revision,
+    profile: {profile_id: profileId, display_name: profileId},
+    order: 0,
+    parent_revision: null,
+    tombstone: false,
+    created_at: 1,
+    updated_at: 1,
+    legacy_ids: [],
+  });
+  const registry = {
+    profile_registry_api_version: 'io.tobkiri.profile-registry.v4',
+    generation: 3,
+    active_profile_id: 'defaults',
+    active_profile_revision: digest('a'),
+    profiles: [profile('defaults', digest('a'))],
+  };
+  const requests: Array<{url: string; method: string; body: unknown}> = [];
+  fetchHandler = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method ?? 'GET',
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({success: true, data: registry}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+
+  await fetchNamedProfiles();
+  await createNamedProfile({
+    profile_id: 'work-a',
+    display_name: 'Work A',
+    source_profile_id: 'defaults',
+    expected_store_generation: 3,
+  });
+  await updateNamedProfile({
+    profile_id: 'work-a',
+    display_name: 'Work A updated',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+  await duplicateNamedProfile({
+    profile_id: 'work-a',
+    new_profile_id: 'work-b',
+    display_name: 'Work B',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+  await deleteNamedProfile({
+    profile_id: 'work-b',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+
+  assert.deepEqual(requests.map(({url, method}) => `${method} ${url}`), [
+    'GET /api/v4/profiles',
+    'POST /api/v4/profiles/create',
+    'POST /api/v4/profiles/update',
+    'POST /api/v4/profiles/duplicate',
+    'POST /api/v4/profiles/delete',
+  ]);
+  assert.deepEqual(requests.slice(1).map((request) => request.body), [
+    {
+      profile_id: 'work-a',
+      display_name: 'Work A',
+      source_profile_id: 'defaults',
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-a',
+      display_name: 'Work A updated',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-a',
+      new_profile_id: 'work-b',
+      display_name: 'Work B',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-b',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+  ]);
+
+  const requestCount = requests.length;
+  assert.throws(
+    () => createNamedProfile({
+      profile_id: 'Work A',
+      display_name: 'Rejected',
+      source_profile_id: 'defaults',
+      expected_store_generation: 3,
+    }),
+    /canonical Profile ID/,
+  );
+  assert.equal(requests.length, requestCount);
 });
 
 test('Pack approval rejects a candidate or approval response for a different state', async () => {

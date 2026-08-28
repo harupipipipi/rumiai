@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import {
   cancelPackMutationReconciliation,
   useAppStore,
-  type RuntimeStatus,
 } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
 import { Setup } from '@/src/pages/Setup';
@@ -15,7 +14,6 @@ import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteAnnouncer } from '@/src/components/layout/RouteAnnouncer';
-import {fetchDefaultsSetupState} from '@/src/lib/defaultsSetup';
 import {
   LazyAiInput,
   LazyApiMap,
@@ -34,8 +32,6 @@ export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
-  const runtimeStatus = useAppStore(state => state.runtimeStatus);
-  const setSetupDone = useAppStore(state => state.setSetupDone);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
 
@@ -57,42 +53,6 @@ export default function App() {
       addToast(message, 'error');
     });
   }, [addToast]);
-
-  useEffect(() => {
-    if (!isSetupDone) return;
-    type IdleWindow = Window & {
-      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-    const target = window as IdleWindow;
-    let cancelled = false;
-    const verifyDefaultsProfile = () => {
-      void fetchDefaultsSetupState()
-        .then((state) => {
-          if (cancelled || state.state === 'active') return;
-          addToast('The Defaults Profile activation is no longer available. Setup must be completed again.', 'error');
-          setSetupDone(false);
-        })
-        .catch((error) => {
-          if (cancelled) return;
-          addToast(error instanceof Error ? error.message : 'Defaults Profile verification failed', 'error');
-        });
-    };
-
-    let cancelScheduled: () => void;
-    if (typeof target.requestIdleCallback === 'function') {
-      const handle = target.requestIdleCallback(verifyDefaultsProfile, { timeout: 1_000 });
-      cancelScheduled = () => target.cancelIdleCallback?.(handle);
-    } else {
-      const handle = window.setTimeout(verifyDefaultsProfile, 300);
-      cancelScheduled = () => window.clearTimeout(handle);
-    }
-
-    return () => {
-      cancelled = true;
-      cancelScheduled();
-    };
-  }, [isSetupDone, setSetupDone, addToast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +101,7 @@ export default function App() {
 
   return (
     <BrowserRouter basename="/panel">
-      <DeferredRouteTree isSetupDone={isSetupDone} runtimeStatus={runtimeStatus} />
+      <DeferredRouteTree isSetupDone={isSetupDone} />
       <ToastContainer />
       <DialogContainer />
     </BrowserRouter>
@@ -150,10 +110,8 @@ export default function App() {
 
 function DeferredRouteTree({
   isSetupDone,
-  runtimeStatus,
 }: {
   isSetupDone: boolean;
-  runtimeStatus: RuntimeStatus;
 }) {
   const location = useLocation();
   const deferredLocation = useDeferredValue(location);
@@ -170,7 +128,7 @@ function DeferredRouteTree({
 
         <Route
           path={panelRoutes.home}
-          element={isSetupDone && runtimeStatus !== 'profile_reconfirmation_required'
+          element={isSetupDone
             ? <Layout />
             : <Navigate to={panelRoutes.setup} replace />}
         >

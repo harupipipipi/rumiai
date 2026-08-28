@@ -327,11 +327,10 @@ export function ProfileCatalogSelector({
         </>
       ) : null}
       {selectedEntry && catalogProjection ? (
-        <ProfileCeremonyPanel
-          surface={profileSurface}
-          packs={packs}
-          packsLoading={packsLoading}
-          loadPacks={loadPacks}
+          <ProfileCeremonyPanel
+            surface={profileSurface}
+            packs={packs}
+            loadPacks={loadPacks}
           client={client}
           onActivated={handleActivated}
           onBusyChange={setCeremonyBusy}
