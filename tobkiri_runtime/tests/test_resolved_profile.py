@@ -298,7 +298,7 @@ def test_persisted_profile_uses_only_committed_v4_activation(
     )
 
     monkeypatch.setattr(scope, "_PERSISTED_PROFILE_CACHE", None)
-    monkeypatch.setattr(capture_module, "capture_default_profile", _fake_v4_activation)
+    monkeypatch.setattr(capture_module, "capture_active_profile", _fake_v4_activation)
 
     plan = persisted_resolved_profile()
 
@@ -341,7 +341,7 @@ def test_persisted_profile_cache_tracks_activation_and_invalidation(
     activation = {"value": _fake_v4_activation()}
     monkeypatch.setattr(
         capture_module,
-        "capture_default_profile",
+        "capture_active_profile",
         lambda: activation["value"],
     )
 

@@ -281,6 +281,45 @@ def test_inventory_binds_all_targets_once_and_rejects_tamper_missing_duplicate()
             )
 
 
+def test_inventory_binds_an_explicit_workflow_target_set() -> None:
+    revision = "c" * 40
+    target = "aarch64-apple-darwin"
+    with TemporaryDirectory(prefix="tobkiri-release-matrix-") as temp:
+        root = Path(temp)
+        _create_target_upload(root, target, revision)
+        output = root / "release-inventory.json"
+        assets = root / "release-assets"
+        inventory = INVENTORY.create_inventory(
+            root / "uploaded",
+            output,
+            assets,
+            revision,
+            "v1.2.3",
+            [target],
+        )
+
+        assert [item["target"] for item in inventory["targets"]] == [target]
+        INVENTORY.verify_inventory(
+            output,
+            assets,
+            revision,
+            "v1.2.3",
+            required_targets=[target],
+        )
+        with pytest.raises(INVENTORY.InventoryError, match="missing or unexpected"):
+            INVENTORY.verify_inventory(output, assets, revision, "v1.2.3")
+
+
+def test_release_workflow_inventory_target_matches_real_build_matrix() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    matrix = workflow["jobs"]["build"]["strategy"]["matrix"]["include"]
+    matrix_targets = {row["target"] for row in matrix}
+    required_target = workflow["env"]["TOBKIRI_REQUIRED_RELEASE_TARGET"]
+
+    assert matrix_targets == {required_target}
+    assert required_target in INVENTORY.TARGETS
+
+
 def test_inventory_rejects_symlink_and_path_escape_fixtures() -> None:
     revision = "b" * 40
     with TemporaryDirectory(prefix="tobkiri-release-path-guards-") as temp:

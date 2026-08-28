@@ -230,7 +230,7 @@ export function Packs() {
                       </Button>
                     ) : null}
                     {pack.installed && pack.approved && pack.required ? (
-                      <Badge variant="secondary">Required by Defaults Profile</Badge>
+                      <Badge variant="secondary">Required by active Profile</Badge>
                     ) : pack.installed && pack.approved ? (
                       <>
                         <Button

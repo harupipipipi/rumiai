@@ -5,25 +5,31 @@ import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {
-  fetchFrontendCatalog,
   fetchPresentationState,
   isDesktopShellAvailable,
   launchSelectedPresentation,
 } from '@/src/lib/api';
-import type {ApiDynamicFrontendCatalog, ApiPresentationState} from '@/src/lib/apiTypes';
-import {isConversationCapabilityReady, launchDisabledReason} from '@/src/lib/presentation';
+import type {ApiPresentationState} from '@/src/lib/apiTypes';
+import {launchDisabledReason} from '@/src/lib/presentation';
 import {useAppStore} from '@/src/store';
 
 function formatError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Tobkiri could not verify the selected Conversation surface.';
+    : 'Tobkiri could not verify the selected Profile launch surface.';
 }
 
-export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
+export function ShellLaunchCard({
+  runtimeReady,
+  profileId,
+  profileDisplayName,
+}: {
+  runtimeReady: boolean;
+  profileId: string;
+  profileDisplayName: string;
+}) {
   const addToast = useAppStore((state) => state.addToast);
   const [presentation, setPresentation] = useState<ApiPresentationState | null>(null);
-  const [frontendCatalog, setFrontendCatalog] = useState<ApiDynamicFrontendCatalog | null>(null);
   const [loading, setLoading] = useState(false);
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
@@ -34,16 +40,11 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     setLoading(true);
     setError(null);
     try {
-      const [nextPresentation, nextCatalog] = await Promise.all([
-        fetchPresentationState(),
-        fetchFrontendCatalog(),
-      ]);
+      const nextPresentation = await fetchPresentationState();
       setPresentation(nextPresentation);
-      setFrontendCatalog(nextCatalog);
     } catch (loadError) {
       setError(formatError(loadError));
       setPresentation(null);
-      setFrontendCatalog(null);
     } finally {
       setLoading(false);
     }
@@ -55,24 +56,20 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     }
   }, [desktopShell, runtimeReady, loadSurfaceState]);
 
-  if (!desktopShell) return null;
-
   const selectedShell = presentation?.selection
     ? presentation.catalog.shell_providers.find(
       (provider) => provider.provider_id === presentation.selection?.shell_provider_id,
     )
     : null;
   const materialization = presentation?.materialization ?? null;
-  const capabilityReady = isConversationCapabilityReady(frontendCatalog);
-  const blockedReason = !runtimeReady
+  const blockedReason = !desktopShell
+    ? 'Profile launch is available in Tobkiri Launcher.'
+    : !runtimeReady
     ? 'The selected Shell becomes available after Tobkiri runtime readiness.'
     : !presentation?.selection
       ? 'No verified Shell selection is active.'
       : materialization
         ? launchDisabledReason(materialization)
-          ?? (!capabilityReady
-            ? 'The verified Conversation capability is not ready in the active v4 Profile.'
-            : null)
         : 'The selected Shell materialization is unavailable.';
 
   const launch = async () => {
@@ -81,14 +78,8 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     setLaunching(true);
     setError(null);
     try {
-      const freshCatalog = await fetchFrontendCatalog();
-      setFrontendCatalog(freshCatalog);
-      if (!isConversationCapabilityReady(freshCatalog)) {
-        setError('The verified Conversation capability changed and is no longer ready.');
-        return;
-      }
       const result = await launchSelectedPresentation();
-      addToast(result.message || 'Tobkiri Conversation opened in the selected Shell.', 'success');
+      addToast(result.message || `${profileDisplayName} opened in the selected Shell.`, 'success');
     } catch (launchError) {
       setError(formatError(launchError));
     } finally {
@@ -98,20 +89,20 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
   };
 
   return (
-    <Card aria-labelledby="shell-launch-title">
+    <Card aria-labelledby={`shell-launch-title-${profileId}`}>
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <MessageCircle className="h-4 w-4 text-accent" />
-            <CardTitle id="shell-launch-title">Tobkiri Conversation</CardTitle>
+            <CardTitle id={`shell-launch-title-${profileId}`}>{profileDisplayName} launch</CardTitle>
           </div>
           <Badge variant={blockedReason ? 'warning' : 'success'}>
             {blockedReason ? 'Unavailable' : 'Ready'}
           </Badge>
         </div>
         <p className="text-sm leading-relaxed text-text-muted">
-          Open the configured Conversation route through the selected Tobkiri Shell.
-          Launcher uses its typed Shell command; it does not navigate through a legacy panel route.
+          Launch this active execution Profile through its verified Tobkiri Shell binding.
+          The handoff remains bound to the Profile revision, activation, and Plan identity.
         </p>
       </CardHeader>
       <CardContent>
@@ -133,7 +124,7 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
               </p>
               <p className="flex items-center gap-2 text-xs text-text-muted">
                 <Route className="h-3.5 w-3.5 shrink-0" />
-                <span>{blockedReason ?? 'Conversation route is provided by the selected Shell.'}</span>
+                <span>{blockedReason ?? 'Verified Profile handoff is ready.'}</span>
               </p>
             </div>
             <Button
@@ -143,7 +134,7 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
               onClick={() => void launch()}
               aria-busy={launching}
             >
-              {launching ? 'Opening…' : 'Open Tobkiri Conversation'}
+              {launching ? 'Opening…' : `Launch ${profileDisplayName}`}
             </Button>
           </div>
         )}

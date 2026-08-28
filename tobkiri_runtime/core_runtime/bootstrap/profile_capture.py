@@ -19,11 +19,16 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ResolvedDefaultProfile,
     resolve_default_profile,
 )
-from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.canonical import canonical_digest, strict_loads
 
 from ..authority.v4 import AuthorityStore
 from ..authority.v4_models import authority_digest
 from ..env_compat import read_migrated_env
+from ..active_profile_store_v4 import ActiveProfileStore, ActiveProfileStoreError
+from ..profile_definition_store_v4 import (
+    ProfileDefinitionStore,
+    ProfileDefinitionStoreConflict,
+)
 
 
 _ProfilePointerSignature = tuple[int, int, int, int]
@@ -99,6 +104,56 @@ def _bundle_root(base_dir: Path | None = None) -> Path:
     bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
     _verify_installed_bundle_binding(runtime_root, bundle_root)
     return bundle_root
+
+
+def host_profile_catalog(base_dir: Path | None = None) -> BundledCatalog:
+    """Return the verified artifact catalog plus Host-owned Profile definitions."""
+
+    bundled = BundledCatalog.load(_bundle_root(base_dir))
+    user_data = runtime_user_data_root(base_dir)
+    definitions = ProfileDefinitionStore(user_data)
+    legacy_collection = user_data / "settings" / "startup_profiles.json"
+    if not definitions.list_profiles(include_tombstones=True) and legacy_collection.is_file():
+        definitions.import_legacy_collection(legacy_collection)
+    try:
+        definitions.bootstrap_defaults(bundled.profiles["defaults"])
+    except ProfileDefinitionStoreConflict:
+        if definitions.get_profile("defaults") is None:
+            raise
+    profiles = {
+        item.profile_id: dict(item.profile)
+        for item in definitions.list_profiles()
+        if _is_resolvable_profile_definition(item.profile)
+    }
+    return BundledCatalog(
+        root=bundled.root,
+        packs=bundled.packs,
+        bases=bundled.bases,
+        shells=bundled.shells,
+        profiles=profiles,
+        artifact_root=bundled.artifact_root,
+        executable_catalogs=bundled.executable_catalogs,
+    )
+
+
+def _is_resolvable_profile_definition(profile: Mapping[str, Any]) -> bool:
+    """Keep opaque legacy imports visible in the store but out of resolution."""
+
+    return all(
+        key in profile
+        for key in (
+            "profile_api_version",
+            "profile_id",
+            "mode",
+            "base",
+            "shell",
+            "packs",
+            "requested_edges",
+            "authority_references",
+            "profile_authority_snapshot_digest",
+            "provenance",
+        )
+    )
 
 
 def _verify_installed_bundle_binding(runtime_root: Path, bundle_root: Path) -> None:
@@ -318,6 +373,12 @@ def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
     return pointer.is_file()
 
 
+def active_profile_exists(*, base_dir: Path | None = None) -> bool:
+    """Return whether the Host-global Profile selection physically exists."""
+
+    return ActiveProfileStore(runtime_user_data_root(base_dir)).path.is_file()
+
+
 def activation_audit_receipt(
     active: ActiveDefaultProfile, *, base_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -342,6 +403,95 @@ def activation_audit_receipt(
         "activation_id": str(reservation["activation_id"]),
         "fencing_token": int(reservation["fencing_token"]),
     }
+
+
+def capture_active_profile(
+    *, base_dir: Path | None = None
+) -> ActiveDefaultProfile:
+    """Capture the exact Host-selected Profile without a Defaults fallback."""
+
+    user_data = runtime_user_data_root(base_dir)
+    pointers = ActiveProfileStore(user_data)
+    try:
+        pointer = pointers.require(verify_snapshot=True)
+    except ActiveProfileStoreError:
+        # Compatibility migration only: an existing pre-registry Defaults
+        # activation is promoted once.  Absence of both pointers remains
+        # fail-closed and never silently bootstraps Defaults here.
+        if pointers.path.is_file() or not active_default_profile_exists(
+            base_dir=base_dir
+        ):
+            raise
+        capture_default_profile(base_dir=base_dir)
+        pointer = pointers.require(verify_snapshot=True)
+    workspace = user_data / "workspaces" / pointer.profile_id
+    if workspace.is_symlink() or not workspace.is_dir():
+        raise ProfileResolutionDenied("active Profile workspace is unavailable")
+    catalog = host_profile_catalog(base_dir)
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        store = ActivationStore(
+            workspace / "activation",
+            workspace,
+            profile_id=pointer.profile_id,
+            authority=authority,
+            catalog=catalog,
+        )
+        active = store.load_active_snapshot()
+    identity = (
+        str(active.resolved.plan["profile_revision"]),
+        str(active.activation["activation_id"]),
+        str(active.resolved.plan["plan_digest"]),
+        str(active.resolved.lock["lock_digest"]),
+    )
+    if identity != (
+        pointer.profile_revision,
+        pointer.activation_id,
+        pointer.plan_digest,
+        pointer.lock_digest,
+    ):
+        raise ProfileResolutionDenied(
+            "Host active pointer does not match the Profile activation"
+        )
+    return active
+
+
+def _publish_host_active_pointer(
+    active: ActiveDefaultProfile,
+    *,
+    user_data: Path,
+    replace_existing: bool,
+) -> None:
+    """Publish one verified workspace activation through the Host-global CAS."""
+
+    activation_id = str(active.activation["activation_id"])
+    profile_id = str(active.resolved.profile["profile_id"])
+    relative = (
+        Path("workspaces")
+        / profile_id
+        / "activation"
+        / "activations"
+        / f"{activation_id.removeprefix('activation:')}.json"
+    )
+    try:
+        snapshot = strict_loads((user_data / relative).read_bytes())
+    except (OSError, ValueError) as error:
+        raise ProfileResolutionDenied(
+            "active Profile activation envelope is unavailable"
+        ) from error
+    if not isinstance(snapshot, Mapping):
+        raise ProfileResolutionDenied("active Profile activation envelope is invalid")
+    pointers = ActiveProfileStore(user_data)
+    current = pointers.load(verify_snapshot=True)
+    if current is not None and not replace_existing:
+        return
+    pointers.commit_activation(
+        active.activation,
+        activation_snapshot=snapshot,
+        activation_snapshot_path=relative.as_posix(),
+        expected=current,
+        catalog_revision=str(active.resolved.plan.get("catalog_revision") or "")
+        or None,
+    )
 
 
 def capture_default_profile(
@@ -404,6 +554,11 @@ def capture_default_profile(
                     created_at=created_at,
                 )
             active = store.load_active_snapshot()
+            _publish_host_active_pointer(
+                active,
+                user_data=user_data,
+                replace_existing=confirmation is not None,
+            )
             if confirmation is None and cache is not None:
                 signature = _activation_pointer_signature(active_pointer)
                 if signature is not None:
@@ -443,6 +598,11 @@ def capture_default_profile(
             created_at=created_at,
         )
         active = store.load_active_snapshot()
+        _publish_host_active_pointer(
+            active,
+            user_data=user_data,
+            replace_existing=True,
+        )
         if cache is not None:
             signature = _activation_pointer_signature(active_pointer)
             if signature is not None:
@@ -452,8 +612,11 @@ def capture_default_profile(
 
 __all__ = [
     "activation_audit_receipt",
+    "active_profile_exists",
     "active_default_profile_exists",
+    "capture_active_profile",
     "capture_default_profile",
+    "host_profile_catalog",
     "invalidate_profile_capture_scope",
     "prepare_default_profile_confirmation",
     "profile_capture_scope",

@@ -40,8 +40,8 @@
     {
       "path": "ecosystem/defaultspack/defaultspack/desktop_app.py",
       "type": "regular-file",
-      "size": 20257,
-      "sha256": "4a166edd675a9d5fa11a5112511c30c3cc6b2d678c56d588e53f364b11e734bf",
+      "size": 20255,
+      "sha256": "6379d3cc117530899e9868efa4d4c0cd33d9f8fd104de3e10641540c565e2ba0",
       "executable": false
     },
     {

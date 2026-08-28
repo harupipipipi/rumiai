@@ -92,9 +92,9 @@ def persisted_resolved_profile() -> Any | None:
     if active is not None:
         return active
     try:
-        from .bootstrap.profile_capture import capture_default_profile
+        from .bootstrap.profile_capture import capture_active_profile
 
-        captured = capture_default_profile()
+        captured = capture_active_profile()
         activation_id = str(captured.activation["activation_id"])
         cache_key = (activation_id, _PERSISTED_PROFILE_INVALIDATION_REVISION)
         with _PERSISTED_PROFILE_LOCK:

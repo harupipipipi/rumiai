@@ -665,20 +665,10 @@ def _bind_baseline_conversation_authority(
     registered_backends: tuple[ExecutionBackend, ...],
     target_backend_digests: dict[str, str],
 ) -> ExecutionBackend | None:
-    """Commit the exact Defaults Conversation authority only for a live PackVM.
-
-    The Defaults confirmation is the approval source for its required baseline
-    Pack.  Optional Pack approvals are deliberately not consulted here: they
-    cannot authorize, widen, or substitute this fixed Profile edge.
-    """
+    """Commit an active Profile's verified Conversation contribution."""
 
     key = _BASELINE_CONVERSATION_KEY
     target = FunctionPrincipal.from_dict(binding["function_principal"])
-    expected_profile_edges = tuple(
-        edge
-        for edge in catalog.profiles["defaults"]["requested_edges"]
-        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
-    )
     active_profile_edges = tuple(
         edge
         for edge in profile["requested_edges"]
@@ -688,12 +678,7 @@ def _bind_baseline_conversation_authority(
         key not in static_edge_keys
         or _BASELINE_CONVERSATION_PACK_ID not in mandatory_pack_ids
         or str(binding["pack_id"]) != _BASELINE_CONVERSATION_PACK_ID
-        or len(expected_profile_edges) != 1
         or len(active_profile_edges) != 1
-        or str(expected_profile_edges[0]["caller_function_id"])
-        != _BASELINE_CONVERSATION_CALLER_ID
-        or str(expected_profile_edges[0]["target_provider_id"])
-        != _BASELINE_CONVERSATION_FUNCTION_ID
         or str(active_profile_edges[0]["caller_function_id"])
         != _BASELINE_CONVERSATION_CALLER_ID
         or str(active_profile_edges[0]["target_provider_id"])
@@ -709,7 +694,7 @@ def _bind_baseline_conversation_authority(
         or resolved_binding.variant.execution_kind is not ExecutionKind.PACK_VM
         or resolved_binding.variant.backend != _PYTHON_PACK_BACKEND_ID
     ):
-        raise AuthorityDenied("Defaults baseline Conversation identity changed")
+        raise AuthorityDenied("Profile Conversation contribution identity changed")
 
     try:
         backend = BackendRegistry(registered_backends).select(resolved_binding)
@@ -769,35 +754,25 @@ def _validated_conversation_bridge_binding(
     """Return the only Host capability reachable from PackVM Conversation.
 
     The guest can request neither a different Contract target nor a broader
-    provider identity.  This check deliberately uses both the shipped Defaults
-    profile and the active immutable Profile before binding the Host bridge.
+    provider identity.  The active immutable Profile is the sole Profile
+    authority for this optional contribution.
     """
 
     key = _BRIDGED_AI_GENERATE_KEY
     binding = binding_by_key.get(key)
     resolved_binding = resolved_binding_by_key.get(key)
-    expected_edges = tuple(
-        edge
-        for edge in catalog.profiles["defaults"]["requested_edges"]
-        if (str(edge["contract_id"]), str(edge["operation_id"])) == key
-    )
     active_edges = tuple(
         edge
         for edge in profile["requested_edges"]
         if (str(edge["contract_id"]), str(edge["operation_id"])) == key
     )
     if binding is None or resolved_binding is None:
-        raise AuthorityDenied("Defaults Conversation bridge target is unavailable")
+        raise AuthorityDenied("Profile Conversation bridge target is unavailable")
     target = FunctionPrincipal.from_dict(binding["function_principal"])
     if (
         key not in static_edge_keys
         or str(binding["pack_id"]) != _BRIDGED_AI_GENERATE_PACK_ID
-        or len(expected_edges) != 1
         or len(active_edges) != 1
-        or str(expected_edges[0]["caller_function_id"])
-        != _BASELINE_CONVERSATION_FUNCTION_ID
-        or str(expected_edges[0]["target_provider_id"])
-        != _BRIDGED_AI_GENERATE_FUNCTION_ID
         or str(active_edges[0]["caller_function_id"])
         != _BASELINE_CONVERSATION_FUNCTION_ID
         or str(active_edges[0]["target_provider_id"])
@@ -815,7 +790,7 @@ def _validated_conversation_bridge_binding(
         or resolved_binding.variant.execution_kind is ExecutionKind.PACK_VM
         or resolved_binding.variant.backend == _PYTHON_PACK_BACKEND_ID
     ):
-        raise AuthorityDenied("Defaults Conversation bridge identity changed")
+        raise AuthorityDenied("Profile Conversation bridge identity changed")
     return resolved_binding
 
 
@@ -850,19 +825,20 @@ def capture_production_dispatch(
     if authority_path.name != "v4.sqlite3" or authority_path.parent.name != "authority":
         raise AuthorityDenied("Authority store path is not canonical")
     authority_user_data = authority_path.parent.parent
-    authority_workspace = authority_user_data / "workspaces" / "defaults"
+    profile_id = str(active.resolved.profile["profile_id"])
+    authority_workspace = authority_user_data / "workspaces" / profile_id
     try:
         activation_store = ActivationStore(
             authority_workspace / "activation",
             authority_workspace,
-            profile_id="defaults",
+            profile_id=profile_id,
             authority=authority_store,
             catalog=BundledCatalog.load(bundle_root),
         )
         persisted_active = activation_store.load_active_snapshot()
     except Exception as exc:
         raise AuthorityDenied(
-            "Authority store is not bound to the captured Defaults activation"
+            "Authority store is not bound to the captured Profile activation"
         ) from exc
     if (
         dict(persisted_active.activation) != dict(active.activation)
@@ -870,7 +846,7 @@ def capture_production_dispatch(
         or dict(persisted_active.resolved.lock) != dict(active.resolved.lock)
         or dict(persisted_active.resolved.plan) != dict(active.resolved.plan)
     ):
-        raise AuthorityDenied("Authority store is not bound to the captured Defaults activation")
+        raise AuthorityDenied("Authority store is not bound to the captured Profile activation")
     active = persisted_active
     activation_suffix = str(active.activation["fencing_token"])
 
@@ -984,9 +960,9 @@ def capture_production_dispatch(
     }
     if control_bindings:
         def load_active_profile() -> ActiveDefaultProfile:
-            from .profile_capture import capture_default_profile
+            from .profile_capture import capture_active_profile
 
-            return capture_default_profile()
+            return capture_active_profile()
 
         control_session = capture_pack_control_session(
             active=active,
@@ -1050,7 +1026,7 @@ def capture_production_dispatch(
         }
     static_edge_keys = {
         (str(edge["contract_id"]), str(edge["operation_id"]))
-        for edge in catalog.profiles["defaults"]["requested_edges"]
+        for edge in profile["requested_edges"]
     }
     dynamic_bindings = {
         key: binding
@@ -1059,7 +1035,7 @@ def capture_production_dispatch(
     }
     mandatory_pack_ids = {
         str(item["pack_id"])
-        for item in catalog.profiles["defaults"].get("packs", ())
+        for item in profile.get("packs", ())
         if item.get("role") != "application"
     }
     optional_pack_ids = {
@@ -1207,34 +1183,40 @@ def capture_production_dispatch(
     baseline_resolved_binding = resolved_binding_by_key.get(
         _BASELINE_CONVERSATION_KEY
     )
-    if baseline_binding is None or baseline_resolved_binding is None:
-        raise AuthorityDenied("Defaults baseline Conversation binding is unavailable")
-    _validated_conversation_bridge_binding(
-        catalog=catalog,
-        profile=profile,
-        binding_by_key=binding_by_key,
-        resolved_binding_by_key=resolved_binding_by_key,
-        static_edge_keys=static_edge_keys,
-    )
-    baseline_target = _binding_principal(baseline_resolved_binding)
-    if caller_by_operation.get(_BRIDGED_AI_GENERATE_KEY) != baseline_target:
-        raise AuthorityDenied("Defaults Conversation bridge caller identity changed")
-    baseline_backend = _bind_baseline_conversation_authority(
-        active=active,
-        catalog=catalog,
-        profile=profile,
-        binding=baseline_binding,
-        resolved_binding=baseline_resolved_binding,
-        caller=caller_by_operation[_BASELINE_CONVERSATION_KEY],
-        scope=scope_by_operation[_BASELINE_CONVERSATION_KEY],
-        mandatory_pack_ids=mandatory_pack_ids,
-        static_edge_keys=static_edge_keys,
-        activation_suffix=activation_suffix,
-        authority_store=authority_store,
-        authority_control=authority_control,
-        registered_backends=registered_backends,
-        target_backend_digests=target_backend_digests,
-    )
+    baseline_backend = None
+    if baseline_binding is not None or baseline_resolved_binding is not None:
+        if baseline_binding is None or baseline_resolved_binding is None:
+            raise AuthorityDenied(
+                "Profile Conversation contribution is incomplete"
+            )
+        _validated_conversation_bridge_binding(
+            catalog=catalog,
+            profile=profile,
+            binding_by_key=binding_by_key,
+            resolved_binding_by_key=resolved_binding_by_key,
+            static_edge_keys=static_edge_keys,
+        )
+        baseline_target = _binding_principal(baseline_resolved_binding)
+        if caller_by_operation.get(_BRIDGED_AI_GENERATE_KEY) != baseline_target:
+            raise AuthorityDenied(
+                "Profile Conversation bridge caller identity changed"
+            )
+        baseline_backend = _bind_baseline_conversation_authority(
+            active=active,
+            catalog=catalog,
+            profile=profile,
+            binding=baseline_binding,
+            resolved_binding=baseline_resolved_binding,
+            caller=caller_by_operation[_BASELINE_CONVERSATION_KEY],
+            scope=scope_by_operation[_BASELINE_CONVERSATION_KEY],
+            mandatory_pack_ids=mandatory_pack_ids,
+            static_edge_keys=static_edge_keys,
+            activation_suffix=activation_suffix,
+            authority_store=authority_store,
+            authority_control=authority_control,
+            registered_backends=registered_backends,
+            target_backend_digests=target_backend_digests,
+        )
 
     def authority_target_domain(binding: ResolvedOperationBinding) -> str:
         target_suffix = binding.principal_ref.value.removeprefix("sha256:")[:24]
@@ -1768,12 +1750,12 @@ def capture_production_dispatch(
 
     def assert_current_capture() -> None:
         from ..pack_control_v4 import PackControlDenied
-        from .profile_capture import capture_default_profile
+        from .profile_capture import capture_active_profile
 
         # Reuse only the explicit operation-local capture opened by the HTTP
         # boundary or runtime-surface operation. Outside that scope this is
         # still a fresh canonical capture on every assertion.
-        current = capture_default_profile()
+        current = capture_active_profile()
         if (
             dict(current.activation) != captured_activation
             or dict(current.resolved.profile) != captured_profile
@@ -1782,7 +1764,7 @@ def capture_production_dispatch(
             or authority_store.security_epoch != int(captured_activation["security_epoch"])
         ):
             raise AuthorityDenied(
-                "captured Defaults activation is stale",
+                "captured Profile activation is stale",
                 code="stale_revision",
             )
         if _pack_root_identities(pack_roots) != captured_pack_root_identities:

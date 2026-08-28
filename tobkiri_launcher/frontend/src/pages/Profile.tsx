@@ -1,5 +1,6 @@
 import {FormEvent, useEffect, useState} from 'react';
 import {Check, UserRound} from 'lucide-react';
+import {useSearchParams} from 'react-router';
 
 import {AdvancedSurfaceFrame} from '@/src/components/advanced/AdvancedSurfaceFrame';
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
@@ -15,6 +16,7 @@ import type {RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
 import {AVATAR_OPTIONS, useAppStore} from '@/src/store';
 
 export function Profile() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const profile = useAppStore((state) => state.profile);
   const updateLocalProfile = useAppStore((state) => state.updateLocalProfile);
   const addToast = useAppStore((state) => state.addToast);
@@ -132,6 +134,15 @@ export function Profile() {
         packs={packs}
         packsLoading={packsLoading}
         loadPacks={loadPacks}
+        initialSelectedProfileId={searchParams.get('profile_id') ?? searchParams.get('profile')}
+        onSelectedProfileId={(profileId) => {
+          setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.set('profile_id', profileId);
+            next.delete('profile');
+            return next;
+          }, {replace: true});
+        }}
         onActivated={async () => {
           await Promise.all([
             catalogSurface.refresh(true),

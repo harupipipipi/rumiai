@@ -77,8 +77,8 @@ class SetupHandlersMixin:
         """Return the sole canonical setup candidate and its typed state."""
 
         from ..bootstrap.profile_capture import (
-            active_default_profile_exists,
-            capture_default_profile,
+            active_profile_exists,
+            capture_active_profile,
         )
         from ecosystem.defaultspack.domain.runtime_v4 import (
             ProfileReconfirmationRequired,
@@ -88,9 +88,9 @@ class SetupHandlersMixin:
         preview = self._recommended_default_profile_preview()
         state = "review_required"
         denial_diagnostic: str | None = None
-        if active_default_profile_exists():
+        if active_profile_exists():
             try:
-                capture_default_profile()
+                capture_active_profile()
                 state = "active"
             except ProfileReconfirmationRequired as error:
                 denial_diagnostic = str(error)

@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import {
   fetchDashboard,
+  createNamedProfile,
+  deleteNamedProfile,
+  duplicateNamedProfile,
+  fetchNamedProfiles,
+  updateNamedProfile,
+  type NamedProfileRecord,
+  type NamedProfileRegistry,
 } from '@/src/lib/api';
 import { useAppStore } from '@/src/store';
 import { TobkiriLoader, TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
@@ -15,6 +22,10 @@ import {
   Cloud,
   Package,
   Workflow,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
@@ -48,16 +59,39 @@ export async function copyTextToClipboard(
   }
 }
 
+export function nextDuplicateProfileId(
+  profileId: string,
+  existingProfileIds: Iterable<string>,
+): string {
+  const baseId = `${profileId}-copy`;
+  const usedIds = new Set(existingProfileIds);
+  let candidate = baseId;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
-  const navigate = useNavigate();
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [registry, setRegistry] = useState<NamedProfileRegistry | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileBusy, setProfileBusy] = useState<string | null>(null);
+  const [profileQuery, setProfileQuery] = useState('');
+  const [newProfileId, setNewProfileId] = useState('');
+  const [newProfileName, setNewProfileName] = useState('');
+  const [showAddProfile, setShowAddProfile] = useState(false);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingProfileName, setEditingProfileName] = useState('');
 
   const refreshDashboard = async () => {
     setDashboardLoading(true);
@@ -73,6 +107,15 @@ export function Dashboard() {
     }
   };
 
+  const refreshProfiles = async () => {
+    try {
+      setRegistry(await fetchNamedProfiles());
+      setProfileError(null);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Named Profiles could not be loaded.');
+    }
+  };
+
   useEffect(() => {
     if (runtimeReady) {
       void refreshDashboard();
@@ -80,6 +123,113 @@ export function Dashboard() {
       setDashboardLoading(false);
     }
   }, [runtimeReady]);
+
+  useEffect(() => {
+    void refreshProfiles();
+  }, []);
+
+  const visibleProfiles = useMemo(() => {
+    const query = profileQuery.trim().toLocaleLowerCase();
+    return (registry?.profiles ?? []).filter((entry) => {
+      const name = String(entry.profile.display_name ?? entry.profile_id);
+      return !query
+        || entry.profile_id.toLocaleLowerCase().includes(query)
+        || name.toLocaleLowerCase().includes(query);
+    });
+  }, [profileQuery, registry]);
+
+  const commitProfileMutation = async (
+    key: string,
+    operation: () => Promise<NamedProfileRegistry>,
+    successMessage: string,
+  ) => {
+    setProfileBusy(key);
+    try {
+      setRegistry(await operation());
+      setProfileError(null);
+      addToast(successMessage, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Profile mutation was rejected.';
+      setProfileError(message);
+      addToast(message, 'error');
+    } finally {
+      setProfileBusy(null);
+    }
+  };
+
+  const submitNewProfile = async (event: FormEvent) => {
+    event.preventDefault();
+    const profileId = newProfileId.trim();
+    const displayName = newProfileName.trim();
+    if (!profileId || !displayName || !registry) return;
+    const sourceProfileId = registry.active_profile_id ?? registry.profiles[0]?.profile_id;
+    if (!sourceProfileId) return;
+    await commitProfileMutation(
+      'create',
+      () => createNamedProfile({
+        profile_id: profileId,
+        display_name: displayName,
+        source_profile_id: sourceProfileId,
+        expected_store_generation: registry.generation,
+      }),
+      `Profile ${displayName} created.`,
+    );
+    setNewProfileId('');
+    setNewProfileName('');
+    setShowAddProfile(false);
+  };
+
+  const submitProfileName = async (event: FormEvent, entry: NamedProfileRecord) => {
+    event.preventDefault();
+    if (!registry) return;
+    const displayName = editingProfileName.trim();
+    if (!displayName) return;
+    await commitProfileMutation(
+      `edit:${entry.profile_id}`,
+      () => updateNamedProfile({
+        profile_id: entry.profile_id,
+        display_name: displayName,
+        expected_profile_revision: entry.profile_revision,
+        expected_store_generation: registry.generation,
+      }),
+      `Profile ${displayName} updated.`,
+    );
+    setEditingProfileId(null);
+    setEditingProfileName('');
+  };
+
+  const duplicateProfile = async (entry: NamedProfileRecord) => {
+    if (!registry) return;
+    const candidate = nextDuplicateProfileId(
+      entry.profile_id,
+      registry.profiles.map((profile) => profile.profile_id),
+    );
+    const displayName = `${String(entry.profile.display_name ?? entry.profile_id)} Copy`;
+    await commitProfileMutation(
+      `duplicate:${entry.profile_id}`,
+      () => duplicateNamedProfile({
+        profile_id: entry.profile_id,
+        new_profile_id: candidate,
+        display_name: displayName,
+        expected_profile_revision: entry.profile_revision,
+        expected_store_generation: registry.generation,
+      }),
+      `Profile ${displayName} created.`,
+    );
+  };
+
+  const removeProfile = async (entry: NamedProfileRecord) => {
+    if (!registry || registry.active_profile_id === entry.profile_id) return;
+    await commitProfileMutation(
+      `delete:${entry.profile_id}`,
+      () => deleteNamedProfile({
+        profile_id: entry.profile_id,
+        expected_profile_revision: entry.profile_revision,
+        expected_store_generation: registry.generation,
+      }),
+      `Profile ${String(entry.profile.display_name ?? entry.profile_id)} deleted.`,
+    );
+  };
 
   const copyRuntimeError = async () => {
     const message = runtimeError || 'The control panel opened, but the background runtime startup failed.';
@@ -151,13 +301,16 @@ export function Dashboard() {
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-main">Home</h1>
-            <p className="mt-1 text-sm text-text-muted">Your workspace summary and active packs.</p>
+            <p className="mt-1 text-sm text-text-muted">Browse every Profile without changing the active execution Profile.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={() => navigate(panelRoutes.packs)}>
-              <Package className="h-4 w-4" /> Manage Packs
+            <Button onClick={() => setShowAddProfile((shown) => !shown)}>
+              <Plus className="h-4 w-4" /> Add Profile
             </Button>
-            <Button variant="outline" size="icon" title="Refresh" onClick={() => void refreshDashboard()}>
+            <Button variant="outline" size="icon" title="Refresh" onClick={() => {
+              void refreshDashboard();
+              void refreshProfiles();
+            }}>
               <Route className="h-4 w-4" />
             </Button>
           </div>
@@ -180,7 +333,146 @@ export function Dashboard() {
           </div>
         )}
 
-        <ShellLaunchCard runtimeReady={runtimeReady} />
+        <section className="rounded-xl border border-border bg-bg-card p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-text-main">Profiles</h2>
+              <p className="mt-1 text-xs text-text-muted">
+                Selection only changes what you inspect. Activation always uses the v4 review and approval ceremony.
+              </p>
+            </div>
+            <label className="relative block sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-text-muted" />
+              <input
+                aria-label="Search Profiles"
+                className="h-9 w-full rounded-lg border border-border bg-bg-main pl-9 pr-3 text-sm text-text-main outline-none focus:border-accent"
+                onChange={(event) => setProfileQuery(event.target.value)}
+                placeholder="Search Profiles"
+                value={profileQuery}
+              />
+            </label>
+          </div>
+
+          {showAddProfile && (
+            <form className="mt-4 grid gap-3 rounded-lg border border-border bg-bg-main p-4 sm:grid-cols-[1fr_1fr_auto]" onSubmit={submitNewProfile}>
+              <input
+                aria-label="New Profile ID"
+                className="h-9 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
+                onChange={(event) => setNewProfileId(event.target.value)}
+                placeholder="profile-id"
+                value={newProfileId}
+              />
+              <input
+                aria-label="New Profile name"
+                className="h-9 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
+                onChange={(event) => setNewProfileName(event.target.value)}
+                placeholder="Display name"
+                value={newProfileName}
+              />
+              <Button disabled={!registry || profileBusy === 'create'} size="sm" type="submit">
+                <Plus className="h-3.5 w-3.5" /> Create
+              </Button>
+            </form>
+          )}
+
+          {profileError && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span className="flex-1">{profileError}</span>
+              <Button onClick={() => void refreshProfiles()} size="sm" variant="ghost">Retry</Button>
+            </div>
+          )}
+
+          <div className="mt-4 space-y-3">
+            {!registry && !profileError && (
+              <div className="flex items-center justify-center py-8"><TobkiriLoadingMark /></div>
+            )}
+            {registry && visibleProfiles.length === 0 && (
+              <p className="py-8 text-center text-sm text-text-muted">No Profiles match this search.</p>
+            )}
+            {visibleProfiles.map((entry) => {
+              const active = registry?.active_profile_id === entry.profile_id;
+              const displayName = String(entry.profile.display_name ?? entry.profile_id);
+              const busy = profileBusy?.endsWith(entry.profile_id) ?? false;
+              return (
+                <article className="rounded-lg border border-border bg-bg-main p-4" key={entry.profile_id}>
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="truncate font-medium text-text-main">{displayName}</h3>
+                        {active && <Badge variant="success">Active execution</Badge>}
+                        <Badge variant="outline">{entry.profile_id}</Badge>
+                      </div>
+                      <p className="mt-1 truncate font-mono text-[11px] text-text-muted" title={entry.profile_revision}>
+                        revision {entry.profile_revision}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover"
+                        to={`${panelRoutes.profile}?profile_id=${encodeURIComponent(entry.profile_id)}`}
+                      >
+                        Browse &amp; review
+                      </Link>
+                      <Link
+                        className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border bg-bg-main px-3 text-xs font-medium hover:bg-bg-hover"
+                        to={`${panelRoutes.profile}?profile_id=${encodeURIComponent(entry.profile_id)}#profile-closure`}
+                      >
+                        <Package className="h-3.5 w-3.5" /> Pack closure
+                      </Link>
+                      <Button
+                        aria-label={`Edit ${displayName}`}
+                        disabled={busy}
+                        onClick={() => {
+                          setEditingProfileId(entry.profile_id);
+                          setEditingProfileName(displayName);
+                        }}
+                        size="icon"
+                        variant="ghost"
+                      ><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button
+                        aria-label={`Duplicate ${displayName}`}
+                        disabled={busy}
+                        onClick={() => void duplicateProfile(entry)}
+                        size="icon"
+                        variant="ghost"
+                      ><Copy className="h-3.5 w-3.5" /></Button>
+                      <Button
+                        aria-label={`Delete ${displayName}`}
+                        disabled={active || busy}
+                        onClick={() => void removeProfile(entry)}
+                        size="icon"
+                        title={active ? 'Switch away before deleting this Profile' : 'Delete Profile'}
+                        variant="ghost"
+                      ><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  </div>
+                  {editingProfileId === entry.profile_id && (
+                    <form className="mt-3 flex gap-2 border-t border-border pt-3" onSubmit={(event) => void submitProfileName(event, entry)}>
+                      <input
+                        aria-label={`Display name for ${entry.profile_id}`}
+                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-bg-card px-3 text-sm text-text-main"
+                        onChange={(event) => setEditingProfileName(event.target.value)}
+                        value={editingProfileName}
+                      />
+                      <Button disabled={busy} size="sm" type="submit">Save</Button>
+                      <Button onClick={() => setEditingProfileId(null)} size="sm" type="button" variant="ghost">Cancel</Button>
+                    </form>
+                  )}
+                  {active && (
+                    <div className="mt-4 border-t border-border pt-4">
+                      <ShellLaunchCard
+                        profileDisplayName={displayName}
+                        profileId={entry.profile_id}
+                        runtimeReady={runtimeReady}
+                      />
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Summary tiles */}
         <section className="grid gap-4 sm:grid-cols-3">

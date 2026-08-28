@@ -426,10 +426,10 @@ class CapturedPackControlSession:
     def _capture_current_binding(self) -> tuple[_Binding, ActiveDefaultProfile]:
         """Capture current Profile authority without holding session state."""
 
-        from .bootstrap.profile_capture import capture_default_profile
+        from .bootstrap.profile_capture import capture_active_profile
 
         try:
-            active = capture_default_profile()
+            active = capture_active_profile()
         except Exception as error:
             raise PackControlDigestMismatch(
                 "active v4 Profile session is missing or invalid"
@@ -822,11 +822,9 @@ def _catalog_payload(
 def _required_profile_pack_ids(profile_id: str) -> frozenset[str]:
     """Return the immutable Pack closure declared by the bundled Profile."""
 
-    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+    from .bootstrap.profile_capture import host_profile_catalog
 
-    from .bootstrap.profile_capture import _bundle_root
-
-    catalog = BundledCatalog.load(_bundle_root())
+    catalog = host_profile_catalog()
     source = catalog.profiles.get(profile_id)
     if source is None:
         raise PackControlDigestMismatch("bundled Defaults Profile is unavailable")
@@ -992,9 +990,9 @@ def _active_profile(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         if active is None:
-            from .bootstrap.profile_capture import capture_default_profile
+            from .bootstrap.profile_capture import capture_active_profile
 
-            active = capture_default_profile()
+            active = capture_active_profile()
     except Exception as error:
         raise PackControlDigestMismatch(
             "active v4 Profile session is missing or invalid"
@@ -1026,7 +1024,7 @@ def _active_profile(
 def resolve_profile_pack_set(
     pack_ids: list[str],
     *,
-    profile_id: str = "defaults",
+    profile_id: str | None = None,
     expected_profile_definition_digest: str | None = None,
     expected_profile_catalog_digest: str | None = None,
     expected_bundle_lock_digest: str | None = None,
@@ -1050,11 +1048,20 @@ def resolve_profile_pack_set(
         _authority_snapshot_digest,
         _bundle_root,
         _edge_key,
+        host_profile_catalog,
     )
 
     user_data = _user_data_root()
-    bundle_root = bundle_root or _bundle_root()
-    catalog = BundledCatalog.load(bundle_root)
+    trusted_active_resolution = profile_id is None
+    if profile_id is None:
+        from .bootstrap.profile_capture import capture_active_profile
+
+        profile_id = str(capture_active_profile().resolved.profile["profile_id"])
+    catalog = (
+        BundledCatalog.load(bundle_root)
+        if bundle_root is not None
+        else host_profile_catalog()
+    )
     from .profile_catalog_v4 import require_profile_catalog_binding
 
     authoritative_bindings = (
@@ -1077,8 +1084,10 @@ def resolve_profile_pack_set(
             raise PackControlDigestMismatch(
                 "Profile catalog binding is stale or invalid"
             ) from error
-    elif profile_id != "defaults":
-        raise PackControlUnapproved("non-default Profile requires exact catalog bindings")
+    elif not trusted_active_resolution:
+        raise PackControlUnapproved(
+            "selected Profile requires exact catalog bindings"
+        )
     external_packs = dict(catalog.packs)
     pending = list(dict.fromkeys(pack_ids))
     requested_closure: set[str] = set()
@@ -1144,8 +1153,12 @@ def resolve_profile_pack_set(
 
     authority_path = user_data / "authority" / "v4.sqlite3"
     with AuthorityStore(authority_path) as authority:
+        effective_bundle_root = Path(catalog.root)
         bundle_lock_digest = (
-            "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
+            "sha256:"
+            + hashlib.sha256(
+                (effective_bundle_root / "bundle.lock.json").read_bytes()
+            ).hexdigest()
         )
         snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
         bindings = {
@@ -1180,7 +1193,7 @@ def resolve_profile_pack_set(
         for edge in dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
-        installed = _read_control_state("defaults")
+        installed = _read_control_state(profile_id)
         binding = _capture_binding()
         selected_optional = requested_closure - mandatory
         for pack_id in sorted(selected_optional):
@@ -1223,63 +1236,113 @@ def activate_resolved_profile_pack_set(
     from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
 
     from .authority.v4 import AuthorityStore
-    from .bootstrap.profile_capture import _bundle_root
+    from .bootstrap.profile_capture import host_profile_catalog
+    from .active_profile_store_v4 import ActiveProfileStore
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
     user_data = _user_data_root()
     profile_id = str(resolved.profile["profile_id"])
-    workspace = user_data / "workspaces" / "defaults"
+    workspace = user_data / "workspaces" / profile_id
+    workspace.mkdir(parents=True, exist_ok=True)
+    pointers = ActiveProfileStore(user_data)
+    predecessor = pointers.require(verify_snapshot=True)
+    if (
+        not hmac.compare_digest(
+            predecessor.profile_revision, expected_profile_revision
+        )
+        or not hmac.compare_digest(predecessor.plan_digest, expected_plan_digest)
+        or not hmac.compare_digest(
+            predecessor.activation_id, expected_activation_id
+        )
+    ):
+        raise PackControlStaleRevision("reviewed Profile predecessor is stale")
+    catalog = (
+        BundledCatalog.load(bundle_root)
+        if bundle_root is not None
+        else host_profile_catalog()
+    )
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         store = ActivationStore(
             workspace / "activation",
             workspace,
             profile_id=profile_id,
             authority=authority,
-            catalog=BundledCatalog.load(bundle_root or _bundle_root()),
+            catalog=catalog,
         )
-        active = store.load_active_snapshot()
-        if hmac.compare_digest(
-            str(active.activation["activation_id"]), activation_id
-        ):
-            if active.resolved != resolved:
-                raise PackControlConflict(
-                    "activation identity is bound to another resolved Profile"
+        active_pointer = workspace / "activation" / "active.json"
+        if active_pointer.is_file():
+            active = store.load_active_snapshot()
+            if hmac.compare_digest(
+                str(active.activation["activation_id"]), activation_id
+            ):
+                if active.resolved != resolved:
+                    raise PackControlConflict(
+                        "activation identity is bound to another resolved Profile"
+                    )
+                activation = dict(active.activation)
+            else:
+                created_at = datetime.now(timezone.utc).isoformat().replace(
+                    "+00:00", "Z"
                 )
-            return dict(active.activation)
-        binding = _capture_binding()
-        if not hmac.compare_digest(
-            binding.profile_revision, expected_profile_revision
-        ) or not hmac.compare_digest(binding.plan_digest, expected_plan_digest):
-            raise PackControlStaleRevision("reviewed Profile predecessor is stale")
-        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        activation = store.activate(
-            resolved,
-            activation_id=activation_id,
-            created_at=created_at,
-            expected_predecessor_profile_revision=expected_profile_revision,
-            expected_predecessor_plan_digest=expected_plan_digest,
-            expected_predecessor_activation_id=expected_activation_id,
-        )
+                activation = store.activate(
+                    resolved,
+                    activation_id=activation_id,
+                    created_at=created_at,
+                    expected_predecessor_profile_revision=str(
+                        active.resolved.plan["profile_revision"]
+                    ),
+                    expected_predecessor_plan_digest=str(
+                        active.resolved.plan["plan_digest"]
+                    ),
+                    expected_predecessor_activation_id=str(
+                        active.activation["activation_id"]
+                    ),
+                )
+        else:
+            created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            activation = store.activate(
+                resolved,
+                activation_id=activation_id,
+                created_at=created_at,
+            )
+    envelope_path = (
+        workspace
+        / "activation"
+        / "activations"
+        / f"{activation_id.removeprefix('activation:')}.json"
+    )
+    try:
+        envelope = json.loads(envelope_path.read_bytes())
+    except (OSError, json.JSONDecodeError) as error:
+        raise PackControlConflict("activated Profile envelope is unavailable") from error
+    pointers.commit_activation(
+        activation,
+        activation_snapshot=envelope,
+        activation_snapshot_path=envelope_path.relative_to(user_data).as_posix(),
+        expected=predecessor,
+        catalog_revision=str(resolved.plan["catalog_revision"]),
+    )
     return activation
 
 
 def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
     """Compatibility wrapper for the existing Pack lifecycle transaction."""
 
-    resolved = resolve_profile_pack_set(pack_ids)
     profile = state.get("resolved_profile")
     plan = state.get("resolved_plan")
     if not isinstance(profile, Mapping) or not isinstance(plan, Mapping):
         raise PackControlConflict("active v4 Profile binding is unavailable")
+    profile_id = str(profile.get("profile_id") or "")
+    resolved = resolve_profile_pack_set(pack_ids)
     activate_resolved_profile_pack_set(
         resolved,
         activation_id=(
-            "activation:defaults-"
+            f"activation:{profile_id}-"
             + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
             + "-"
             + secrets.token_hex(8)
         ),
-        expected_profile_revision="sha256:" + _digest(profile),
+        expected_profile_revision=str(plan.get("profile_revision") or ""),
         expected_plan_digest=str(plan.get("plan_digest") or ""),
         expected_activation_id=str(state.get("activation", {}).get("activation_id") or ""),
     )

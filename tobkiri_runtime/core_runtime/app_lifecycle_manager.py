@@ -114,11 +114,11 @@ class AppLifecycleManager:
             {"needs_setup": bool, "reason": str}
         """
         from .bootstrap.profile_capture import (
-            active_default_profile_exists,
-            capture_default_profile,
+            active_profile_exists,
+            capture_active_profile,
         )
 
-        if not active_default_profile_exists(base_dir=self.base_dir):
+        if not active_profile_exists(base_dir=self.base_dir):
             result = {
                 "needs_setup": True,
                 "reason": "explicit_defaults_confirmation_required",
@@ -127,7 +127,7 @@ class AppLifecycleManager:
             result.update(get_runtime_readiness())
             return result
         try:
-            active = capture_default_profile(base_dir=self.base_dir)
+            active = capture_active_profile(base_dir=self.base_dir)
             result = {
                 "needs_setup": False,
                 "reason": "canonical_v4_profile_captured",
@@ -241,9 +241,9 @@ class AppLifecycleManager:
                 "errors": errors,
                 "setup_state": "invalid_request",
             }
-        from .bootstrap.profile_capture import capture_default_profile
+        from .bootstrap.profile_capture import capture_active_profile
         try:
-            active = capture_default_profile(base_dir=self.base_dir)
+            active = capture_active_profile(base_dir=self.base_dir)
         except Exception as error:
             logger.error("canonical v4 setup transaction failed: %s", error)
             return {

@@ -14,6 +14,9 @@ permissions:
 
 env:
   TOBKIRI_RELEASE_REPOSITORY: harupipipipi/tobkiri
+  # Keep the inventory contract identical to the target matrix above. Add a
+  # target here only in the same change that adds its real packaging job.
+  TOBKIRI_REQUIRED_RELEASE_TARGET: aarch64-apple-darwin
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -786,6 +789,8 @@ jobs:
                   os.environ["SOURCE_REVISION"],
                   "--tag",
                   os.environ["GITHUB_REF_NAME"],
+                  "--required-target",
+                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
               ],
               check=True,
           )
@@ -822,6 +827,8 @@ jobs:
                   os.environ["GITHUB_REF_NAME"],
                   "--inventory-sha256",
                   os.environ["INVENTORY_SHA256"],
+                  "--required-target",
+                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
               ],
               check=True,
           )
@@ -871,6 +878,8 @@ jobs:
                   os.environ["GITHUB_REF_NAME"],
                   "--inventory-sha256",
                   os.environ["INVENTORY_SHA256"],
+                  "--required-target",
+                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
               ],
               check=True,
           )

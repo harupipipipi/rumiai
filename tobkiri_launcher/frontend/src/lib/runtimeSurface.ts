@@ -144,7 +144,8 @@ export interface RuntimeProfileCatalogEntry {
   profile_id: string;
   display_name: string;
   active: boolean;
-  lifecycle_state: 'active' | 'available';
+  lifecycle_state: 'active' | 'successor_pending' | 'available';
+  active_revision_matches_definition: boolean;
   available: boolean;
   diagnostics: Array<{code: string; subject: string}>;
   definition: RuntimeProfileCatalogDefinition;
@@ -977,6 +978,7 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
     'display_name',
     'active',
     'lifecycle_state',
+    'active_revision_matches_definition',
     'available',
     'diagnostics',
     'definition',
@@ -992,7 +994,12 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
     !validString(value.profile_id)
     || !validString(value.display_name)
     || typeof value.active !== 'boolean'
-    || (value.lifecycle_state !== 'active' && value.lifecycle_state !== 'available')
+    || (
+      value.lifecycle_state !== 'active'
+      && value.lifecycle_state !== 'successor_pending'
+      && value.lifecycle_state !== 'available'
+    )
+    || typeof value.active_revision_matches_definition !== 'boolean'
     || typeof value.available !== 'boolean'
     || !Array.isArray(value.diagnostics)
     || !exactObject(value.definition, ['digest', 'ref', 'catalog_revision', 'source_path', 'provenance'])
@@ -1114,7 +1121,11 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
     return null;
   }
   if (value.available !== (diagnostics.length === 0)) return null;
-  if (value.active !== (value.lifecycle_state === 'active')) return null;
+  if (value.active !== (value.lifecycle_state !== 'available')) return null;
+  if (
+    value.active_revision_matches_definition
+    !== (value.lifecycle_state === 'active')
+  ) return null;
   if (value.active && (
     value.records.profile_revision === null
     || value.records.profile_lock_digest === null
@@ -1140,6 +1151,7 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
     display_name: value.display_name,
     active: value.active,
     lifecycle_state: value.lifecycle_state,
+    active_revision_matches_definition: value.active_revision_matches_definition,
     available: value.available,
     diagnostics,
     definition: {

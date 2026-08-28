@@ -56,6 +56,11 @@ const EXACT_NON_MAP_API_ROUTES = [
   {method: 'POST', path: PANEL_AUTH_EXCHANGE_PATH},
   {method: 'GET', path: '/api/setup/packs'},
   {method: 'POST', path: '/api/setup/packs/install'},
+  {method: 'GET', path: '/api/v4/profiles'},
+  {method: 'POST', path: '/api/v4/profiles/create'},
+  {method: 'POST', path: '/api/v4/profiles/update'},
+  {method: 'POST', path: '/api/v4/profiles/duplicate'},
+  {method: 'POST', path: '/api/v4/profiles/delete'},
   {method: 'POST', path: '/api/v4/packvm/prepare'},
   {method: 'POST', path: '/api/v4/packvm/consent'},
   {method: 'POST', path: '/api/v4/packvm/provision'},
@@ -300,7 +305,11 @@ function isPackVMLifecyclePath(path: string): boolean {
 }
 
 function isPanelSessionApiPath(path: string): boolean {
-  return isSetupApiPath(path) || isFrontendContractPath(path) || isPackVMLifecyclePath(path);
+  return isSetupApiPath(path)
+    || path === '/api/v4/profiles'
+    || path.startsWith('/api/v4/profiles/')
+    || isFrontendContractPath(path)
+    || isPackVMLifecyclePath(path);
 }
 
 function isExactAllowedApiRequest(path: string, method: string): boolean {
@@ -784,6 +793,55 @@ export function getApiRequestCacheSnapshot(): GetRequestSnapshot {
 export function fetchDashboard(): Promise<ApiDashboard> {
   return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
 }
+
+export interface NamedProfileRecord {
+  profile_id: string;
+  profile_revision: string;
+  profile: Record<string, unknown>;
+  order: number;
+  parent_revision: string | null;
+  tombstone: boolean;
+  created_at: number;
+  updated_at: number;
+  legacy_ids: string[];
+}
+
+export interface NamedProfileRegistry {
+  profile_registry_api_version: 'io.tobkiri.profile-registry.v4';
+  generation: number;
+  active_profile_id: string | null;
+  active_profile_revision: string | null;
+  profiles: NamedProfileRecord[];
+  changed_profile?: NamedProfileRecord;
+  action?: 'create' | 'update' | 'duplicate' | 'delete';
+}
+
+export function fetchNamedProfiles(): Promise<NamedProfileRegistry> {
+  return apiFetch<NamedProfileRegistry>('/api/v4/profiles', {cache: 'no-store'});
+}
+
+function mutateNamedProfile(
+  action: 'create' | 'update' | 'duplicate' | 'delete',
+  payload: Record<string, unknown>,
+): Promise<NamedProfileRegistry> {
+  return apiFetch<NamedProfileRegistry>(`/api/v4/profiles/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export const createNamedProfile = (payload: Record<string, unknown>) => (
+  mutateNamedProfile('create', payload)
+);
+export const updateNamedProfile = (payload: Record<string, unknown>) => (
+  mutateNamedProfile('update', payload)
+);
+export const duplicateNamedProfile = (payload: Record<string, unknown>) => (
+  mutateNamedProfile('duplicate', payload)
+);
+export const deleteNamedProfile = (payload: Record<string, unknown>) => (
+  mutateNamedProfile('delete', payload)
+);
 
 export async function fetchFrontendCatalog(): Promise<ApiDynamicFrontendCatalog> {
   const data = await apiFetch<{dynamic_host?: ApiDynamicFrontendCatalog | null}>(

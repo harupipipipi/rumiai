@@ -1882,6 +1882,177 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         except self._CLIENT_DISCONNECT_EXCEPTIONS:
             self.close_connection = True
 
+    @staticmethod
+    def _profile_registry_store() -> Any:
+        """Return the Host-owned Named Profile registry for this process."""
+
+        from .bootstrap.profile_capture import (
+            host_profile_catalog,
+            runtime_user_data_root,
+        )
+        from .profile_definition_store_v4 import ProfileDefinitionStore
+
+        host_profile_catalog()
+        return ProfileDefinitionStore(runtime_user_data_root())
+
+    def _profile_registry_payload(self) -> dict[str, object]:
+        """Project all Named Profiles and the separate active execution pointer."""
+
+        from .active_profile_store_v4 import ActiveProfileStore
+        from .bootstrap.profile_capture import runtime_user_data_root
+
+        store = self._profile_registry_store()
+        state = store.snapshot()
+        active = ActiveProfileStore(runtime_user_data_root()).load(
+            verify_snapshot=True
+        )
+        return {
+            "profile_registry_api_version": "io.tobkiri.profile-registry.v4",
+            "generation": int(state["generation"]),
+            "active_profile_id": active.profile_id if active is not None else None,
+            "active_profile_revision": (
+                active.profile_revision if active is not None else None
+            ),
+            "profiles": store.list_profile_payloads(),
+        }
+
+    def _handle_profile_registry_read(self, path: str) -> None:
+        if not self._check_auth("GET", path):
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        try:
+            self._send_mapping_result(self._profile_registry_payload())
+        except Exception:
+            logger.exception("Named Profile registry read failed")
+            self._send_mapping_result(
+                {"error": "Named Profile registry is unavailable", "status_code": 503}
+            )
+
+    def _handle_profile_registry_mutation(
+        self,
+        path: str,
+        action: str,
+        body: Mapping[str, object],
+    ) -> None:
+        if not self._check_auth("POST", path):
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        allowed: dict[str, frozenset[str]] = {
+            "create": frozenset(
+                {
+                    "profile_id",
+                    "display_name",
+                    "source_profile_id",
+                    "expected_store_generation",
+                }
+            ),
+            "update": frozenset(
+                {
+                    "profile_id",
+                    "display_name",
+                    "expected_profile_revision",
+                    "expected_store_generation",
+                }
+            ),
+            "duplicate": frozenset(
+                {
+                    "profile_id",
+                    "new_profile_id",
+                    "display_name",
+                    "expected_profile_revision",
+                    "expected_store_generation",
+                }
+            ),
+            "delete": frozenset(
+                {
+                    "profile_id",
+                    "expected_profile_revision",
+                    "expected_store_generation",
+                }
+            ),
+        }
+        if action not in allowed or set(body) - allowed[action]:
+            self._send_mapping_result(
+                {"error": "Named Profile mutation shape is invalid", "status_code": 400}
+            )
+            return
+        from .active_profile_store_v4 import ActiveProfileStore
+        from .bootstrap.profile_capture import runtime_user_data_root
+        from .profile_definition_store_v4 import (
+            ProfileDefinitionNotFound,
+            ProfileDefinitionStoreConflict,
+        )
+
+        try:
+            store = self._profile_registry_store()
+            generation = body.get("expected_store_generation")
+            expected_generation = generation if isinstance(generation, int) else None
+            profile_id = str(body.get("profile_id") or "")
+            expected_revision = str(body.get("expected_profile_revision") or "") or None
+            display_name = str(body.get("display_name") or "").strip() or None
+            if action == "create":
+                source_id = str(body.get("source_profile_id") or "")
+                if not source_id:
+                    raise ValueError("source_profile_id is required")
+                source = store.get_profile(source_id)
+                if source is None:
+                    raise ProfileDefinitionNotFound(source_id)
+                changed = store.create_profile(
+                    source.profile,
+                    profile_id=profile_id,
+                    display_name=display_name,
+                    expected_store_generation=expected_generation,
+                )
+            elif action == "update":
+                changed = store.update_profile(
+                    profile_id,
+                    patch={"display_name": display_name or profile_id},
+                    expected_profile_revision=expected_revision,
+                    expected_store_generation=expected_generation,
+                )
+            elif action == "duplicate":
+                changed = store.duplicate_profile(
+                    profile_id,
+                    new_profile_id=str(body.get("new_profile_id") or "") or None,
+                    display_name=display_name,
+                    expected_profile_revision=expected_revision,
+                    expected_store_generation=expected_generation,
+                )
+            else:
+                active = ActiveProfileStore(runtime_user_data_root()).load(
+                    verify_snapshot=True
+                )
+                if active is not None and active.profile_id == profile_id:
+                    self._send_mapping_result(
+                        {
+                            "error": "The active execution Profile cannot be deleted",
+                            "status_code": 409,
+                        }
+                    )
+                    return
+                changed = store.delete_profile(
+                    profile_id,
+                    expected_profile_revision=expected_revision,
+                    expected_store_generation=expected_generation,
+                )
+            result = self._profile_registry_payload()
+            result["changed_profile"] = changed.to_dict()
+            result["action"] = action
+            self._send_mapping_result(result)
+        except ProfileDefinitionNotFound:
+            self._send_mapping_result(
+                {"error": "Named Profile was not found", "status_code": 404}
+            )
+        except ProfileDefinitionStoreConflict:
+            self._send_mapping_result(
+                {"error": "Named Profile revision is stale", "status_code": 409}
+            )
+        except (OSError, RuntimeError, ValueError):
+            logger.exception("Named Profile registry mutation failed")
+            self._send_mapping_result(
+                {"error": "Named Profile mutation was rejected", "status_code": 400}
+            )
+
     def do_OPTIONS(self) -> None:
         """Answer local panel preflight without widening the origin set."""
 
@@ -1940,6 +2111,9 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         if path == "/api/setup/migration/status":
             self._send_mapping_result(self._setup_get_migration_status())
             return
+        if path == "/api/v4/profiles":
+            self._handle_profile_registry_read(path)
+            return
         mount = self._match_web_mount(path)
         if mount is not None:
             if mount["auth_required"] and not self._check_auth("GET", path):
@@ -1995,6 +2169,17 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 except self._CLIENT_DISCONNECT_EXCEPTIONS:
                     self.close_connection = True
                 self._refresh_setup_runtime_after_response(result)
+            return
+        profile_action = {
+            "/api/v4/profiles/create": "create",
+            "/api/v4/profiles/update": "update",
+            "/api/v4/profiles/duplicate": "duplicate",
+            "/api/v4/profiles/delete": "delete",
+        }.get(path)
+        if profile_action is not None:
+            body = self._parse_object_body()
+            if body is not None:
+                self._handle_profile_registry_mutation(path, profile_action, body)
             return
         if path == "/api/v4/dispatch":
             self._discard_request_body()
@@ -2187,8 +2372,8 @@ class PackAPIServer:
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
-        if session.profile_id != "defaults" or not session.plan_digest.startswith("sha256:"):
-            raise RuntimeError("frontend contracts require the exact Defaults Profile")
+        if not session.profile_id or not session.plan_digest.startswith("sha256:"):
+            raise RuntimeError("frontend contracts require an exact active Profile")
         for binding in routes.values():
             for target in binding.targets:
                 providers = session.provider_metadata(target.contract_id)
@@ -2236,7 +2421,7 @@ class PackAPIServer:
         from .authority.v4 import AuthorityStore
         from .bootstrap.production_v4 import capture_production_dispatch
         from .bootstrap.profile_capture import (
-            capture_default_profile,
+            capture_active_profile,
             runtime_user_data_root,
         )
         from .di_container import get_container
@@ -2248,7 +2433,7 @@ class PackAPIServer:
                 _load_production_capture_inputs()
             )
             if session is None:
-                active = capture_default_profile()
+                active = capture_active_profile()
                 authority = AuthorityStore(
                     runtime_user_data_root() / "authority" / "v4.sqlite3"
                 )

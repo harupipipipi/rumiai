@@ -14,8 +14,6 @@ import {
 import type {ProfileActivateResult, ProfileCeremonyClient} from '@/src/lib/profileCeremony';
 import type {Pack} from '@/src/store';
 
-type CeremonyMode = 'catalog' | 'defaults';
-
 function published(value: string | null | undefined): string {
   return value ?? 'not published';
 }
@@ -107,7 +105,7 @@ function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) 
         </BindingCard>
       </div>
 
-      <section className="rounded-lg border border-border bg-bg-main p-4">
+      <section className="scroll-mt-6 rounded-lg border border-border bg-bg-main p-4" id="profile-closure">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="flex items-center gap-2 text-sm font-semibold text-text-main"><PackageCheck className="h-4 w-4" aria-hidden="true" />Authoritative Pack closure</h4>
           <Badge variant="outline">{entry.pack_closure.length} exact rows</Badge>
@@ -146,6 +144,8 @@ export function ProfileCatalogSelector({
   loadPacks,
   client,
   onActivated,
+  initialSelectedProfileId,
+  onSelectedProfileId,
 }: {
   profileSurface: RuntimeSurfaceState<unknown>;
   catalogSurface: RuntimeSurfaceState<RuntimeProfileCatalogProjection>;
@@ -154,9 +154,10 @@ export function ProfileCatalogSelector({
   loadPacks: () => Promise<void>;
   client?: ProfileCeremonyClient;
   onActivated?: (result: ProfileActivateResult) => Promise<void>;
+  initialSelectedProfileId?: string | null;
+  onSelectedProfileId?: (profileId: string) => void;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [ceremonyMode, setCeremonyMode] = useState<CeremonyMode>('catalog');
   const [ceremonyBusy, setCeremonyBusy] = useState(false);
   const previousPackFingerprint = useRef<string | null>(null);
 
@@ -194,9 +195,12 @@ export function ProfileCatalogSelector({
     setSelectedProfileId((current) => (
       current && catalogProjection.profiles.some((entry) => entry.profile_id === current)
         ? current
-        : catalogProjection.active_profile_id
+        : initialSelectedProfileId
+          && catalogProjection.profiles.some((entry) => entry.profile_id === initialSelectedProfileId)
+          ? initialSelectedProfileId
+          : catalogProjection.active_profile_id
     ));
-  }, [catalogProjection]);
+  }, [catalogProjection, initialSelectedProfileId]);
 
   useEffect(() => {
     if (packsLoading) return;
@@ -210,11 +214,11 @@ export function ProfileCatalogSelector({
   }, [catalogSurface.refresh, packFingerprint, packsLoading]);
 
   const selectedEntry = catalogProjection?.profiles.find((entry) => entry.profile_id === selectedProfileId) ?? null;
-  const catalogCeremonyMode = ceremonyMode === 'catalog' && selectedEntry !== null;
   const handleActivated = useCallback(async (result: ProfileActivateResult) => {
     setSelectedProfileId(result.profile_id);
+    onSelectedProfileId?.(result.profile_id);
     await onActivated?.(result);
-  }, [onActivated]);
+  }, [onActivated, onSelectedProfileId]);
 
   const showLoading = (catalogSurface.status === 'idle' || catalogSurface.status === 'loading') && !catalogSurface.data;
   const catalogInvalid = Boolean(catalogSurface.data && !catalogProjection);
@@ -230,7 +234,7 @@ export function ProfileCatalogSelector({
               {catalogProjection ? `${catalogProjection.count} definitions` : 'locked'}
             </Badge>
           </div>
-          <CardDescription>Profiles are read from the Broker-backed Protocol v4 catalog. The selected definition owns its Pack closure and exact digest bindings; this Launcher cannot invent or edit named Profiles.</CardDescription>
+          <CardDescription>Profiles are owned by Tobkiri's Host registry and projected through the Broker-backed Protocol v4 catalog. Selection here only changes the Profile being inspected; use Home for definition CRUD.</CardDescription>
         </CardHeader>
         <CardContent>
           {showLoading ? (
@@ -283,7 +287,7 @@ export function ProfileCatalogSelector({
                       disabled={!entry.available || catalogSurface.stale || ceremonyBusy}
                       onClick={() => {
                         setSelectedProfileId(entry.profile_id);
-                        setCeremonyMode('catalog');
+                        onSelectedProfileId?.(entry.profile_id);
                       }}
                     >
                       <span className={selected ? 'flex size-5 shrink-0 items-center justify-center rounded-full border border-accent bg-accent text-accent-fg' : 'size-5 shrink-0 rounded-full border border-border'} aria-hidden="true">
@@ -315,47 +319,38 @@ export function ProfileCatalogSelector({
             </CardHeader>
             <CardContent>
               <ProfileDefinitionDetails entry={selectedEntry} />
-              <div className="mt-5 flex flex-wrap items-center gap-2" role="group" aria-label="Choose Profile ceremony mode">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={catalogCeremonyMode ? 'default' : 'outline'}
-                  aria-pressed={catalogCeremonyMode}
-                  disabled={ceremonyBusy}
-                  onClick={() => setCeremonyMode('catalog')}
-                >
-                  Use selected Profile ceremony
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={catalogCeremonyMode ? 'outline' : 'default'}
-                  aria-pressed={!catalogCeremonyMode}
-                  disabled={ceremonyBusy}
-                  onClick={() => setCeremonyMode('defaults')}
-                >
-                  Edit Defaults Pack-set
-                </Button>
-              </div>
+              <p className="mt-5 text-sm text-text-muted">
+                Resolve, review, approve, and activate this selected Profile without changing the browsing selection first.
+              </p>
             </CardContent>
           </Card>
         </>
       ) : null}
-      <ProfileCeremonyPanel
-        surface={profileSurface}
-        packs={packs}
-        packsLoading={packsLoading}
-        loadPacks={loadPacks}
-        client={client}
-        onActivated={handleActivated}
-        onBusyChange={setCeremonyBusy}
-        authoritativeSelection={catalogCeremonyMode && catalogProjection ? {
-          entry: selectedEntry,
-          catalogDigest: catalogProjection.catalog_digest,
-          bundleLockDigest: catalogProjection.bundle_lock_digest,
-        } : undefined}
-        catalogSurface={catalogCeremonyMode ? catalogSurface : undefined}
-      />
+      {selectedEntry && catalogProjection ? (
+        <ProfileCeremonyPanel
+          surface={profileSurface}
+          packs={packs}
+          packsLoading={packsLoading}
+          loadPacks={loadPacks}
+          client={client}
+          onActivated={handleActivated}
+          onBusyChange={setCeremonyBusy}
+          authoritativeSelection={{
+            entry: selectedEntry,
+            catalogDigest: catalogProjection.catalog_digest,
+            bundleLockDigest: catalogProjection.bundle_lock_digest,
+          }}
+          catalogSurface={catalogSurface}
+        />
+      ) : (
+        <Card>
+          <CardContent>
+            <p className="py-4 text-sm text-text-muted">
+              Select a verified Profile definition before starting the resolve, review, approval, and activation ceremony.
+            </p>
+          </CardContent>
+        </Card>
+      )}
     </>
   );
 }

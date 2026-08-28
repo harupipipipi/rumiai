@@ -324,11 +324,6 @@ class RuntimeProfileChangeService:
             )
         profile_id = _required_string(body.get("profile_id"))
         authoritative_selection = set(body) == catalog_expected
-        if not authoritative_selection and profile_id != "defaults":
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.INVALID_REQUEST,
-                "non-default Profile selection requires exact catalog bindings",
-            )
         revision = _required_string(body.get("expected_profile_revision"))
         plan_digest = _required_string(body.get("expected_plan_digest"))
         requested = body.get("desired_pack_ids")
@@ -351,6 +346,7 @@ class RuntimeProfileChangeService:
             expected_profile_revision=revision,
             expected_plan_digest=plan_digest,
         )
+        current_data = cast(Mapping[str, Any], current["data"])
         if authoritative_selection:
             definition_digest = _required_string(body.get("profile_definition_digest"))
             catalog_digest = _required_string(body.get("profile_catalog_digest"))
@@ -365,6 +361,11 @@ class RuntimeProfileChangeService:
             except RuntimeSurfaceError:
                 raise
         else:
+            if profile_id != str(current["profile_id"]):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                    "non-active Profile selection requires exact catalog bindings",
+                )
             catalog = self._surface().read_profile_catalog()
             catalog_data = cast(Mapping[str, Any], catalog["data"])
             entry = next(
@@ -394,16 +395,17 @@ class RuntimeProfileChangeService:
                         expected_bundle_lock_digest=bundle_digest,
                         bundle_root=self._bundle_root,
                     )
-            elif self._bundle_root is None:
-                resolved = resolve_profile_pack_set(pack_ids)
             else:
                 resolved = resolve_profile_pack_set(
                     pack_ids,
-                    bundle_root=self._bundle_root,
+                    **(
+                        {}
+                        if self._bundle_root is None
+                        else {"bundle_root": self._bundle_root}
+                    ),
                 )
         except Exception as error:
             raise _map_change_error(error) from error
-        current_data = cast(Mapping[str, Any], current["data"])
         review = {
             "candidate_generation": "profile-change-generation:" + secrets.token_hex(16),
             "profile": dict(resolved.profile),
@@ -790,15 +792,15 @@ class RuntimeSurfaceService:
 
     @staticmethod
     def _load_active() -> ActiveDefaultProfile:
-        from .bootstrap.profile_capture import capture_default_profile
+        from .bootstrap.profile_capture import capture_active_profile
 
-        return capture_default_profile()
+        return capture_active_profile()
 
     @staticmethod
     def _load_catalog() -> BundledCatalog:
-        from .bootstrap.profile_capture import _bundle_root
+        from .bootstrap.profile_capture import host_profile_catalog
 
-        return BundledCatalog.load(_bundle_root())
+        return host_profile_catalog()
 
     def read_profile(
         self,

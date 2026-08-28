@@ -32,8 +32,9 @@ from tobkiri_host.runtime import V4DispatchSession, install_dispatch_session
 from .production_v4 import capture_production_dispatch
 from .profile_capture import (
     _bundle_root,
-    active_default_profile_exists,
-    capture_default_profile,
+    active_profile_exists,
+    capture_active_profile,
+    host_profile_catalog,
     runtime_user_data_root,
 )
 from ecosystem.defaultspack.domain.runtime_v4 import (
@@ -128,14 +129,14 @@ class Kernel:
             dispatch_session = None
             contract_bindings: tuple[FrontendContractBinding, ...] = ()
             reconfirmation_error: str | None = None
-            if active_default_profile_exists():
+            if active_profile_exists():
                 try:
-                    active = capture_default_profile()
+                    active = capture_active_profile()
                     authority_store = AuthorityStore(
                         user_data / "authority" / "v4.sqlite3"
                     )
                     bundle_root = _bundle_root()
-                    catalog = BundledCatalog.load(bundle_root)
+                    catalog = host_profile_catalog()
                     contract_bindings = load_frontend_contract_bindings(
                         runtime_root
                         / "ecosystem"

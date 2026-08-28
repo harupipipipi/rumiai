@@ -68,6 +68,7 @@ function profileCatalogEntry(profileId: string, active: boolean): RuntimeProfile
     display_name: profileId === 'defaults' ? 'Defaults Profile' : 'Alternate Profile',
     active,
     lifecycle_state: active ? 'active' : 'available',
+    active_revision_matches_definition: active,
     available: true,
     diagnostics: [],
     definition: {
@@ -376,7 +377,7 @@ test('stale catalogs lock selection and ceremony actions while retaining visible
   }
 });
 
-test('selector keeps one ceremony owner and preserves the separate Defaults editor across catalog states', async () => {
+test('selector gives every named Profile the same ceremony and never falls back to Defaults', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const {dom, container, root} = createDom();
@@ -394,16 +395,12 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
     });
     await act(async () => undefined);
     assert.equal(ceremonyOwnerCount(container), 1);
-
-    const defaultsMode = buttonContaining(container, 'Edit Defaults Pack-set');
-    await act(async () => { defaultsMode.click(); });
-    assert.equal(defaultsMode.getAttribute('aria-pressed'), 'true');
-    assert.equal(ceremonyOwnerCount(container), 1);
-    assert.ok(container.querySelector('button[aria-label^="Toggle Defaults Pack"]'));
-
-    await act(async () => { buttonContaining(container, 'Use selected Profile ceremony').click(); });
+    await act(async () => {
+      buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click();
+    });
     assert.equal(ceremonyOwnerCount(container), 1);
     assert.equal(container.querySelectorAll('button[aria-label^="Toggle Defaults Pack"]').length, 0);
+    assert.doesNotMatch(container.textContent ?? '', /Defaults Pack-set editor/);
 
     await act(async () => {
       root.render(
@@ -416,9 +413,9 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
         />,
       );
     });
-    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.equal(ceremonyOwnerCount(container), 0);
     assert.match(container.textContent ?? '', /Loading authoritative Profile definitions/);
-    assert.match(container.textContent ?? '', /Defaults Pack-set editor/);
+    assert.match(container.textContent ?? '', /Select a verified Profile definition/);
 
     await act(async () => {
       root.render(
@@ -435,7 +432,7 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
         />,
       );
     });
-    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.equal(ceremonyOwnerCount(container), 0);
     assert.match(container.textContent ?? '', /HTTP API session mismatch/);
     assert.ok(container.querySelector('[role="alert"]'));
   } finally {

@@ -261,7 +261,7 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
     from core_runtime.bootstrap.profile_capture import (
         _bundle_root,
         active_default_profile_exists,
-        capture_default_profile,
+        capture_active_profile,
         runtime_user_data_root,
     )
     from core_runtime.di_container import get_container
@@ -275,7 +275,7 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
         raise RuntimeError("Defaults v4 activation is not committed")
     bundle_root = _bundle_root()
     ecosystem_root = _pack_root().parent
-    active = capture_default_profile()
+    active = capture_active_profile()
     catalog = BundledCatalog.load(bundle_root)
     application = catalog.packs.get("runtime.tauri.application.default")
     if application is None:
