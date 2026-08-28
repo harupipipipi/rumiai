@@ -451,6 +451,14 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
                 raise PackV4MigrationError(
                     f"bundled Function executable is missing: {pack_id}/{function['id']}"
                 )
+            implementation_path = str(variant.get("implementation_path") or "")
+            if not implementation_path:
+                raise PackV4MigrationError(
+                    f"bundled Function executable path is missing: {pack_id}/{function['id']}"
+                )
+            implementation_digest = _file_digest(
+                ECOSYSTEM / pack_id / implementation_path
+            )
             operation_catalog = {
                 str(item["operation_id"]): item
                 for item in variant.get("operations", [])
@@ -468,7 +476,7 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
                     {
                         "id": str(operation_id),
                         "entrypoint_id": str(operation_id),
-                        "implementation_digest": function["implementation_digest"],
+                        "implementation_digest": implementation_digest,
                     }
                 )
             if not operations:
@@ -541,7 +549,14 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
             # regeneration would chase an impossible cryptographic
             # fixed-point.
             "runtime_artifacts": [
-                item
+                (
+                    {
+                        **item,
+                        "digest": implementation_digest,
+                    }
+                    if item.get("path") == implementation_path
+                    else item
+                )
                 for item in source["artifacts"]
                 if item.get("path") != "executables.v4.json"
             ],
