@@ -54,11 +54,11 @@ export function AiInput() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void refreshAiInput()}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Operation catalog provenance" /> : null}
-      {surface.status === 'ready' && invokableOperations.length > 0 && selectedOperation ? (
+      {surface.data && invokableOperations.length > 0 && selectedOperation ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.2fr)]">
           <Card>
             <CardHeader>

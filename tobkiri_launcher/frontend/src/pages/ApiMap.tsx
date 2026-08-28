@@ -41,11 +41,11 @@ export function ApiMap() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void surface.refresh(true)}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Contract map provenance" /> : null}
-      {surface.status === 'ready' && routes && routes.length > 0 ? (
+      {surface.data && routes && routes.length > 0 ? (
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">

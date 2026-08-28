@@ -303,6 +303,34 @@ test('authoritative Profile selection binds exact identity and completes resolve
     });
     await act(async () => undefined);
 
+    let launches = 0;
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(currentCatalog, {refresh: async () => { catalogRefreshes += 1; }})}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => { packRefreshes += 1; }}
+          client={ceremonyClient(calls)}
+          onActivated={async () => { catalogRefreshes += 1; }}
+          onLaunch={async (entry) => {
+            launches += 1;
+            assert.equal(entry.profile_id, 'defaults');
+          }}
+        />,
+      );
+    });
+    await act(async () => undefined);
+
+    assert.equal(buttonByLabel(container, 'Edit Profile Alternate Profile').disabled, false);
+    assert.equal(buttonByLabel(container, 'Duplicate Profile Alternate Profile').disabled, true);
+    assert.equal(buttonByLabel(container, 'Delete Profile Alternate Profile').disabled, true);
+    assert.equal(buttonByLabel(container, 'Activate Profile Alternate Profile').disabled, false);
+    assert.equal(buttonByLabel(container, 'Launch Profile Alternate Profile').disabled, true);
+    await act(async () => { buttonByLabel(container, 'Launch Profile Defaults Profile').click(); });
+    assert.equal(launches, 1);
+
     const alternate = buttonByLabel(container, 'Select Profile Alternate Profile (alternate)');
     assert.equal(alternate.disabled, false);
     assert.equal(alternate.getAttribute('aria-pressed'), 'false');

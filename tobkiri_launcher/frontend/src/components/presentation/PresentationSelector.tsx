@@ -155,9 +155,11 @@ export function PresentationSelector({
     : !compatibility.compatible
       ? compatibility.reasons[0] ?? 'The selected Base Pack and Shell Provider are not compatible.'
       : !approvalAllowsSelection(selectedBase?.approval.state)
-        ? 'The selected Base Pack is not approved.'
+          ? 'The selected Base Pack is not approved.'
         : !approvalAllowsSelection(selectedShell?.approval.state)
           ? 'The selected Shell Provider is not approved.'
+          : state.materialization.status === 'blocked'
+            ? state.materialization.reason ?? 'The selected presentation is blocked and cannot be saved.'
           : selectedShell?.artifact?.status !== 'verified'
             ? 'The selected Shell production artifact is not verified.'
             : null;

@@ -6,6 +6,7 @@ import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {Input} from '@/src/components/ui/Input';
 import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
+import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import {
   extractExactProfileCatalog,
@@ -166,6 +167,7 @@ export function ProfileCatalogSelector({
   loadPacks,
   client,
   onActivated,
+  onLaunch,
 }: {
   profileSurface: RuntimeSurfaceState<unknown>;
   catalogSurface: RuntimeSurfaceState<RuntimeProfileCatalogProjection>;
@@ -174,12 +176,15 @@ export function ProfileCatalogSelector({
   loadPacks: () => Promise<void>;
   client?: ProfileCeremonyClient;
   onActivated?: (result: ProfileActivateResult) => Promise<void>;
+  onLaunch?: (entry: RuntimeProfileCatalogEntry) => void | Promise<void>;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [ceremonyMode, setCeremonyMode] = useState<CeremonyMode>('catalog');
   const [ceremonyBusy, setCeremonyBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [showAddProfileHelp, setShowAddProfileHelp] = useState(false);
+  const [launchingProfileId, setLaunchingProfileId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const previousPackFingerprint = useRef<string | null>(null);
 
   const catalogProjection = useMemo(
@@ -242,42 +247,78 @@ export function ProfileCatalogSelector({
     await onActivated?.(result);
   }, [onActivated]);
 
-  const showLoading = (catalogSurface.status === 'idle' || catalogSurface.status === 'loading') && !catalogSurface.data;
+  const hasCatalogProjection = catalogProjection !== null;
+  const showLoading = !hasCatalogProjection
+    && (catalogSurface.status === 'idle' || catalogSurface.status === 'loading')
+    && !catalogSurface.error;
   const catalogInvalid = Boolean(catalogSurface.data && !catalogProjection);
-  const showFailure = catalogInvalid || Boolean(catalogSurface.error) || catalogSurface.status !== 'ready' && !showLoading;
+  const showFailure = catalogInvalid
+    || Boolean(catalogSurface.error)
+    || (!hasCatalogProjection && !showLoading && catalogSurface.status !== 'ready');
+  const showEmpty = !hasCatalogProjection
+    && !showLoading
+    && !showFailure
+    && catalogSurface.status === 'ready';
+  const catalogActionsLocked = !hasCatalogProjection
+    || catalogSurface.status !== 'ready'
+    || catalogSurface.stale
+    || Boolean(catalogSurface.error);
+  const showRefreshing = hasCatalogProjection
+    && catalogSurface.status === 'loading'
+    && !catalogSurface.error;
+
+  const handleLaunch = useCallback(async (entry: RuntimeProfileCatalogEntry) => {
+    if (!onLaunch || !entry.active || catalogActionsLocked || launchingProfileId) return;
+    setActionError(null);
+    setLaunchingProfileId(entry.profile_id);
+    try {
+      await onLaunch(entry);
+    } catch {
+      setActionError('The selected Profile could not be launched. Verify the active Shell and try again.');
+    } finally {
+      setLaunchingProfileId(null);
+    }
+  }, [catalogActionsLocked, launchingProfileId, onLaunch]);
 
   return (
     <>
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Profiles</CardTitle>
+            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Profiles <span className="text-sm font-normal text-text-muted">· Advanced Profile catalog</span></CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={catalogProjection && !catalogSurface.stale ? 'success' : 'warning'}>
                 {catalogProjection ? `${catalogProjection.count} profiles` : 'locked'}
               </Badge>
-              <Button type="button" size="sm" variant="outline" onClick={() => setShowAddProfileHelp((current) => !current)}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={showLoading || showFailure}
+                title={showLoading || showFailure ? 'The Profile catalog must be available before adding a verified Profile.' : 'Show how verified Profile bundles are added to the catalog.'}
+                onClick={() => setShowAddProfileHelp((current) => !current)}
+              >
                 {showAddProfileHelp ? <X className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
                 {showAddProfileHelp ? 'Close' : 'Add Profile'}
               </Button>
             </div>
           </div>
-          <CardDescription>Select, inspect, and activate a verified Profile. Each Profile owns its exact Base, Shell, and Pack set.</CardDescription>
+          <CardDescription>Broker-backed Protocol v4 catalog: select, inspect, and activate a verified Profile. Each Profile owns its exact Base, Shell, and Pack set.</CardDescription>
         </CardHeader>
-        <CardContent>
-          {showAddProfileHelp ? (
+        <CardContent aria-busy={showLoading || showRefreshing}>
+          {showAddProfileHelp && !showLoading && !showFailure ? (
             <div className="mb-4 rounded-lg border border-accent/30 bg-accent/5 px-4 py-4" role="note">
               <p className="text-sm font-semibold text-text-main">Add a verified Profile</p>
               <p className="mt-1 text-sm leading-6 text-text-muted">New Profiles come from a signed Profile bundle published to the runtime catalog. This runtime does not currently expose a Profile-authoring operation, so Launcher will not create an unverified local substitute. Install or publish the bundle, then refresh this list.</p>
-              <Button type="button" className="mt-3" size="sm" variant="outline" onClick={() => void catalogSurface.refresh(true)} disabled={catalogSurface.status === 'loading'}>
-                <RefreshCw className={catalogSurface.status === 'loading' ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} aria-hidden="true" />
+              <Button type="button" className="mt-3" size="sm" variant="outline" onClick={() => void catalogSurface.refresh(true)} loading={catalogSurface.status === 'loading'}>
+               <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Refresh Profiles
               </Button>
             </div>
           ) : null}
           {showLoading ? (
             <div className="flex min-h-28 items-center gap-3 rounded-lg border border-border bg-bg-main px-4 py-4 text-sm text-text-muted" role="status" aria-live="polite">
-              <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <TobkiriLoadingMark />
               Loading authoritative Profile definitions…
             </div>
           ) : null}
@@ -292,14 +333,14 @@ export function ProfileCatalogSelector({
                   {catalogSurface.stale ? <p className="mt-1 text-xs text-text-muted">The last accepted definitions remain read-only until the catalog refreshes.</p> : null}
                 </div>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => void catalogSurface.refresh(true)} disabled={catalogSurface.status === 'loading'}>
+              <Button type="button" variant="outline" size="sm" onClick={() => void catalogSurface.refresh(true)} loading={catalogSurface.status === 'loading'}>
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Refresh catalog
               </Button>
             </div>
           ) : null}
 
-          {!showLoading && !showFailure && catalogProjection && catalogProjection.profiles.length === 0 ? (
+          {showEmpty || (!showLoading && !showFailure && catalogProjection && catalogProjection.profiles.length === 0) ? (
             <div className="flex min-h-28 flex-col items-center justify-center rounded-lg border border-dashed border-border px-5 py-8 text-center" role="status">
               <p className="text-sm font-semibold text-text-main">No Profile definitions are currently published</p>
               <p className="mt-2 max-w-xl text-sm text-text-muted">The authoritative catalog is empty. No client-side Profile candidates or Pack closures are created.</p>
@@ -308,6 +349,12 @@ export function ProfileCatalogSelector({
 
           {!showLoading && catalogProjection && catalogProjection.profiles.length > 0 ? (
             <>
+              {showRefreshing ? (
+                <p className="mb-3 flex items-center gap-2 text-xs text-text-muted" role="status" aria-live="polite">
+                  <TobkiriLoadingMark />
+                  Refreshing the authoritative Profile catalog…
+                </p>
+              ) : null}
               {catalogSurface.stale ? (
                 <p className="mb-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">The catalog is stale. Definitions and markers remain visible for diagnosis, but selection and ceremony actions are locked.</p>
               ) : null}
@@ -331,7 +378,7 @@ export function ProfileCatalogSelector({
                       className="flex min-h-11 items-center gap-3 rounded-lg border border-border bg-bg-main px-3 py-3 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] disabled:pointer-events-none disabled:opacity-60"
                       aria-label={`Select Profile ${entry.display_name} (${entry.profile_id})${unavailableLabel}`}
                       aria-pressed={selected}
-                      disabled={!entry.available || catalogSurface.stale || ceremonyBusy}
+                      disabled={!entry.available || catalogActionsLocked || ceremonyBusy}
                       onClick={() => {
                         setSelectedProfileId(entry.profile_id);
                         setCeremonyMode('catalog');
@@ -352,6 +399,96 @@ export function ProfileCatalogSelector({
                   );
                 })}
               </div>
+              {actionError ? (
+                <p className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-text-main" role="alert">{actionError}</p>
+              ) : null}
+              {filteredProfiles.length > 0 ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2" role="group" aria-label="Profile actions">
+                  {filteredProfiles.map((entry) => {
+                    const actionDisabled = catalogActionsLocked || !entry.available || ceremonyBusy;
+                    const activateDisabled = actionDisabled || entry.active;
+                    const launchDisabled = actionDisabled || !entry.active || !onLaunch;
+                    const launchBusy = launchingProfileId === entry.profile_id;
+                    const unavailableReason = !entry.available
+                      ? 'This Profile is unavailable in the verified catalog.'
+                      : catalogActionsLocked
+                        ? 'Refresh the authoritative Profile catalog before using Profile actions.'
+                        : null;
+                    return (
+                      <div key={`actions:${entry.profile_id}`} className="rounded-lg border border-border bg-bg-main px-3 py-3">
+                        <p className="truncate text-xs font-medium text-text-muted">Actions for {entry.display_name}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="min-h-11"
+                            aria-label={`Edit Profile ${entry.display_name}`}
+                            disabled={actionDisabled}
+                            title="Open this verified Profile for inspection and activation; named catalog fields remain immutable."
+                            onClick={() => {
+                              setSelectedProfileId(entry.profile_id);
+                              setCeremonyMode('catalog');
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="min-h-11"
+                            aria-label={`Duplicate Profile ${entry.display_name}`}
+                            disabled
+                            title="Duplicate is unavailable because the canonical v4 map exposes no Profile-authoring operation."
+                          >
+                            Duplicate
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="min-h-11"
+                            aria-label={`Delete Profile ${entry.display_name}`}
+                            disabled
+                            title="Delete is unavailable because the canonical v4 map exposes no Profile-authoring operation."
+                          >
+                            Delete
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="default"
+                            className="min-h-11"
+                            aria-label={`Activate Profile ${entry.display_name}`}
+                            disabled={activateDisabled}
+                            title={entry.active ? 'This Profile is already active.' : unavailableReason ?? 'Select this Profile and complete the v4 resolve, review, approval, and activation ceremony.'}
+                            onClick={() => {
+                              setSelectedProfileId(entry.profile_id);
+                              setCeremonyMode('catalog');
+                            }}
+                          >
+                            Activate
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="min-h-11"
+                            aria-label={`Launch Profile ${entry.display_name}`}
+                            disabled={launchDisabled || Boolean(launchingProfileId && !launchBusy)}
+                            loading={launchBusy}
+                            title={!onLaunch ? 'Profile launch is available only from the desktop Launcher Shell.' : !entry.active ? 'Activate this Profile through the v4 ceremony before launching.' : unavailableReason ?? 'Launch the active Profile Shell.'}
+                            onClick={() => void handleLaunch(entry)}
+                          >
+                            Launch
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
               {filteredProfiles.length === 0 ? (
                 <div className="mt-3 flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed border-border px-4 text-center">
                   <Search className="mb-2 h-5 w-5 text-text-muted" aria-hidden="true" />

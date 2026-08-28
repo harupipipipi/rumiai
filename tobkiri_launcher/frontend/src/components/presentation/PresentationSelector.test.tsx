@@ -114,6 +114,15 @@ const verifiedState: ApiPresentationState = {
   },
 };
 
+const blockedVerifiedState: ApiPresentationState = {
+  ...verifiedState,
+  materialization: {
+    ...verifiedState.materialization,
+    status: 'blocked',
+    reason: 'Kernel approval is required before materialization.',
+  },
+};
+
 test('PresentationSelector exposes exact selection and blocks unverified launch', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   Object.defineProperties(globalThis, {
@@ -179,6 +188,24 @@ test('PresentationSelector exposes exact selection and blocks unverified launch'
     assert.deepEqual(changed, [state.selection]);
 
     await act(async () => saveButton.click());
+    assert.deepEqual(saved, []);
+
+    await act(async () => {
+      root.render(
+        <PresentationSelector
+          state={blockedVerifiedState}
+          selection={blockedVerifiedState.selection}
+          onSelectionChange={() => undefined}
+          onSave={(selection) => { saved.push(selection); }}
+          onLaunch={() => { launches += 1; }}
+        />,
+      );
+    });
+    const blockedSaveButton = container.querySelector<HTMLButtonElement>('[data-testid="save-presentation"]');
+    assert.ok(blockedSaveButton);
+    assert.equal(blockedSaveButton.disabled, true);
+    assert.match(container.textContent ?? '', /Save blocked: Kernel approval is required/);
+    await act(async () => blockedSaveButton.click());
     assert.deepEqual(saved, []);
 
     await act(async () => {

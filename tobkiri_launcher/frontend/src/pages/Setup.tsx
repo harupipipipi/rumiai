@@ -270,7 +270,7 @@ export function Setup() {
         Loading selected presentation…
       </div> : presentationError ? <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
         <p>{presentationError}</p>
-        <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()}>Retry</Button></div>
+        <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>Retry</Button></div>
       </div> : presentation ? <PresentationSelector
         state={presentation}
         selection={selection}

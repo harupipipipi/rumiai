@@ -1,24 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
   fetchDashboard,
+  isDesktopShellAvailable,
+  launchDefaultspackDesktop,
 } from '@/src/lib/api';
 import { useAppStore } from '@/src/store';
 import { TobkiriLoader, TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
 import {
   AlertCircle,
-  CheckCircle2,
   Copy,
   Monitor,
-  Plus,
-  RefreshCw,
   Route,
   ShieldCheck,
   Terminal,
   Cloud,
   Package,
-  Settings2,
-  UserRound,
   Workflow,
 } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
@@ -27,12 +24,9 @@ import { transformDashboard } from '@/src/lib/transforms';
 import type { DashboardData } from '@/src/store';
 import { panelRoutes } from '@/src/lib/routes';
 import { ShellLaunchCard } from '@/src/components/presentation/ShellLaunchCard';
+import { ProfileCatalogSelector } from '@/src/components/advanced/ProfileCatalogSelector';
 import { useRuntimeSurface } from '@/src/hooks/useRuntimeSurface';
-import {
-  extractExactProfileCatalog,
-  type RuntimeProfileCatalogEntry,
-  type RuntimeProfileCatalogProjection,
-} from '@/src/lib/runtimeSurface';
+import type {RuntimeProfileCatalogEntry, RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
 
 const defaultDashboard: DashboardData = {
   kernelStatus: 'stopped',
@@ -64,19 +58,16 @@ export function Dashboard() {
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
+  const packs = useAppStore((state) => state.packs);
+  const packsLoading = useAppStore((state) => state.packsLoading);
+  const loadPacks = useAppStore((state) => state.loadPacks);
   const navigate = useNavigate();
+  const profileSurface = useRuntimeSurface<unknown>('profile');
   const profileCatalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
-  const profileCatalog = profileCatalogSurface.data
-    ? extractExactProfileCatalog(profileCatalogSurface.data.data)
-    : null;
-  const activeProfile = profileCatalog?.profiles.find((profile) => (
-    profile.profile_id === profileCatalog.active_profile_id || profile.active
-  )) ?? null;
-
   const refreshDashboard = async () => {
     setDashboardLoading(true);
     try {
@@ -98,6 +89,35 @@ export function Dashboard() {
       setDashboardLoading(false);
     }
   }, [runtimeReady]);
+
+  useEffect(() => {
+    void loadPacks();
+  }, [loadPacks]);
+
+  useEffect(() => {
+    if (!runtimeReady) return;
+    void Promise.all([
+      profileSurface.refresh(true),
+      profileCatalogSurface.refresh(true),
+      loadPacks(true),
+    ]);
+  }, [loadPacks, profileCatalogSurface.refresh, profileSurface.refresh, runtimeReady]);
+
+  const refreshProfileSurfaces = useCallback(async () => {
+    await Promise.all([
+      profileSurface.refresh(true),
+      profileCatalogSurface.refresh(true),
+      loadPacks(true),
+    ]);
+  }, [loadPacks, profileCatalogSurface.refresh, profileSurface.refresh]);
+
+  const launchProfile = useCallback(async (entry: RuntimeProfileCatalogEntry) => {
+    if (!isDesktopShellAvailable()) {
+      throw new Error('Profile Shell launch requires the desktop Launcher.');
+    }
+    const result = await launchDefaultspackDesktop();
+    addToast(result || `${entry.display_name} opened in the selected Shell.`, 'success');
+  }, [addToast]);
 
   const copyRuntimeError = async () => {
     const message = runtimeError || 'The control panel opened, but the background runtime startup failed.';
@@ -198,12 +218,17 @@ export function Dashboard() {
           </div>
         )}
 
-        <ActiveProfileCard
-          activeProfile={activeProfile}
-          profileCount={profileCatalog?.count ?? 0}
-          loading={profileCatalogSurface.status === 'idle' || profileCatalogSurface.status === 'loading'}
-          error={profileCatalogSurface.error?.message ?? null}
-          onRefresh={() => void profileCatalogSurface.refresh(true)}
+        <ProfileCatalogSelector
+          profileSurface={profileSurface}
+          catalogSurface={profileCatalogSurface}
+          packs={packs}
+          packsLoading={packsLoading}
+          loadPacks={loadPacks}
+          onActivated={async () => {
+            await refreshProfileSurfaces();
+            await refreshDashboard();
+          }}
+          onLaunch={runtimeReady && isDesktopShellAvailable() ? launchProfile : undefined}
         />
 
         <ShellLaunchCard
@@ -260,74 +285,6 @@ export function Dashboard() {
   );
 }
 
-function ActiveProfileCard({
-  activeProfile,
-  profileCount,
-  loading,
-  error,
-  onRefresh,
-}: {
-  activeProfile: RuntimeProfileCatalogEntry | null;
-  profileCount: number;
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-}) {
-  return (
-    <section className="rounded-xl border border-border bg-bg-card p-5" aria-labelledby="active-profile-title">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
-            <UserRound className="size-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 id="active-profile-title" className="text-base font-semibold text-text-main">
-                {activeProfile?.display_name ?? 'Defaults Profile'}
-              </h2>
-              {activeProfile ? <Badge variant="success"><CheckCircle2 className="mr-1 size-3" aria-hidden="true" />Active</Badge> : null}
-              {profileCount > 0 ? <Badge variant="outline">{profileCount} published</Badge> : null}
-            </div>
-            {loading && !activeProfile ? (
-              <p className="mt-2 flex items-center gap-2 text-sm text-text-muted" role="status">
-                <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
-                Loading Profiles…
-              </p>
-            ) : activeProfile ? (
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-text-muted">
-                <span>Base: <strong className="font-medium text-text-main">{activeProfile.bindings.base.pack_id}</strong></span>
-                <span>Shell: <strong className="font-medium text-text-main">{activeProfile.bindings.shell.provider_id}</strong></span>
-                <span>{activeProfile.pack_closure.length} Packs</span>
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-text-muted">{error ?? 'No active Profile is available yet.'}</p>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {!activeProfile && !loading ? (
-            <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
-              <RefreshCw className="size-4" aria-hidden="true" />Retry
-            </Button>
-          ) : null}
-          <Link
-            to={panelRoutes.profile}
-            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border bg-bg-main px-3 text-xs font-medium text-text-main transition hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
-          >
-            <Plus className="size-4" aria-hidden="true" />Add Profile
-          </Link>
-          <Link
-            to={panelRoutes.profile}
-            className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-accent px-3 text-xs font-medium text-accent-fg transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
-          >
-            <Settings2 className="size-4" aria-hidden="true" />Manage Profiles
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function SupervisorSnapshot({
   data,
   loading,
@@ -350,7 +307,7 @@ function SupervisorSnapshot({
 
   if (!data) {
     return (
-      <section className="rounded-xl border border-border bg-bg-card p-5">
+      <section className="rounded-xl border border-border bg-bg-card p-5" aria-busy={loading}>
         <div className="flex items-center gap-3">
           <Monitor className="h-4 w-4 text-text-muted" />
           <div className="min-w-0 flex-1">

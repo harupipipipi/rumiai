@@ -58,3 +58,32 @@ test('stale surface frame keeps accepted evidence visible and exposes a retry co
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
   }
 });
+
+test('initial surface loading uses the branded loader and keeps the projection body exclusive', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createSurface();
+
+  try {
+    await act(async () => {
+      root.render(
+        <AdvancedSurfaceFrame
+          descriptor={LAUNCHER_ADVANCED_VIEWS.graph}
+          state={{status: 'loading', stale: false, error: null, hasData: false}}
+          onRetry={() => undefined}
+        >
+          <p>Projection body must wait for the authoritative snapshot</p>
+        </AdvancedSurfaceFrame>,
+      );
+    });
+
+    assert.ok(container.querySelector('[data-loading-scope="panel"]'));
+    assert.match(container.textContent ?? '', /Loading Graph/);
+    assert.doesNotMatch(container.textContent ?? '', /Projection body must wait/);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});

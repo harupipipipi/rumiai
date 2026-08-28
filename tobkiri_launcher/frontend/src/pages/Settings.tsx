@@ -27,7 +27,7 @@ export function Settings() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void surface.refresh(true)}
     >
       <div className="grid gap-5 lg:grid-cols-2">

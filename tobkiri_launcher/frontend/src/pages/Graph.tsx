@@ -33,11 +33,11 @@ export function Graph() {
   return (
     <AdvancedSurfaceFrame
       descriptor={descriptor}
-      state={{status: surface.status, stale: surface.stale, error: surface.error}}
+      state={{status: surface.status, stale: surface.stale, error: surface.error, hasData: Boolean(surface.data)}}
       onRetry={() => void surface.refresh(true)}
     >
       {surface.data ? <RuntimeEvidenceCard envelope={surface.data} title="Plan graph provenance" /> : null}
-      {surface.status === 'ready' && bindings && bindings.length > 0 ? (
+      {surface.data && bindings && bindings.length > 0 ? (
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
