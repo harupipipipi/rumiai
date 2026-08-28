@@ -110,6 +110,14 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
     return (runtime_root / "user_data").resolve()
 
 
+def _user_data_root(base_dir: Path | None = None) -> Path:
+    """Normalize optional roots without breaking zero-argument adapters."""
+
+    if base_dir is None:
+        return runtime_user_data_root()
+    return runtime_user_data_root(base_dir)
+
+
 def _bundle_root(base_dir: Path | None = None) -> Path:
     """Return the compile-time installed Defaults bundle location.
 
@@ -124,18 +132,23 @@ def _bundle_root(base_dir: Path | None = None) -> Path:
     return bundle_root
 
 
-def host_profile_catalog(base_dir: Path | None = None) -> BundledCatalog:
+def host_profile_catalog(
+    base_dir: Path | None = None,
+    *,
+    bundle_root: Path | None = None,
+) -> BundledCatalog:
     """Return the verified artifact catalog plus Host-owned Profile definitions."""
 
-    bundled = BundledCatalog.load(_bundle_root(base_dir))
-    user_data = (
-        runtime_user_data_root()
-        if base_dir is None
-        else runtime_user_data_root(base_dir)
+    bundled = BundledCatalog.load(
+        _bundle_root(base_dir) if bundle_root is None else bundle_root
     )
+    user_data = _user_data_root(base_dir)
     definitions = ProfileDefinitionStore(user_data)
     legacy_collection = user_data / "settings" / "startup_profiles.json"
-    if not definitions.list_profiles(include_tombstones=True) and legacy_collection.is_file():
+    if (
+        not definitions.list_profiles(include_tombstones=True)
+        and legacy_collection.is_file()
+    ):
         definitions.import_legacy_collection(legacy_collection)
     try:
         definitions.bootstrap_defaults(bundled.profiles["defaults"])
@@ -319,7 +332,7 @@ def _resolve_candidate(
 ) -> tuple[ResolvedDefaultProfile, dict[str, Any]]:
     """Resolve the finite Defaults candidate without writing first-start state."""
 
-    user_data = runtime_user_data_root(base_dir)
+    user_data = _user_data_root(base_dir)
     bundle_root = _bundle_root(base_dir)
     catalog = BundledCatalog.load(bundle_root)
     bundle_lock_digest = "sha256:" + hashlib.sha256(
@@ -380,7 +393,7 @@ def _resolve_profile_candidate(
 ) -> tuple[ResolvedDefaultProfile, dict[str, Any]]:
     """Resolve one registry Profile using the same authority ceremony as Defaults."""
 
-    user_data = runtime_user_data_root(base_dir)
+    user_data = _user_data_root(base_dir)
     catalog = host_profile_catalog(base_dir)
     source_profile = catalog.profiles.get(profile_id)
     if source_profile is None:
@@ -506,7 +519,7 @@ def capture_profile(
         safe_profile_id = validate_canonical_id(profile_id, field="profile_id")
     except Exception as error:
         raise ProfileResolutionDenied("Profile ID is not canonical") from error
-    user_data = runtime_user_data_root(base_dir)
+    user_data = _user_data_root(base_dir)
     workspace = user_data / "workspaces" / safe_profile_id
     state_root = workspace / "activation"
     active_pointer = state_root / "active.json"
@@ -606,11 +619,7 @@ def capture_profile(
 def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
     """Return whether the canonical activation pointer physically exists."""
 
-    user_data = (
-        runtime_user_data_root()
-        if base_dir is None
-        else runtime_user_data_root(base_dir)
-    )
+    user_data = _user_data_root(base_dir)
     pointer = (
         user_data
         / "workspaces"
@@ -624,11 +633,7 @@ def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
 def active_profile_exists(*, base_dir: Path | None = None) -> bool:
     """Return whether the Host-global Profile selection physically exists."""
 
-    user_data = (
-        runtime_user_data_root()
-        if base_dir is None
-        else runtime_user_data_root(base_dir)
-    )
+    user_data = _user_data_root(base_dir)
     return ActiveProfileStore(user_data).path.is_file()
 
 
@@ -637,11 +642,7 @@ def activation_audit_receipt(
 ) -> dict[str, Any]:
     """Return the committed Authority reservation bound to an activation."""
 
-    user_data = (
-        runtime_user_data_root()
-        if base_dir is None
-        else runtime_user_data_root(base_dir)
-    )
+    user_data = _user_data_root(base_dir)
     with AuthorityStore(
         user_data / "authority" / "v4.sqlite3"
     ) as authority:
@@ -668,11 +669,7 @@ def capture_active_profile(
 ) -> ActiveDefaultProfile:
     """Capture the exact Host-selected Profile without a Defaults fallback."""
 
-    user_data = (
-        runtime_user_data_root()
-        if base_dir is None
-        else runtime_user_data_root(base_dir)
-    )
+    user_data = _user_data_root(base_dir)
     pointers = ActiveProfileStore(user_data)
     cache = _PROFILE_CAPTURE_SCOPE.get()
     if cache is not None:
@@ -780,7 +777,7 @@ def capture_default_profile(
     Authority Kernel epoch, resolve the named ``defaults`` Profile, and atomically
     activate it.  Restart only reloads the digest-bound activation envelope.
     """
-    user_data = runtime_user_data_root(base_dir)
+    user_data = _user_data_root(base_dir)
     state_root = user_data / "workspaces" / "defaults" / "activation"
     active_pointer = state_root / "active.json"
     if state_root.is_symlink() or active_pointer.is_symlink():

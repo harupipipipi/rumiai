@@ -157,9 +157,17 @@ class CapturedPackControlSession:
         )
         from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
-        catalog_loader = (
-            (lambda: BundledCatalog.load(bundle_root)) if bundle_root is not None else None
-        )
+        catalog_loader = None
+        if bundle_root is not None:
+
+            def load_catalog() -> BundledCatalog:
+                """Union the supplied artifact bundle with Host registry Profiles."""
+
+                from .bootstrap.profile_capture import host_profile_catalog
+
+                return host_profile_catalog(bundle_root=bundle_root)
+
+            catalog_loader = load_catalog
         self._runtime_surface = RuntimeSurfaceService(
             snapshot_loader=active_profile_loader,
             catalog_loader=catalog_loader,
@@ -425,6 +433,16 @@ class CapturedPackControlSession:
                     raise PackControlUnavailable("operation status is unavailable") from error
             if operation_id == "settings.read":
                 requested_profile_id = arguments.pop("profile_id", None)
+                if selected_profile_id is not None and requested_profile_id is not None:
+                    if str(selected_profile_id) != str(requested_profile_id):
+                        raise PackControlInvalidRequest(
+                            "browsing Profile selectors disagree"
+                        )
+                requested_profile_id = (
+                    selected_profile_id
+                    if selected_profile_id is not None
+                    else requested_profile_id
+                )
                 _require_empty(arguments)
                 return self._runtime_surface.read_settings(
                     profile_id=(
@@ -1191,7 +1209,7 @@ def resolve_profile_pack_set(
 
         profile_id = str(capture_active_profile().resolved.profile["profile_id"])
     catalog = (
-        BundledCatalog.load(bundle_root)
+        host_profile_catalog(bundle_root=bundle_root)
         if bundle_root is not None
         else host_profile_catalog()
     )
@@ -1418,7 +1436,7 @@ def activate_resolved_profile_pack_set(
             raise ProfileResolutionDenied("activation predecessor is stale")
         raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     catalog = (
-        BundledCatalog.load(bundle_root)
+        host_profile_catalog(bundle_root=bundle_root)
         if bundle_root is not None
         else host_profile_catalog()
     )

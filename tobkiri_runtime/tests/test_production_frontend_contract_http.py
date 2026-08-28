@@ -29,6 +29,7 @@ from core_runtime.frontend_contract_routes import (
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.errors import BackendUnavailableError
@@ -539,6 +540,16 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
 ) -> None:
     server, _session, _authority = production_server
     cookie, csrf, origin = _authenticate(server)
+    definitions = ProfileDefinitionStore(profile_capture.runtime_user_data_root())
+    defaults = definitions.get_profile("defaults")
+    assert defaults is not None
+    for profile_id, display_name in (("alpha", "Alpha"), ("beta", "Beta")):
+        definitions.duplicate_profile(
+            "defaults",
+            new_profile_id=profile_id,
+            display_name=display_name,
+            expected_profile_revision=defaults.profile_revision,
+        )
     status, catalog_response, _ = _request(
         server,
         "GET",
@@ -547,7 +558,16 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     )
     assert status == 200, catalog_response
     catalog = catalog_response["data"]["data"]
-    selected = next(item for item in catalog["profiles"] if item["active"])
+    assert {item["profile_id"] for item in catalog["profiles"]} >= {
+        "defaults",
+        "alpha",
+        "beta",
+    }
+    selected = next(
+        item for item in catalog["profiles"] if item["profile_id"] == "alpha"
+    )
+    assert selected["active"] is False
+    assert selected["browsing"] is True
     status, profile_response, _ = _request(
         server,
         "GET",
