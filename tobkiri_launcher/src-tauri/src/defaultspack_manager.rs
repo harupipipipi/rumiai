@@ -1,8 +1,8 @@
-//! Lifecycle supervision for the local Defaultspack process.
+//! Lifecycle supervision for one Launcher-owned application process.
 //!
-//! The launcher owns only processes it starts itself. An already-running,
-//! authenticated Defaultspack listener is deliberately reused by
-//! `dock_registration` and is never adopted or terminated here.
+//! The launcher owns only processes it starts itself. The historical
+//! Defaultspack adapter remains at the composition boundary, while the
+//! lifecycle state is fenced by the complete Profile execution identity.
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -36,20 +36,64 @@ fn execution_identity_matches(
     current: &crate::host_contract::ExecutionProfileIdentity,
     requested: &crate::host_contract::ExecutionProfileIdentity,
 ) -> bool {
+    application_instance_matches(
+        &ApplicationInstanceKey::from_execution_identity(current),
+        &ApplicationInstanceKey::from_execution_identity(requested),
+    )
+}
+
+/// Identity of one materialized Application instance.
+///
+/// The current dock adapter can only expose the execution tuple to this
+/// module, so its optional application fields are populated by generic
+/// callers that have the signed Application descriptor. Keeping the fields in
+/// the key prevents a future adapter from reusing a process for a different
+/// Application or artifact merely because its Profile ID was unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ApplicationInstanceKey {
+    pub(crate) application_id: Option<String>,
+    pub(crate) provider_id: Option<String>,
+    pub(crate) function_id: Option<String>,
+    pub(crate) artifact_digest: Option<String>,
+    pub(crate) execution_identity: crate::host_contract::ExecutionProfileIdentity,
+}
+
+impl ApplicationInstanceKey {
+    pub(crate) fn from_execution_identity(
+        identity: &crate::host_contract::ExecutionProfileIdentity,
+    ) -> Self {
+        Self {
+            application_id: None,
+            provider_id: None,
+            function_id: None,
+            artifact_digest: None,
+            execution_identity: identity.clone(),
+        }
+    }
+
+    pub(crate) fn matches(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+fn application_instance_matches(
+    current: &ApplicationInstanceKey,
+    requested: &ApplicationInstanceKey,
+) -> bool {
     current.matches(requested)
 }
 
-/// Tracks the Defaultspack child started by this Launcher instance.
-pub(crate) struct DefaultspackManager {
+/// Tracks one Application child started by this Launcher instance.
+pub(crate) struct ApplicationProcessManager {
     config: AppConfig,
     shutdown_requested: Arc<AtomicBool>,
     broker_attestation: BrokerAttestationIdentity,
     debug_approval: Arc<DebugApprovalManager>,
-    state: Mutex<DefaultspackState>,
+    state: Mutex<ApplicationProcessState>,
 }
 
 #[derive(Default)]
-struct DefaultspackState {
+struct ApplicationProcessState {
     child: Option<crate::python_env::PythonChild>,
     /// Process groups created by this Launcher. Keep the ids even after the
     /// direct pack-shell child exits because its Python descendant may still
@@ -65,7 +109,13 @@ struct DefaultspackState {
     active_guardian_pid: Option<u32>,
 }
 
-impl DefaultspackManager {
+/// Compatibility alias for the existing Launcher composition root.
+pub(crate) type DefaultspackManager = ApplicationProcessManager;
+
+/// Compatibility alias for focused lifecycle tests and old internal names.
+type DefaultspackState = ApplicationProcessState;
+
+impl ApplicationProcessManager {
     pub(crate) fn new(
         config: AppConfig,
         shutdown_requested: Arc<AtomicBool>,
@@ -77,7 +127,7 @@ impl DefaultspackManager {
             shutdown_requested,
             broker_attestation,
             debug_approval,
-            state: Mutex::new(DefaultspackState::default()),
+            state: Mutex::new(ApplicationProcessState::default()),
         }
     }
 
@@ -480,10 +530,10 @@ impl DefaultspackManager {
         }
     }
 
-    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, DefaultspackState>> {
+    fn lock_state(&self) -> Result<std::sync::MutexGuard<'_, ApplicationProcessState>> {
         self.state
             .lock()
-            .map_err(|error| anyhow!("Defaultspack manager lock poisoned: {error}"))
+            .map_err(|error| anyhow!("Application process manager lock poisoned: {error}"))
     }
 }
 
@@ -501,7 +551,7 @@ fn managed_defaultspack_run_id() -> String {
         })
 }
 
-impl DefaultspackState {
+impl ApplicationProcessState {
     fn record_unexpected_exit(&mut self, _status: ExitStatus) -> Duration {
         if self
             .started_at
@@ -868,6 +918,42 @@ mod tests {
         );
         assert!(!execution_identity_matches(&current, &requested));
         assert!(execution_identity_matches(&current, &current));
+    }
+
+    #[test]
+    fn application_instance_key_fences_application_and_artifact_identity() {
+        let identity = test_execution_identity(
+            "profile-a",
+            &"a".repeat(64),
+            "profile-a-test",
+            &"b".repeat(64),
+        );
+        let current = ApplicationInstanceKey {
+            application_id: Some("application.alpha".into()),
+            provider_id: Some("provider.alpha".into()),
+            function_id: Some("function.alpha".into()),
+            artifact_digest: Some(format!("sha256:{}", "c".repeat(64))),
+            execution_identity: identity.clone(),
+        };
+        let mut different_application = current.clone();
+        different_application.application_id = Some("application.beta".into());
+        let mut different_artifact = current.clone();
+        different_artifact.artifact_digest = Some(format!("sha256:{}", "d".repeat(64)));
+        let mut unknown_activation = current.clone();
+        unknown_activation.execution_identity = test_execution_identity(
+            "profile-a",
+            &"a".repeat(64),
+            "profile-a-next",
+            &"b".repeat(64),
+        );
+
+        assert!(application_instance_matches(&current, &current));
+        assert!(!application_instance_matches(
+            &current,
+            &different_application
+        ));
+        assert!(!application_instance_matches(&current, &different_artifact));
+        assert!(!application_instance_matches(&current, &unknown_activation));
     }
 
     #[cfg(target_os = "linux")]

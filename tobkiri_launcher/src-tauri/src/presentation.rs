@@ -846,8 +846,6 @@ fn verify_release_binding(
         || manifest.catalog_path != "bundled/presentation_catalog.json"
         || manifest.artifact_index_path != binding.artifact_index_path
         || manifest.profile_lock_path != binding.profile_lock_path
-        || manifest.default_profile_path != "ecosystem/defaultspack/v4/defaults.profile.v4.json"
-        || manifest.defaultspack_lock_path != "ecosystem/defaultspack/v4/bundle.lock.json"
         || manifest.artifact_id != binding.artifact_id
         || manifest.platform != binding.platform
         || manifest.architecture != binding.architecture
@@ -876,28 +874,62 @@ fn verify_release_binding(
         read_verified_regular_file(&defaultspack_lock_path, "Defaults bundle lock")?;
     if byte_digest(&profile_raw) != manifest.default_profile_sha256
         || byte_digest(&defaultspack_lock_raw) != manifest.defaultspack_lock_sha256
-        || catalog.default_profile_digest != manifest.default_profile_sha256
     {
-        bail!("packaged Defaults Profile/lock identity differs from the signed release");
+        bail!("packaged Profile/lock identity differs from the signed release");
     }
+    let profile: serde_json::Value =
+        serde_json::from_slice(&profile_raw).context("signed Profile is malformed")?;
+    let profile_id =
+        json_string_field(&profile, "/profile_id").context("signed Profile identity is missing")?;
+    let base_pack_id = json_string_field(&profile, "/base/pack_id")
+        .context("signed Profile Base identity is missing")?;
+    let shell_provider_id = json_string_field(&profile, "/shell/provider_id")
+        .context("signed Profile Shell identity is missing")?;
+    let profile_selection = PresentationSelection {
+        base_pack_id: base_pack_id.to_owned(),
+        shell_provider_id: shell_provider_id.to_owned(),
+    };
+    if profile_id.trim().is_empty()
+        || profile_id.len() > 128
+        || json_string_field(&profile, "/profile_api_version") != Some("io.tobkiri.profile.v5")
+        || json_string_field(&profile, "/shell/pack_id").is_none()
+    {
+        bail!("signed Profile identity is invalid");
+    }
+    validate_selection(catalog, &profile_selection)
+        .context("signed Profile presentation selection is unavailable")?;
     let defaultspack_lock: serde_json::Value = serde_json::from_slice(&defaultspack_lock_raw)
         .context("Defaults bundle lock is malformed")?;
+    if json_string_field(&defaultspack_lock, "/schema")
+        != Some("io.tobkiri.defaultspack-bundle-lock.v1")
+    {
+        bail!("signed Profile bundle lock schema is unsupported");
+    }
     let entries = defaultspack_lock
         .get("entries")
         .and_then(serde_json::Value::as_array)
         .context("Defaults bundle lock entries are missing")?;
+    let profile_filename = profile_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("signed Profile path has no filename")?;
+    let lock_parent = defaultspack_lock_path
+        .parent()
+        .context("signed Profile bundle lock has no parent")?;
+    if profile_path.parent() != Some(lock_parent) {
+        bail!("signed Profile and bundle lock are not in the same authority root");
+    }
     let profile_bindings = entries
         .iter()
         .filter(|entry| {
-            entry.get("path").and_then(serde_json::Value::as_str)
-                == Some("defaults.profile.v4.json")
+            entry.get("path").and_then(serde_json::Value::as_str) == Some(profile_filename)
                 && entry.get("kind").and_then(serde_json::Value::as_str) == Some("profile")
                 && entry.get("digest").and_then(serde_json::Value::as_str)
                     == Some(manifest.default_profile_sha256.as_str())
         })
         .count();
     if profile_bindings != 1 {
-        bail!("Defaults bundle lock does not bind the signed default Profile");
+        bail!("Profile bundle lock does not bind the signed Profile");
     }
 
     let index_value: serde_json::Value =
@@ -942,8 +974,8 @@ fn verify_release_binding(
     let selected_shell = catalog
         .shell_providers
         .iter()
-        .find(|shell| shell.provider_id == catalog.default_selection.shell_provider_id)
-        .context("default Profile Shell is missing from the catalog")?;
+        .find(|shell| shell.provider_id == profile_selection.shell_provider_id)
+        .context("signed Profile Shell is missing from the catalog")?;
     let variant = selected_shell
         .artifact_variants
         .iter()
@@ -955,8 +987,12 @@ fn verify_release_binding(
         || variant.size != Some(index.size)
         || variant.source_identity.as_deref() != Some(index.source_identity.as_str())
         || variant.source_revision.as_deref() != Some(index.source_revision.as_str())
+        || json_string_field(&profile, "/shell/artifact_digest")
+            .is_some_and(|digest| digest != index.sha256)
+        || json_string_field(&profile, "/shell/executable_artifact_digest")
+            .is_some_and(|digest| digest != index.entrypoint_sha256)
     {
-        bail!("catalog variant differs from the signed Shell artifact index");
+        bail!("Profile/catalog Shell binding differs from the signed artifact index");
     }
 
     let embedded_key = option_env!("TOBKIRI_PRESENTATION_TRUST_KEY_B64").unwrap_or("");
@@ -1045,6 +1081,10 @@ fn byte_digest(bytes: &[u8]) -> String {
 fn canonical_value_digest(value: &serde_json::Value) -> AnyResult<String> {
     let bytes = serde_json::to_vec(value).context("failed to canonicalize release JSON")?;
     Ok(byte_digest(&bytes))
+}
+
+fn json_string_field<'a>(value: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
+    value.pointer(pointer).and_then(serde_json::Value::as_str)
 }
 
 fn validate_catalog_integrity(catalog: &PresentationCatalog) -> AnyResult<()> {
