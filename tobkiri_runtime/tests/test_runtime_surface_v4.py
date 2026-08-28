@@ -309,10 +309,16 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
     active_runtime,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    catalog = BundledCatalog.load(_bundle_root())
+    sandbox_pack_ids = {
+        pack_id
+        for pack_id, manifest in catalog.packs.items()
+        if manifest["pack"]["kind"] == "normal_sandbox"
+    }
     unattested = _service(active_runtime).read_advanced("operations")["data"]["operations"]
-    packvm_rows = [item for item in unattested if item["domain_kind"] == "pack_vm"]
-    assert packvm_rows
-    assert all(item["invokable"] is False for item in packvm_rows)
+    sandbox_rows = [item for item in unattested if item["pack_id"] in sandbox_pack_ids]
+    assert sandbox_rows
+    assert all(item["invokable"] is False for item in sandbox_rows)
 
     lifecycle = runtime_surface._captured_lifecycle_projection()
     for pack in lifecycle["packs"]:
@@ -359,11 +365,11 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
         packvm_readiness_reader=lambda: snapshot,
         capability_binding_reader=lambda: _capability_snapshot(
             active_runtime,
-            packvm_rows,
+            sandbox_rows,
         ),
     ).read_advanced("operations")["data"]["operations"]
-    ready_packvm = [item for item in ready if item["domain_kind"] == "pack_vm"]
-    assert any(item["invokable"] is True for item in ready_packvm)
+    ready_sandbox = [item for item in ready if item["pack_id"] in sandbox_pack_ids]
+    assert any(item["invokable"] is True for item in ready_sandbox)
 
     stale = {**snapshot, "observed_unix": int(time.time()) - 31}
     stale_rows = _service(
@@ -371,7 +377,7 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
         packvm_readiness_reader=lambda: stale,
     ).read_advanced("operations")["data"]["operations"]
     assert all(
-        item["invokable"] is False for item in stale_rows if item["domain_kind"] == "pack_vm"
+        item["invokable"] is False for item in stale_rows if item["pack_id"] in sandbox_pack_ids
     )
 
     wrong = {**snapshot, "image_digest": "sha256:" + "8" * 64}
@@ -380,7 +386,7 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
         packvm_readiness_reader=lambda: wrong,
     ).read_advanced("operations")["data"]["operations"]
     assert all(
-        item["invokable"] is False for item in wrong_rows if item["domain_kind"] == "pack_vm"
+        item["invokable"] is False for item in wrong_rows if item["pack_id"] in sandbox_pack_ids
     )
 
 
@@ -584,7 +590,9 @@ def test_read_fence_cancels_waiter_and_service_remains_restartable(active_runtim
     service = RuntimeSurfaceService(
         snapshot_loader=blocked_snapshot,
         catalog_loader=lambda: BundledCatalog.load(_bundle_root()),
-        read_timeout_seconds=2.0,
+        # A full canonical v4 Profile read verifies the complete selected
+        # closure and is intentionally allowed more than the fence itself.
+        read_timeout_seconds=5.0,
     )
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(service.read_profile)
