@@ -102,11 +102,11 @@ function IdentitySummary({
       </div>
       <dl className="mt-4 grid gap-x-6 gap-y-3 text-xs text-text-muted sm:grid-cols-2">
         <div>
-          <dt className="font-medium text-text-main">Default profile</dt>
+          <dt className="font-medium text-text-main">Selected catalog Profile</dt>
           <dd className="mt-1 break-words">{state.catalog.default_profile_id}</dd>
         </div>
         <div>
-          <dt className="font-medium text-text-main">Profile source</dt>
+          <dt className="font-medium text-text-main">Catalog source</dt>
           <dd className="mt-1 break-words">{state.catalog.default_profile_source}</dd>
         </div>
         <div data-testid="default-profile-digest">

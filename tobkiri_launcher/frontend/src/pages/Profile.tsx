@@ -24,6 +24,7 @@ export function Profile() {
   const packsLoading = useAppStore((state) => state.packsLoading);
   const loadPacks = useAppStore((state) => state.loadPacks);
   const loadFrontendCatalog = useAppStore((state) => state.loadFrontendCatalog);
+  const packVmDoctorReady = useAppStore((state) => state.packVmDoctor?.ready === true);
   const surface = useRuntimeSurface<unknown>('profile');
   const catalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.profile;
@@ -34,6 +35,10 @@ export function Profile() {
   useEffect(() => {
     void loadPacks();
   }, [loadPacks]);
+
+  useEffect(() => {
+    if (packVmDoctorReady) void loadFrontendCatalog();
+  }, [loadFrontendCatalog, packVmDoctorReady]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

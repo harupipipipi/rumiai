@@ -1,18 +1,23 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {AlertTriangle, CheckCircle2, Database, FileKey2, PackageCheck, RefreshCw, ShieldCheck} from 'lucide-react';
+import {AlertTriangle, CheckCircle2, Database, FileKey2, MessageSquare, PackageCheck, RefreshCw, ShieldCheck} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
+import type {ApiDynamicFrontendCatalog} from '@/src/lib/apiTypes';
 import {
   extractExactProfileCatalog,
   type RuntimeProfileCatalogEntry,
   type RuntimeProfileCatalogProjection,
 } from '@/src/lib/runtimeSurface';
+import {
+  resolveConversationCapabilityForProfile,
+  verifiedCapabilityLabel,
+} from '@/src/lib/presentation';
 import type {ProfileActivateResult, ProfileCeremonyClient} from '@/src/lib/profileCeremony';
-import type {Pack} from '@/src/store';
+import {useAppStore, type Pack} from '@/src/store';
 
 function published(value: string | null | undefined): string {
   return value ?? 'not published';
@@ -47,7 +52,91 @@ function BindingCard({
   );
 }
 
-function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) {
+function OptionalConversationCapability({
+  entry,
+  catalog,
+  loading,
+  error,
+}: {
+  entry: RuntimeProfileCatalogEntry;
+  catalog: ApiDynamicFrontendCatalog | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  const capability = entry.active
+    ? resolveConversationCapabilityForProfile(catalog, entry.profile_id)
+    : null;
+  const catalogBelongsToProfile = catalog?.profile_id === entry.profile_id;
+
+  return (
+    <section
+      aria-labelledby={`profile-${entry.profile_id}-capability-title`}
+      className="rounded-lg border border-border bg-bg-main p-4"
+      data-testid="profile-conversation-capability"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h4 id={`profile-${entry.profile_id}-capability-title`} className="flex items-center gap-2 text-sm font-semibold text-text-main">
+            <MessageSquare className="h-4 w-4 text-text-muted" aria-hidden="true" />
+            Optional verified capabilities
+          </h4>
+          <p className="mt-2 text-sm leading-6 text-text-muted">
+            Conversation is shown only when this Profile publishes a verified view contribution. It is not required for Profile activation or Shell launch.
+          </p>
+        </div>
+        <Badge variant={capability ? 'success' : 'outline'}>
+          {capability ? 'Verified' : 'Optional'}
+        </Badge>
+      </div>
+      {!entry.active ? (
+        <p className="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role="status">
+          This Profile is browse-only. Its optional capabilities are resolved from its own accepted catalog after activation; browsing does not borrow the active Profile capability snapshot.
+        </p>
+      ) : loading ? (
+        <p className="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role="status" aria-live="polite">
+          Loading the active Profile capability catalog…
+        </p>
+      ) : capability ? (
+        <dl className="mt-4 grid gap-3 rounded-md border border-border px-3 py-3 text-xs sm:grid-cols-2" role="status" aria-live="polite">
+          <div>
+            <dt className="font-medium text-text-main">Verified view</dt>
+            <dd className="mt-1 break-words text-text-muted">{verifiedCapabilityLabel(capability)}</dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text-main">Capability route</dt>
+            <dd className="mt-1 break-all font-mono text-text-muted">{capability.route}</dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text-main">Owner Pack</dt>
+            <dd className="mt-1 break-all font-mono text-text-muted">{capability.owner_pack_id}</dd>
+          </div>
+          <div>
+            <dt className="font-medium text-text-main">Profile binding</dt>
+            <dd className="mt-1 break-all font-mono text-text-muted">{entry.profile_id}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role={error || (catalog && !catalogBelongsToProfile) ? 'alert' : 'status'}>
+          {error || (catalog && !catalogBelongsToProfile)
+            ? 'No accepted capability snapshot is bound to this active Profile.'
+            : 'No verified conversation capability is published for this Profile.'}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ProfileDefinitionDetails({
+  entry,
+  catalog,
+  frontendCatalogLoading,
+  frontendCatalogError,
+}: {
+  entry: RuntimeProfileCatalogEntry;
+  catalog: ApiDynamicFrontendCatalog | null;
+  frontendCatalogLoading: boolean;
+  frontendCatalogError: string | null;
+}) {
   const {base, shell, application} = entry.bindings;
   return (
     <div className="mt-4 flex flex-col gap-4" aria-label={`Details for Profile ${entry.profile_id}`}>
@@ -124,6 +213,13 @@ function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) 
         </div>
       </section>
 
+      <OptionalConversationCapability
+        entry={entry}
+        catalog={catalog}
+        loading={frontendCatalogLoading}
+        error={frontendCatalogError}
+      />
+
       <dl className="grid gap-3 rounded-lg border border-border bg-bg-main p-4 sm:grid-cols-3">
         <BindingField label="Profile revision" value={entry.records.profile_revision} />
         <BindingField label="Profile lock digest" value={entry.records.profile_lock_digest} />
@@ -157,6 +253,9 @@ export function ProfileCatalogSelector({
   initialSelectedProfileId?: string | null;
   onSelectedProfileId?: (profileId: string) => void;
 }) {
+  const frontendCatalog = useAppStore((state) => state.frontendCatalog);
+  const frontendCatalogLoading = useAppStore((state) => state.frontendCatalogLoading);
+  const frontendCatalogError = useAppStore((state) => state.frontendCatalogError);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [ceremonyBusy, setCeremonyBusy] = useState(false);
   const previousPackFingerprint = useRef<string | null>(null);
@@ -318,7 +417,12 @@ export function ProfileCatalogSelector({
               <CardDescription>Every displayed field below comes from the verified catalog projection and is bound into the resolve request. Pack refreshes can change compatibility, never the definition.</CardDescription>
             </CardHeader>
             <CardContent>
-              <ProfileDefinitionDetails entry={selectedEntry} />
+              <ProfileDefinitionDetails
+                entry={selectedEntry}
+                catalog={frontendCatalog}
+                frontendCatalogLoading={frontendCatalogLoading}
+                frontendCatalogError={frontendCatalogError}
+              />
               <p className="mt-5 text-sm text-text-muted">
                 Resolve, review, approve, and activate this selected Profile without changing the browsing selection first.
               </p>

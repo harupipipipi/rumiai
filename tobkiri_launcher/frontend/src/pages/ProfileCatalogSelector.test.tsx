@@ -5,6 +5,7 @@ import {JSDOM} from 'jsdom';
 import test, {afterEach, beforeEach} from 'node:test';
 
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
+import type {ApiDynamicFrontendCatalog} from '@/src/lib/apiTypes';
 import type {
   ProfileActivateResult,
   ProfileApproveResult,
@@ -20,9 +21,39 @@ import {
   type RuntimeSurfaceEnvelope,
 } from '@/src/lib/runtimeSurface';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
-import type {Pack} from '@/src/store';
+import {useAppStore, type Pack} from '@/src/store';
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+
+function optionalConversationCatalog(profileId = 'defaults', include = true): ApiDynamicFrontendCatalog {
+  return {
+    version: 'rumi.ui.contribution.v1',
+    profile_id: profileId,
+    profile_revision: digest('a'),
+    plan_hash: digest('b'),
+    contributions: include ? [{
+      contribution_id: `${profileId}.conversation.complete`,
+      owner_pack_id: `${profileId}-ui-pack`,
+      label: `${profileId} conversation`,
+      action_contract: 'conversation.turn.v1',
+      operation_id: 'complete',
+      provider_id: `${profileId}-conversation-provider`,
+      function_id: `${profileId}-conversation-function`,
+      kind: 'route',
+      mode: 'declarative',
+      route: `/${profileId}/conversation`,
+      owner_pack_hash: digest('c'),
+      build_identity: `${profileId}-conversation-build`,
+      resolved_profile_revision: digest('a'),
+      resolved_plan_hash: digest('b'),
+      descriptor_hash: digest('d'),
+      view: {type: 'conversation_v4'},
+    }] : [],
+    diagnostics: [],
+    quarantined_pack_ids: [],
+    catalog_hash: digest('e'),
+  };
+}
 
 function profileSnapshot(): RuntimeSurfaceEnvelope<unknown> {
   return {
@@ -436,6 +467,66 @@ test('selector gives every named Profile the same ceremony and never falls back 
     assert.ok(container.querySelector('[role="alert"]'));
   } finally {
     act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('selected Profile shows only its own optional verified capability snapshot', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createDom();
+  useAppStore.setState({
+    frontendCatalog: optionalConversationCatalog(),
+    frontendCatalogLoading: false,
+    frontendCatalogError: null,
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.match(container.textContent ?? '', /Optional verified capabilities/);
+    assert.match(container.textContent ?? '', /defaults conversation/);
+    assert.match(container.textContent ?? '', /defaults-ui-pack/);
+
+    await act(async () => {
+      buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click();
+    });
+    assert.match(container.textContent ?? '', /This Profile is browse-only/);
+    assert.doesNotMatch(container.textContent ?? '', /defaults-ui-pack/);
+    assert.doesNotMatch(container.textContent ?? '', /defaults conversation/);
+
+    await act(async () => {
+      useAppStore.setState({frontendCatalog: optionalConversationCatalog('alternate', false)});
+    });
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope('alternate'))}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.match(container.textContent ?? '', /No verified conversation capability is published/);
+    assert.ok(container.querySelector('[data-testid="profile-conversation-capability"] [role="status"]'));
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
