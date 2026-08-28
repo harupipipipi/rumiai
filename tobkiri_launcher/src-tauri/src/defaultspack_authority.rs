@@ -2133,7 +2133,7 @@ mod tests {
             .unwrap();
         let verified = verify_bundle_lock(&bundle).unwrap();
         assert_eq!(verified.sidecar_digests.len(), 74);
-        assert_eq!(verified.authority_digests.len(), 79);
+        assert_eq!(verified.authority_digests.len(), 83);
         assert!(verified
             .sidecar_digests
             .contains_key("packs/defaultspack.executables.v4.json"));
