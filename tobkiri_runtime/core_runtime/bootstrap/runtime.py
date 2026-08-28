@@ -21,6 +21,7 @@ from ..app_lifecycle_manager import (
     mark_runtime_ready,
     reset_runtime_readiness,
 )
+from ..api.web_mounts import WebMountEntry, WebMountMixin
 from ..authority.v4 import AuthorityStore
 from ..pack_api_server import PackAPIServer, initialize_pack_api_server
 from ..frontend_contract_routes import (
@@ -44,6 +45,12 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _runtime_web_mounts() -> tuple[WebMountEntry, ...]:
+    """Preserve fixed Host surfaces while adding the Defaultspack UI mounts."""
+
+    return WebMountMixin._fixed_web_mounts() + defaultspack_ui_web_mounts()
 
 
 def _persist_desktop_api_token_cache(user_data: Path, api_token: str) -> Path:
@@ -172,7 +179,7 @@ class Kernel:
                 app_lifecycle_manager=self._lifecycle,
                 contract_bindings=contract_bindings,
                 packvm_lifecycle=self._packvm_lifecycle,
-                web_mounts=defaultspack_ui_web_mounts(),
+                web_mounts=_runtime_web_mounts(),
             )
             if reconfirmation_error is None:
                 mark_panel_ready()
@@ -215,7 +222,7 @@ class Kernel:
                     app_lifecycle_manager=self._lifecycle,
                     contract_bindings=bindings,
                     packvm_lifecycle=self._packvm_lifecycle,
-                    web_mounts=defaultspack_ui_web_mounts(),
+                    web_mounts=_runtime_web_mounts(),
                 )
             mark_runtime_ready()
             return {"status": "ok", "runtime_ready": True}
