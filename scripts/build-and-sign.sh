@@ -125,6 +125,12 @@ case "$target" in
     shell_bundles="appimage"
     artifact=""
     ;;
+  aarch64-unknown-linux-gnu)
+    presentation_platform="linux"
+    presentation_architecture="arm64"
+    shell_bundles="appimage"
+    artifact=""
+    ;;
   x86_64-pc-windows-msvc)
     presentation_platform="windows"
     presentation_architecture="x86_64"
@@ -207,6 +213,7 @@ if [[ "$mode" == "local-dev" ]]; then
   (cd "$LAUNCHER_ROOT" && cargo tauri build \
     --debug \
     --target "$target" \
+    --config src-tauri/tauri.local-dev.conf.json \
     "${local_args[@]}")
   echo "LOCAL-DEV ONLY: unsigned/ad-hoc output is not a production release"
   exit 0

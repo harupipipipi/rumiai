@@ -261,8 +261,10 @@ fn prepare_debug_tauri_resource_destination() -> io::Result<()> {
         .nth(3)
         .ok_or_else(|| invalid_release("Cargo OUT_DIR has no profile directory"))?;
     let resource_root = profile_dir.join("app");
-    if resource_root.exists() {
-        make_generated_tree_owner_writable(&resource_root)?;
+    match fs::symlink_metadata(&resource_root) {
+        Ok(_) => make_generated_tree_owner_writable(&resource_root)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     Ok(())
 }
@@ -274,6 +276,15 @@ fn make_generated_tree_owner_writable(path: &Path) -> io::Result<()> {
             "debug Tauri resource destination contains a symlink: {}",
             path.display()
         )));
+    }
+    if !metadata.is_dir() && !metadata.is_file() {
+        return Err(invalid_release(format!(
+            "debug Tauri resource destination contains a special file: {}",
+            path.display()
+        )));
+    }
+    if metadata.is_file() {
+        reject_release_hardlink(&metadata, path)?;
     }
     #[cfg(unix)]
     {
@@ -731,10 +742,13 @@ fn stage_development_runtime_bundle(
     stage_pack_shell(repo_root, staged_root)
         .map_err(|error| stage_error("stage development pack-shell", error))?;
     let development_venv = repo_root.join(".venv");
-    if development_venv.join("bin/python3").is_file() {
+    if fs::symlink_metadata(&development_venv).is_ok() {
+        let target = required_cargo_target()?;
+        verify_development_venv(&development_venv, &target)
+            .map_err(|error| stage_error("verify development Python environment", error))?;
         copy_development_venv_tree(&development_venv, &staged_root.join("dev-venv"))
             .map_err(|error| stage_error("stage development Python environment", error))?;
-        write_development_runtime_path(&staged_root.join("dev-venv"))
+        write_development_runtime_path(&staged_root.join("dev-venv"), &target)
             .map_err(|error| stage_error("bind development Python imports", error))?;
     }
     bind_sealed_python_root(&staged_root.join(SEALED_PYTHON_ROOT), false)
@@ -4717,6 +4731,7 @@ fn require_regular_file(path: &Path, label: &str) -> io::Result<()> {
             format!("{label} must be a regular file: {}", path.display()),
         ));
     }
+    reject_release_hardlink(&metadata, path)?;
     Ok(())
 }
 
@@ -5186,10 +5201,20 @@ fn pack_shell_binary_name(target: &str) -> &'static str {
 
 #[cfg(not(target_os = "macos"))]
 fn reset_dir(path: &Path) -> io::Result<()> {
-    if path.exists() {
-        clear_dir(path)?;
-    } else {
-        fs::create_dir_all(path)?;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(invalid_release(format!(
+                    "generated staging root must be a real directory: {}",
+                    path.display()
+                )));
+            }
+            clear_dir(path)?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir_all(path)?;
+        }
+        Err(error) => return Err(error),
     }
     Ok(())
 }
@@ -5210,30 +5235,257 @@ fn clear_dir(path: &Path) -> io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let entry_path = entry.path();
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
+        let metadata = fs::symlink_metadata(&entry_path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_release(format!(
+                "generated staging tree contains a symlink: {}",
+                entry_path.display()
+            )));
+        }
+        if metadata.is_dir() {
             clear_dir(&entry_path)?;
             fs::remove_dir(&entry_path)?;
-        } else {
+        } else if metadata.is_file() {
+            reject_release_hardlink(&metadata, &entry_path)?;
             fs::remove_file(&entry_path)?;
+        } else {
+            return Err(invalid_release(format!(
+                "generated staging tree contains a special file: {}",
+                entry_path.display()
+            )));
         }
     }
     Ok(())
 }
 
+fn is_windows_target(target: &str) -> bool {
+    target.contains("windows") || target.ends_with("-msvc")
+}
+
+fn development_venv_python_path(venv_root: &Path, target: &str) -> PathBuf {
+    if is_windows_target(target) {
+        venv_root.join("Scripts/python.exe")
+    } else {
+        venv_root.join("bin/python3")
+    }
+}
+
+fn development_venv_site_packages(venv_root: &Path, target: &str) -> io::Result<PathBuf> {
+    if is_windows_target(target) {
+        let site_packages = venv_root.join("Lib/site-packages");
+        require_directory(&site_packages, "development venv site-packages")?;
+        return Ok(site_packages);
+    }
+
+    let lib_root = venv_root.join("lib");
+    require_directory(&lib_root, "development venv lib directory")?;
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&lib_root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_release(format!(
+                "development venv lib entry may not be a symlink: {}",
+                path.display()
+            )));
+        }
+        if metadata.is_dir()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("python"))
+        {
+            let site_packages = path.join("site-packages");
+            match fs::symlink_metadata(&site_packages) {
+                Ok(_) => {
+                    require_directory(&site_packages, "development venv site-packages")?;
+                    candidates.push(site_packages);
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    if candidates.len() != 1 {
+        return Err(invalid_release(format!(
+            "development venv must contain exactly one Python site-packages directory below {}",
+            lib_root.display()
+        )));
+    }
+    Ok(candidates.remove(0))
+}
+
+fn validate_development_venv_tree(venv_root: &Path, python_path: &Path) -> io::Result<()> {
+    fn visit(current: &Path, allowed_launcher_dir: &Path) -> io::Result<()> {
+        for entry in fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() {
+                let is_python_launcher = path.parent() == Some(allowed_launcher_dir)
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| name.starts_with("python"));
+                if !is_python_launcher {
+                    return Err(invalid_release(format!(
+                        "development venv symlink is not a Python launcher: {}",
+                        path.display()
+                    )));
+                }
+                let resolved = fs::canonicalize(&path)?;
+                require_regular_file(&resolved, "development venv Python launcher")?;
+            } else if metadata.is_dir() {
+                visit(&path, allowed_launcher_dir)?;
+            } else if metadata.is_file() {
+                require_regular_file(&path, "development venv file")?;
+            } else {
+                return Err(invalid_release(format!(
+                    "development venv contains an unsupported entry: {}",
+                    path.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    visit(venv_root, python_path.parent().unwrap_or(venv_root))
+}
+
+fn verify_development_venv(venv_root: &Path, target: &str) -> io::Result<()> {
+    require_directory(venv_root, "development Python environment")?;
+    let config_path = venv_root.join("pyvenv.cfg");
+    require_regular_file(&config_path, "development venv configuration")?;
+    let mut config = std::collections::BTreeMap::new();
+    for line in fs::read_to_string(&config_path)?.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(invalid_release(format!(
+                "development venv configuration is malformed: {}",
+                config_path.display()
+            )));
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() || config.insert(key.to_owned(), value.to_owned()).is_some() {
+            return Err(invalid_release(format!(
+                "development venv configuration has duplicate keys: {}",
+                config_path.display()
+            )));
+        }
+    }
+    if !config
+        .get("implementation")
+        .is_some_and(|value| value.eq_ignore_ascii_case("cpython"))
+    {
+        return Err(invalid_release("development venv must use CPython"));
+    }
+    if config
+        .get("include-system-site-packages")
+        .map(String::as_str)
+        != Some("false")
+    {
+        return Err(invalid_release(
+            "development venv must disable system site-packages",
+        ));
+    }
+    if config.get("home").is_none_or(String::is_empty) {
+        return Err(invalid_release(
+            "development venv configuration has no interpreter home",
+        ));
+    }
+    let valid_version = config.get("version_info").is_some_and(|version| {
+        let parts = version.split('.').collect::<Vec<_>>();
+        parts.len() >= 2
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    });
+    if !valid_version {
+        return Err(invalid_release(
+            "development venv configuration has an invalid version",
+        ));
+    }
+
+    let python_path = development_venv_python_path(venv_root, target);
+    let python_metadata = fs::symlink_metadata(&python_path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            invalid_release(format!(
+                "development venv Python launcher is missing: {}",
+                python_path.display()
+            ))
+        } else {
+            error
+        }
+    })?;
+    let python_file = if python_metadata.file_type().is_symlink() {
+        fs::canonicalize(&python_path)?
+    } else {
+        python_path.clone()
+    };
+    let python_metadata = fs::symlink_metadata(&python_file)?;
+    require_regular_file(&python_file, "development venv Python launcher")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !is_windows_target(target) && python_metadata.permissions().mode() & 0o111 == 0 {
+            return Err(invalid_release(format!(
+                "development venv Python launcher is not executable: {}",
+                python_path.display()
+            )));
+        }
+    }
+    development_venv_site_packages(venv_root, target)?;
+    validate_development_venv_tree(venv_root, &python_path)
+}
+
 fn copy_file(src: &Path, dst: &Path) -> io::Result<u64> {
+    let source_metadata = fs::symlink_metadata(src)?;
+    if source_metadata.file_type().is_symlink() || !source_metadata.is_file() {
+        return Err(invalid_release(format!(
+            "copy source must be a regular non-symlink file: {}",
+            src.display()
+        )));
+    }
+    reject_release_hardlink(&source_metadata, src)?;
+    match fs::symlink_metadata(dst) {
+        Ok(destination_metadata) => {
+            if destination_metadata.file_type().is_symlink() || !destination_metadata.is_file() {
+                return Err(invalid_release(format!(
+                    "copy destination must be a regular non-symlink file: {}",
+                    dst.display()
+                )));
+            }
+            reject_release_hardlink(&destination_metadata, dst)?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
     let bytes = fs::copy(src, dst)?;
-    if let Ok(permissions) = fs::metadata(src).map(|metadata| metadata.permissions()) {
-        let _ = fs::set_permissions(dst, permissions);
-    }
+    let _ = fs::set_permissions(dst, source_metadata.permissions());
     Ok(bytes)
 }
 
 fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
-    fs::create_dir_all(dst)?;
+    require_directory(src, "development venv source")?;
+    match fs::symlink_metadata(dst) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(invalid_release(format!(
+                "development venv destination is unsafe: {}",
+                dst.display()
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir_all(dst)?,
+        Err(error) => return Err(error),
+    }
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let source_path = entry.path();
@@ -5241,15 +5493,7 @@ fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
         let metadata = fs::symlink_metadata(&source_path)?;
         if metadata.file_type().is_symlink() {
             let resolved = fs::canonicalize(&source_path)?;
-            if !resolved.is_file() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "development venv symlink is not a file: {}",
-                        source_path.display()
-                    ),
-                ));
-            }
+            require_regular_file(&resolved, "development venv symlink target")?;
             copy_file(&resolved, &destination_path)?;
         } else if metadata.is_dir() {
             copy_development_venv_tree(&source_path, &destination_path)?;
@@ -5268,32 +5512,25 @@ fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn write_development_runtime_path(venv_root: &Path) -> io::Result<()> {
-    let unix_site_packages = venv_root.join("lib/python3.13/site-packages");
-    let windows_site_packages = venv_root.join("Lib/site-packages");
-    let site_packages = if unix_site_packages.is_dir() {
-        unix_site_packages
-    } else if windows_site_packages.is_dir() {
-        windows_site_packages
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "development venv site-packages not found below {}",
-                venv_root.display()
-            ),
-        ));
-    };
+fn write_development_runtime_path(venv_root: &Path, target: &str) -> io::Result<()> {
+    let site_packages = development_venv_site_packages(venv_root, target)?;
     for entry in fs::read_dir(&site_packages)? {
         let entry = entry?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if name.starts_with("__editable__.tobkiri_runtime-") && name.ends_with(".pth") {
+            require_regular_file(&entry.path(), "development editable path file")?;
             fs::remove_file(entry.path())?;
         }
     }
+    let destination = site_packages.join("tobkiri_staged_runtime.pth");
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => require_regular_file(&destination, "development runtime path file")?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
     fs::write(
-        site_packages.join("tobkiri_staged_runtime.pth"),
+        destination,
         "import os,sys; sys.path.insert(0, os.path.dirname(sys.prefix))\n",
     )
 }
@@ -6423,7 +6660,7 @@ mod tests {
             .find("rebase_staged_sealed_python(&staged_root)")
             .expect("sealed application closure must be rebuilt");
         let manifest = stage
-            .find("write_runtime_resource_manifest(&staged_root)")
+            .rfind("write_runtime_resource_manifest(&staged_root)")
             .expect("outer runtime manifest must be final");
         assert!(generate < reseal && reseal < manifest);
         let rebase = &source[source.find("fn rebase_staged_sealed_python").unwrap()

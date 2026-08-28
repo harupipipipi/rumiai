@@ -173,6 +173,76 @@ def test_macos_dev_shell_spec_uses_debug_unsigned_app(tmp_path):
     )
 
 
+def test_linux_arm64_dev_shell_spec_uses_appimage(tmp_path):
+    module = _load_module()
+
+    spec = module._target_shell_spec(tmp_path, "aarch64-unknown-linux-gnu")
+
+    assert spec["bundle"] == "appimage"
+    assert spec["platform"] == "linux"
+    assert spec["architecture"] == "arm64"
+    assert spec["relative_path"] == "Tobkiri.AppImage"
+    assert str(spec["artifact"]).endswith(
+        "src-tauri/target/aarch64-unknown-linux-gnu/debug/bundle/appimage/Tobkiri.AppImage"
+    )
+
+
+def _write_verified_venv(root: Path, target: str = "aarch64-unknown-linux-gnu") -> Path:
+    venv_root = root / ".venv"
+    python_path = venv_root / (
+        "Scripts/python.exe" if "windows" in target else "bin/python3"
+    )
+    site_packages = (
+        venv_root / "Lib/site-packages"
+        if "windows" in target
+        else venv_root / "lib/python3.12/site-packages"
+    )
+    python_path.parent.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    (venv_root / "pyvenv.cfg").write_text(
+        "home = /opt/cpython\n"
+        "implementation = CPython\n"
+        "version_info = 3.12.8\n"
+        "include-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    python_path.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' '{venv_root}' '/opt/cpython' 'cpython'\n",
+        encoding="utf-8",
+    )
+    python_path.chmod(0o755)
+    return python_path
+
+
+def test_verify_development_venv_accepts_existing_isolated_cpython(tmp_path):
+    module = _load_module()
+    python_path = _write_verified_venv(tmp_path)
+
+    assert module.verify_development_venv(tmp_path, "aarch64-unknown-linux-gnu") == python_path
+
+
+def test_verify_development_venv_rejects_symlink_entries(tmp_path):
+    module = _load_module()
+    _write_verified_venv(tmp_path)
+    outside = tmp_path / "outside"
+    outside.write_text("outside", encoding="utf-8")
+    (tmp_path / ".venv/lib/python3.12/site-packages/escaped.py").symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="symlink is not a Python launcher"):
+        module.verify_development_venv(tmp_path, "aarch64-unknown-linux-gnu")
+
+
+def test_verify_development_venv_rejects_hardlinked_entries(tmp_path):
+    module = _load_module()
+    _write_verified_venv(tmp_path)
+    outside = tmp_path / "outside"
+    outside.write_text("outside", encoding="utf-8")
+    os.link(outside, tmp_path / ".venv/lib/python3.12/site-packages/linked.py")
+
+    with pytest.raises(RuntimeError, match="must not be hardlinked"):
+        module.verify_development_venv(tmp_path, "aarch64-unknown-linux-gnu")
+
+
 def test_prepare_dev_pack_shell_writes_verified_debug_digest(tmp_path, monkeypatch):
     module = _load_module()
     target = "aarch64-apple-darwin"
