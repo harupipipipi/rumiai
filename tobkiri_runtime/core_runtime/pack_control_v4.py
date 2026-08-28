@@ -65,6 +65,11 @@ PACK_CONTROL_OPERATIONS = frozenset(
     }
 )
 _CANDIDATE_TTL_SECONDS = 120.0
+# A complete Profile projection validates the entire selected Pack closure.
+# Keep the small RuntimeSurfaceService default strict for local callers, but
+# give the Host control provider a bounded budget that accommodates the
+# canonical generated catalog on slower development machines.
+_CONTROL_SURFACE_READ_TIMEOUT_SECONDS = 15.0
 _PERSISTENCE_STORES: dict[Path, SecureDirectory] = {}
 _PERSISTENCE_STORES_LOCK = threading.RLock()
 
@@ -164,6 +169,7 @@ class CapturedPackControlSession:
             snapshot_loader=active_profile_loader,
             catalog_loader=catalog_loader,
             packvm_readiness_reader=packvm_readiness_reader,
+            read_timeout_seconds=_CONTROL_SURFACE_READ_TIMEOUT_SECONDS,
         )
         self._profile_changes = RuntimeProfileChangeService(
             surface_service=self._runtime_surface,
