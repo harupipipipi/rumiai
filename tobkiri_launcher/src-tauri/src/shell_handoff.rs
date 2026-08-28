@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Url;
 
 use crate::config::AppConfig;
+use crate::host_contract::ExecutionProfileIdentity;
 
 pub(crate) const SHELL_BUNDLE_IDENTIFIER: &str = "io.tobkiri.shell.tauri";
 pub(crate) const SHELL_PROVIDER_ID: &str = "shell.tauri.default";
@@ -25,7 +26,7 @@ pub(crate) const HANDOFF_ARGUMENT: &str = "--tobkiri-shell-handoff";
 const LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher";
 const CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher.ci-e2e";
 const MACOS_ARTIFACT_POLICY: &str = env!("TOBKIRI_MACOS_ARTIFACT_POLICY");
-const HANDOFF_SCHEMA: &str = "io.tobkiri.shell-handoff.v1";
+const HANDOFF_SCHEMA: &str = "io.tobkiri.shell-handoff.v2";
 const LOCAL_AUTH_PROTOCOL: &str = "io.tobkiri.local-auth.v1";
 const LOCAL_AUTH_AUDIENCE: &str = "runtime-profile";
 const HANDOFF_DIRECTORY: &str = "shell_handoff";
@@ -42,7 +43,9 @@ struct ShellHandoffPayload {
     protocol: String,
     audience: String,
     profile_id: String,
-    profile_digest: String,
+    profile_revision: String,
+    activation_id: String,
+    plan_digest: String,
     catalog_revision: String,
     provider_id: String,
     artifact_id: String,
@@ -55,11 +58,12 @@ struct ShellHandoffPayload {
 pub(crate) struct ValidatedShellHandoff {
     pub runtime_url: Url,
     pub runtime_port: u16,
+    pub identity: ExecutionProfileIdentity,
+    pub catalog_revision: String,
 }
 
 pub(crate) struct ShellHandoffBinding<'a> {
-    pub profile_id: &'a str,
-    pub profile_digest: &'a str,
+    pub identity: &'a ExecutionProfileIdentity,
     pub catalog_revision: &'a str,
     pub provider_id: &'a str,
     pub artifact_id: &'a str,
@@ -80,8 +84,10 @@ pub(crate) fn create_shell_handoff(
         schema: HANDOFF_SCHEMA.to_string(),
         protocol: LOCAL_AUTH_PROTOCOL.to_string(),
         audience: LOCAL_AUTH_AUDIENCE.to_string(),
-        profile_id: binding.profile_id.to_string(),
-        profile_digest: binding.profile_digest.to_string(),
+        profile_id: binding.identity.profile_id.clone(),
+        profile_revision: binding.identity.profile_revision.clone(),
+        activation_id: binding.identity.activation_id.clone(),
+        plan_digest: binding.identity.plan_digest.clone(),
         catalog_revision: binding.catalog_revision.to_string(),
         provider_id: binding.provider_id.to_string(),
         artifact_id: binding.artifact_id.to_string(),
@@ -287,8 +293,13 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
     {
         bail!("Shell handoff identity is invalid");
     }
-    validate_identifier(&payload.profile_id, "profile")?;
-    validate_sha256(&payload.profile_digest, "profile digest")?;
+    let identity = ExecutionProfileIdentity::new(
+        payload.profile_id.clone(),
+        payload.profile_revision.clone(),
+        payload.activation_id.clone(),
+        payload.plan_digest.clone(),
+    )
+    .context("Shell handoff execution Profile identity is invalid")?;
     validate_sha256(&payload.catalog_revision, "catalog revision")?;
     if payload.artifact_id != expected_shell_artifact_id()? {
         bail!("Shell handoff artifact identity is invalid");
@@ -343,19 +354,9 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
     Ok(ValidatedShellHandoff {
         runtime_url,
         runtime_port,
+        identity,
+        catalog_revision: payload.catalog_revision.clone(),
     })
-}
-
-fn validate_identifier(value: &str, label: &str) -> Result<()> {
-    if value.is_empty()
-        || value.len() > 128
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
-        })
-    {
-        bail!("Shell handoff {label} identity is invalid");
-    }
-    Ok(())
 }
 
 fn validate_sha256(value: &str, label: &str) -> Result<()> {
@@ -984,8 +985,10 @@ mod tests {
             schema: HANDOFF_SCHEMA.into(),
             protocol: LOCAL_AUTH_PROTOCOL.into(),
             audience: LOCAL_AUTH_AUDIENCE.into(),
-            profile_id: "defaults".into(),
-            profile_digest: format!("sha256:{}", "a".repeat(64)),
+            profile_id: "profile-a".into(),
+            profile_revision: format!("sha256:{}", "a".repeat(64)),
+            activation_id: "activation:profile-a-2026".into(),
+            plan_digest: format!("sha256:{}", "c".repeat(64)),
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
             provider_id: SHELL_PROVIDER_ID.into(),
             artifact_id: expected_shell_artifact_id().unwrap().into(),
@@ -1053,8 +1056,10 @@ mod tests {
             schema: HANDOFF_SCHEMA.into(),
             protocol: LOCAL_AUTH_PROTOCOL.into(),
             audience: LOCAL_AUTH_AUDIENCE.into(),
-            profile_id: "defaults".into(),
-            profile_digest: format!("sha256:{}", "a".repeat(64)),
+            profile_id: "profile-a".into(),
+            profile_revision: format!("sha256:{}", "a".repeat(64)),
+            activation_id: "activation:profile-a-2026".into(),
+            plan_digest: format!("sha256:{}", "c".repeat(64)),
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
             provider_id: SHELL_PROVIDER_ID.into(),
             artifact_id: expected_shell_artifact_id().unwrap().into(),
@@ -1074,6 +1079,20 @@ mod tests {
 
         let consumed = consume_shell_handoff_from_root(&path, &root).unwrap();
         assert_eq!(consumed.runtime_port, 8766);
+        assert_eq!(consumed.identity.profile_id, "profile-a");
+        assert_eq!(
+            consumed.identity.profile_revision,
+            format!("sha256:{}", "a".repeat(64))
+        );
+        assert_eq!(consumed.identity.activation_id, "activation:profile-a-2026");
+        assert_eq!(
+            consumed.identity.plan_digest,
+            format!("sha256:{}", "c".repeat(64))
+        );
+        assert_eq!(
+            consumed.catalog_revision,
+            format!("sha256:{}", "b".repeat(64))
+        );
         assert!(!path.exists());
         assert!(consume_shell_handoff_from_root(&path, &root).is_err());
 

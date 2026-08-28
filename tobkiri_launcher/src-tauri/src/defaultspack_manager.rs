@@ -32,6 +32,13 @@ const SYSTEM_KILL: &str = "/bin/kill";
 #[cfg(all(test, unix))]
 const SYSTEM_SHELL: &str = "/bin/sh";
 
+fn execution_identity_matches(
+    current: &crate::host_contract::ExecutionProfileIdentity,
+    requested: &crate::host_contract::ExecutionProfileIdentity,
+) -> bool {
+    current.matches(requested)
+}
+
 /// Tracks the Defaultspack child started by this Launcher instance.
 pub(crate) struct DefaultspackManager {
     config: AppConfig,
@@ -78,6 +85,8 @@ impl DefaultspackManager {
     ///
     /// A restart already in progress is reused instead of spawning a duplicate.
     pub(crate) fn start_or_reuse(&self, metadata: DefaultspackDesktopMetadata) -> Result<()> {
+        let mut replaced_child = None;
+        let mut replaced_run_id = None;
         let should_spawn = {
             let mut state = self.lock_state()?;
             if self.shutdown_requested.load(Ordering::SeqCst) {
@@ -85,17 +94,45 @@ impl DefaultspackManager {
             }
 
             state.stop_requested = false;
-            if let Some(child) = state.child.as_mut() {
-                match child
+            if state.child.is_some() {
+                let child_status = state
+                    .child
+                    .as_mut()
+                    .expect("managed child was checked above")
                     .try_wait()
-                    .context("failed to inspect managed Defaultspack process")?
-                {
+                    .context("failed to inspect managed Defaultspack process")?;
+                match child_status {
                     None => {
-                        info!(
-                            "Defaultspack already running under Launcher supervision (pid {})",
-                            child.id()
+                        let identity_matches =
+                            state.launch_metadata.as_ref().is_some_and(|current| {
+                                execution_identity_matches(
+                                    current.execution_identity(),
+                                    metadata.execution_identity(),
+                                )
+                            });
+                        if identity_matches {
+                            info!(
+                                "Defaultspack already running under Launcher supervision (pid {})",
+                                state
+                                    .child
+                                    .as_ref()
+                                    .expect("managed child is still present")
+                                    .id()
+                            );
+                            return Ok(());
+                        }
+                        warn!(
+                            "Managed Defaultspack identity changed; replacing the live child before reuse"
                         );
-                        return Ok(());
+                        replaced_child = state.child.take();
+                        replaced_run_id = state.active_run_id.take();
+                        state.active_guardian_pid = None;
+                        state.launch_metadata = None;
+                        state.owned_process_groups.retain(|pid| {
+                            replaced_child
+                                .as_ref()
+                                .map_or(true, |child| child.id() != *pid)
+                        });
                     }
                     Some(status) => {
                         warn!(
@@ -112,6 +149,16 @@ impl DefaultspackManager {
             }
 
             if state.restart_in_progress {
+                if state.launch_metadata.as_ref().is_some_and(|current| {
+                    !execution_identity_matches(
+                        current.execution_identity(),
+                        metadata.execution_identity(),
+                    )
+                }) {
+                    return Err(anyhow!(
+                        "Defaultspack restart is in progress for a different execution Profile"
+                    ));
+                }
                 info!("Defaultspack restart is already in progress; reusing it");
                 return Ok(());
             }
@@ -130,6 +177,16 @@ impl DefaultspackManager {
             true
         };
 
+        if let Some(run_id) = replaced_run_id.as_deref() {
+            self.debug_approval.unregister_guardian(run_id);
+        }
+        if let Some(mut child) = replaced_child {
+            info!(
+                "Stopping managed Defaultspack child with stale Profile identity (pid {})",
+                child.id()
+            );
+            stop_child(&mut child)?;
+        }
         if should_spawn {
             self.spawn_and_track(metadata, "initial launch")?;
         }
@@ -320,6 +377,7 @@ impl DefaultspackManager {
                         .unwrap_or_else(|| metadata.working_dir().to_path_buf()),
                     metadata.port(),
                     self.config.desktop_api_token_path(),
+                    metadata.execution_identity().clone(),
                 ) {
                     registration_error = Some(error);
                     true
@@ -362,7 +420,14 @@ impl DefaultspackManager {
     ) -> Result<()> {
         let (run_id, old_run_id) = {
             let mut state = self.lock_state()?;
-            if state.active_guardian_pid == Some(process_id) {
+            if state.active_guardian_pid == Some(process_id)
+                && state.launch_metadata.as_ref().is_some_and(|current| {
+                    execution_identity_matches(
+                        current.execution_identity(),
+                        metadata.execution_identity(),
+                    )
+                })
+            {
                 return Ok(());
             }
             let old_run_id = state.active_run_id.take();
@@ -386,6 +451,7 @@ impl DefaultspackManager {
                     .unwrap_or_else(|| metadata.working_dir().to_path_buf()),
                 metadata.port(),
                 self.config.desktop_api_token_path(),
+                metadata.execution_identity().clone(),
             )
             .map_err(|error| {
                 anyhow!("failed to register authenticated Defaultspack listener: {error}")
@@ -769,6 +835,39 @@ mod tests {
             BrokerAttestationIdentity::generate(),
             debug_approval,
         )
+    }
+
+    fn test_execution_identity(
+        profile_id: &str,
+        profile_revision: &str,
+        activation_id: &str,
+        plan_digest: &str,
+    ) -> crate::host_contract::ExecutionProfileIdentity {
+        crate::host_contract::ExecutionProfileIdentity::new(
+            profile_id,
+            format!("sha256:{profile_revision}"),
+            format!("activation:{activation_id}"),
+            format!("sha256:{plan_digest}"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn manager_reuse_requires_the_complete_execution_profile_identity() {
+        let current = test_execution_identity(
+            "profile-a",
+            &"a".repeat(64),
+            "profile-a-test",
+            &"b".repeat(64),
+        );
+        let requested = test_execution_identity(
+            "profile-a",
+            &"a".repeat(64),
+            "profile-a-next-activation",
+            &"b".repeat(64),
+        );
+        assert!(!execution_identity_matches(&current, &requested));
+        assert!(execution_identity_matches(&current, &current));
     }
 
     #[cfg(target_os = "linux")]

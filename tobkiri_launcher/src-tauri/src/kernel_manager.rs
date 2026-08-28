@@ -167,9 +167,8 @@ impl KernelManager {
         );
 
         let dev_environment = cfg!(debug_assertions) || self.config.is_dev_workspace();
-        let host_contract_path = crate::host_contract::write_contract(
+        let host_contract_path = crate::host_contract::write_bootstrap_contract(
             &self.config,
-            crate::host_contract::DEFAULT_PROFILE_ID,
             [(
                 "panel_bootstrap_secret",
                 self.panel_bootstrap_secret.clone(),

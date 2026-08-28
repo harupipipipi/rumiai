@@ -18,10 +18,17 @@ use crate::shell_handoff::{
     consume_shell_handoff, handoff_path_from_os_args, handoff_path_from_strings,
 };
 
+#[derive(Debug, Clone)]
+struct ShellRuntimeBinding {
+    runtime_port: u16,
+    identity: crate::host_contract::ExecutionProfileIdentity,
+}
+
 fn apply_handoff(
     app: &AppHandle,
     path: &Path,
     allowed_runtime_ports: &Arc<Mutex<Vec<u16>>>,
+    runtime_binding: &Arc<Mutex<Option<ShellRuntimeBinding>>>,
 ) -> Result<()> {
     let handoff = consume_shell_handoff(path)?;
     {
@@ -30,6 +37,25 @@ fn apply_handoff(
             .map_err(|error| anyhow!("Shell navigation policy lock is poisoned: {error}"))?;
         ports.clear();
         ports.push(handoff.runtime_port);
+    }
+    {
+        let mut binding = runtime_binding
+            .lock()
+            .map_err(|error| anyhow!("Shell identity binding lock is poisoned: {error}"))?;
+        *binding = Some(ShellRuntimeBinding {
+            runtime_port: handoff.runtime_port,
+            identity: handoff.identity.clone(),
+        });
+        let current = binding
+            .as_ref()
+            .context("Shell identity binding was not retained")?;
+        if current.runtime_port != handoff.runtime_port
+            || !current.identity.matches(&handoff.identity)
+        {
+            return Err(anyhow!(
+                "Shell runtime identity binding changed during handoff"
+            ));
+        }
     }
 
     let window = app
@@ -59,15 +85,23 @@ fn reject_initial_handoff(app: &AppHandle, error: &anyhow::Error) {
 
 pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
     let allowed_runtime_ports = Arc::new(Mutex::new(Vec::<u16>::new()));
+    let runtime_binding = Arc::new(Mutex::new(None::<ShellRuntimeBinding>));
     let ports_for_navigation = Arc::clone(&allowed_runtime_ports);
     let ports_for_forwarded_handoff = Arc::clone(&allowed_runtime_ports);
+    let binding_for_forwarded_handoff = Arc::clone(&runtime_binding);
     let initial_args = std::env::args_os().collect::<Vec<OsString>>();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
             move |app, args, _cwd| {
-                let result = handoff_path_from_strings(&args)
-                    .and_then(|path| apply_handoff(app, &path, &ports_for_forwarded_handoff));
+                let result = handoff_path_from_strings(&args).and_then(|path| {
+                    apply_handoff(
+                        app,
+                        &path,
+                        &ports_for_forwarded_handoff,
+                        &binding_for_forwarded_handoff,
+                    )
+                });
                 if let Err(error) = result {
                     warn!("Forwarded Tobkiri Shell handoff rejected: {error:#}");
                 }
@@ -90,9 +124,14 @@ pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
                 .build(),
         )
         .setup(move |app| {
-            match handoff_path_from_os_args(initial_args.clone())
-                .and_then(|path| apply_handoff(app.handle(), &path, &allowed_runtime_ports))
-            {
+            match handoff_path_from_os_args(initial_args.clone()).and_then(|path| {
+                apply_handoff(
+                    app.handle(),
+                    &path,
+                    &allowed_runtime_ports,
+                    &runtime_binding,
+                )
+            }) {
                 Ok(()) => {}
                 Err(error) => reject_initial_handoff(app.handle(), &error),
             }

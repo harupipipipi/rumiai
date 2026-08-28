@@ -54,8 +54,8 @@ pub(crate) struct DefaultspackDesktopMetadata {
     app_working_dir: PathBuf,
     env_vars: Vec<(String, String)>,
     port: u16,
-    profile_id: String,
-    profile_digest: String,
+    execution_identity: crate::host_contract::ExecutionProfileIdentity,
+    bootstrap_profile_digest: String,
     catalog_revision: String,
     artifact_digest: String,
     function_id: String,
@@ -70,6 +70,16 @@ impl DefaultspackDesktopMetadata {
     pub(crate) fn port(&self) -> u16 {
         self.port
     }
+
+    pub(crate) fn execution_identity(&self) -> &crate::host_contract::ExecutionProfileIdentity {
+        &self.execution_identity
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedShellRuntime {
+    pub(crate) url: String,
+    pub(crate) identity: crate::host_contract::ExecutionProfileIdentity,
 }
 
 /// Read the HMAC key from the plaintext `hmac_keys.json` file.
@@ -321,12 +331,15 @@ pub(crate) fn launch_defaultspack_desktop_window_impl(
 pub(crate) fn prepare_defaultspack_shell_runtime_url(
     app: &AppHandle,
     config: &AppConfig,
-) -> AnyResult<String> {
+) -> AnyResult<PreparedShellRuntime> {
     with_defaultspack_launch_coordination(|| {
-        let (port, bootstrap_secret) = ensure_defaultspack_desktop_ready(app, config)?;
+        let (port, bootstrap_secret, identity) = ensure_defaultspack_desktop_ready(app, config)?;
         let code = crate::request_panel_bootstrap_code_with_retry(port, &bootstrap_secret)
             .context("failed to issue a Defaultspack shell bootstrap code")?;
-        defaultspack_window_url_with_bootstrap_code(port, &code)
+        Ok(PreparedShellRuntime {
+            url: defaultspack_window_url_with_bootstrap_code(port, &code)?,
+            identity,
+        })
     })
 }
 
@@ -349,7 +362,7 @@ pub(crate) fn open_defaultspack_desktop_window_path_impl(
 ) -> AnyResult<String> {
     with_defaultspack_launch_coordination(|| {
         info!("open_defaultspack_desktop_window_path_impl: starting");
-        let (port, _) = ensure_defaultspack_desktop_ready(app, config)?;
+        let (port, _, _) = ensure_defaultspack_desktop_ready(app, config)?;
         let api_token = read_desktop_api_token_from_config(config)
             .context("failed to read Viewer local auth token for Defaultspack window")?;
         let authenticated_url = defaultspack_window_url_with_local_auth(port, &api_token)?;
@@ -489,9 +502,17 @@ fn recover_stale_defaultspack_listener(metadata: &DefaultspackDesktopMetadata) -
 fn ensure_defaultspack_desktop_ready(
     app: &AppHandle,
     config: &AppConfig,
-) -> AnyResult<(u16, String)> {
+) -> AnyResult<(u16, String, crate::host_contract::ExecutionProfileIdentity)> {
     let manager = app.state::<Arc<DefaultspackManager>>();
-    let metadata = match read_defaultspack_desktop_metadata(config) {
+    let api_token = read_desktop_api_token_from_config(config)
+        .context("failed to read Viewer local auth token for Defaultspack launch")?;
+    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
+    let active_identity = crate::health_check::authenticated_runtime_identity(
+        config.kernel_port,
+        &panel_bootstrap_secret,
+    )
+    .context("failed to capture the active execution Profile identity")?;
+    let metadata = match read_defaultspack_desktop_metadata(config, active_identity.clone()) {
         Ok(m) => {
             info!("launch_defaultspack_desktop_impl: metadata loaded (port={}, entrypoint={}, argv_count={}, working_dir={})",
                 m.port, m.entrypoint.display(), m.argv.len(), m.app_working_dir.display());
@@ -504,12 +525,9 @@ fn ensure_defaultspack_desktop_ready(
     };
     let base_url = defaultspack_window_url(metadata.port);
     info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {base_url}");
-    let api_token = read_desktop_api_token_from_config(config)
-        .context("failed to read Viewer local auth token for Defaultspack launch")?;
-    let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     crate::host_contract::write_contract(
         config,
-        crate::host_contract::DEFAULT_PROFILE_ID,
+        metadata.execution_identity(),
         [
             ("desktop_api_token", api_token.clone()),
             ("panel_bootstrap_secret", panel_bootstrap_secret.clone()),
@@ -520,6 +538,19 @@ fn ensure_defaultspack_desktop_ready(
         .has_managed_process()
         .context("failed to inspect managed Defaultspack process")?;
     let mut server_ready = is_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret);
+    if server_ready {
+        let observed_identity = crate::health_check::authenticated_runtime_identity(
+            metadata.port,
+            &panel_bootstrap_secret,
+        )
+        .context("authenticated Defaultspack identity is unavailable")?;
+        if !observed_identity.matches(metadata.execution_identity()) {
+            warn!(
+                "Authenticated Defaultspack listener identity differs from the active execution Profile; it will not be reused"
+            );
+            server_ready = false;
+        }
+    }
     if server_ready && recover_authenticated_stale_defaultspack_listener(&manager, &metadata)? {
         server_ready = false;
     }
@@ -590,6 +621,15 @@ fn ensure_defaultspack_desktop_ready(
     if !is_launcher_owned_defaultspack_listener(&manager, &listener, &metadata)? {
         bail!("replacement Defaultspack listener is not owned by this Launcher");
     }
+    let observed_identity =
+        crate::health_check::authenticated_runtime_identity(metadata.port, &panel_bootstrap_secret)
+            .context("authenticated Defaultspack identity is unavailable after readiness")?;
+    if !observed_identity.matches(metadata.execution_identity()) {
+        manager
+            .stop()
+            .context("failed to stop a Defaultspack listener with stale Profile identity")?;
+        bail!("Defaultspack listener identity does not match the active execution Profile");
+    }
     if let Some(wrapper_pid) = manager.managed_child_pid()? {
         if !process_is_descendant_of(listener.pid, wrapper_pid)? {
             // A Kernel-restored server won the bind race. It is still a
@@ -606,7 +646,11 @@ fn ensure_defaultspack_desktop_ready(
         return Err(error);
     }
 
-    Ok((metadata.port, panel_bootstrap_secret))
+    Ok((
+        metadata.port,
+        panel_bootstrap_secret,
+        metadata.execution_identity().clone(),
+    ))
 }
 
 fn write_guardian_ready_audit(
@@ -623,7 +667,7 @@ fn write_guardian_ready_audit(
             ),
             ts: crate::host_audit::now_epoch_seconds(),
             function_id: "launcher.defaultspack.guardian.prepare".to_string(),
-            profile_id: Some(metadata.profile_id.clone()),
+            profile_id: Some(metadata.execution_identity().profile_id.clone()),
             pack_id: Some("defaultspack".to_string()),
             conversation_id: None,
             allowed: true,
@@ -632,8 +676,12 @@ fn write_guardian_ready_audit(
             approval_result: None,
             args_summary: json!({
                 "authority": "pack-v4-profile-lock",
+                "profile_id": metadata.execution_identity().profile_id,
+                "profile_revision": metadata.execution_identity().profile_revision,
+                "activation_id": metadata.execution_identity().activation_id,
+                "plan_digest": metadata.execution_identity().plan_digest,
                 "catalog_revision": metadata.catalog_revision,
-                "profile_digest": metadata.profile_digest,
+                "bootstrap_profile_digest": metadata.bootstrap_profile_digest,
                 "artifact_digest": metadata.artifact_digest,
                 "function_id": metadata.function_id,
                 "provider_id": metadata.provider_id,
@@ -751,6 +799,7 @@ fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
 
 fn read_defaultspack_desktop_metadata(
     config: &AppConfig,
+    execution_identity: crate::host_contract::ExecutionProfileIdentity,
 ) -> AnyResult<DefaultspackDesktopMetadata> {
     let authority = crate::defaultspack_authority::resolve(config)?;
     let app_working_dir = authority.pack_root;
@@ -788,8 +837,8 @@ fn read_defaultspack_desktop_metadata(
         app_working_dir,
         env_vars,
         port,
-        profile_id: authority.profile_id,
-        profile_digest: authority.profile_digest,
+        execution_identity,
+        bootstrap_profile_digest: authority.profile_digest,
         catalog_revision: authority.catalog_revision,
         artifact_digest: authority.launch.artifact_digest,
         function_id: authority.launch.function_id,
@@ -929,7 +978,7 @@ pub(crate) fn spawn_defaultspack_local_server(
     let panel_bootstrap_secret = read_panel_bootstrap_secret_from_config(config)?;
     let host_contract_path = crate::host_contract::write_contract(
         config,
-        crate::host_contract::DEFAULT_PROFILE_ID,
+        metadata.execution_identity(),
         [
             ("desktop_api_token", api_token.clone()),
             ("panel_bootstrap_secret", panel_bootstrap_secret),
@@ -1261,8 +1310,8 @@ mod tests {
             app_working_dir: PathBuf::from("/tmp/rumi/defaultspack"),
             env_vars: vec![],
             port: DEFAULTSPACK_DEFAULT_PORT,
-            profile_id: "defaults".into(),
-            profile_digest: "sha256:test".into(),
+            execution_identity: test_execution_identity(),
+            bootstrap_profile_digest: "sha256:".to_string() + &"a".repeat(64),
             catalog_revision: "sha256:test".into(),
             artifact_digest: "sha256:test".into(),
             function_id: "runtime.tauri.application.default".into(),
@@ -1314,8 +1363,8 @@ mod tests {
             ),
             env_vars: vec![],
             port: DEFAULTSPACK_DEFAULT_PORT,
-            profile_id: "defaults".into(),
-            profile_digest: "sha256:test".into(),
+            execution_identity: test_execution_identity(),
+            bootstrap_profile_digest: "sha256:".to_string() + &"a".repeat(64),
             catalog_revision: "sha256:test".into(),
             artifact_digest: "sha256:test".into(),
             function_id: "runtime.tauri.application.default".into(),
@@ -1516,8 +1565,8 @@ mod tests {
             app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
             env_vars: Vec::new(),
             port: DEFAULTSPACK_DEFAULT_PORT,
-            profile_id: "defaults".into(),
-            profile_digest: format!("sha256:{}", "1".repeat(64)),
+            execution_identity: test_execution_identity(),
+            bootstrap_profile_digest: format!("sha256:{}", "1".repeat(64)),
             catalog_revision: format!("sha256:{}", "2".repeat(64)),
             artifact_digest: format!("sha256:{}", "3".repeat(64)),
             function_id: "runtime.tauri.application.default".into(),
@@ -1531,10 +1580,23 @@ mod tests {
         assert!(audit.contains("\"health\":\"ready\""));
         assert!(audit.contains("\"local_auth\":\"verified\""));
         assert!(audit.contains("\"guardian\":\"registered\""));
-        assert!(audit.contains("\"profile_id\":\"defaults\""));
+        assert!(audit.contains("\"profile_id\":\"profile-a\""));
+        assert!(audit.contains("\"profile_revision\":\"sha256:aaaaaaaa"));
+        assert!(audit.contains("\"activation_id\":\"activation:profile-a-test\""));
+        assert!(audit.contains("\"plan_digest\":\"sha256:bbbbbbbb"));
         assert!(audit.contains("\"artifact_digest\":\"sha256:3333"));
         assert!(audit.contains("\"function_id\":\"runtime.tauri.application.default\""));
         assert!(audit.contains("\"provider_id\":\"runtime.tauri.application.default\""));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    fn test_execution_identity() -> crate::host_contract::ExecutionProfileIdentity {
+        crate::host_contract::ExecutionProfileIdentity::new(
+            "profile-a",
+            format!("sha256:{}", "a".repeat(64)),
+            "activation:profile-a-test",
+            format!("sha256:{}", "b".repeat(64)),
+        )
+        .unwrap()
     }
 }

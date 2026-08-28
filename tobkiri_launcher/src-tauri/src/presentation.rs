@@ -350,6 +350,8 @@ struct StoredProfileSelection {
     shell_artifact_digest: String,
     platform: String,
     architecture: String,
+    #[serde(default)]
+    execution_identity: Option<crate::host_contract::ExecutionProfileIdentity>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -371,6 +373,8 @@ pub struct PresentationState {
     pub catalog: PresentationCatalog,
     #[serde(default)]
     pub selection: Option<PresentationSelection>,
+    #[serde(default)]
+    pub execution_identity: Option<crate::host_contract::ExecutionProfileIdentity>,
     pub materialization: PresentationMaterialization,
 }
 
@@ -482,18 +486,32 @@ pub(crate) fn launch_selected_presentation_impl(
     // exact verified Shell artifact has passed pre-admission. The authenticated
     // URL never crosses argv or the environment; only an owner-only one-shot
     // handoff path is passed to the presentation process.
-    let runtime_url =
+    let prepared_runtime =
         crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config)?;
+    if let Some(selection_identity) = state.execution_identity.as_ref() {
+        if !selection_identity.matches(&prepared_runtime.identity) {
+            bail!("selected presentation identity is stale; active execution Profile changed");
+        }
+    }
+    // A selection is a durable artifact preference until an active runtime is
+    // captured. Persisting the exact identity here makes a restart or a second
+    // Shell launch reject a stale selection instead of silently returning to
+    // the packaged bootstrap Profile.
+    write_selection_with_identity(
+        config,
+        &state.catalog,
+        selection,
+        Some(&prepared_runtime.identity),
+    )?;
     let handoff_path = crate::shell_handoff::create_shell_handoff(
         config,
         crate::shell_handoff::ShellHandoffBinding {
-            profile_id: &state.catalog.default_profile_id,
-            profile_digest: &state.catalog.default_profile_digest,
+            identity: &prepared_runtime.identity,
             catalog_revision: &catalog_revision,
             provider_id: &shell.provider_id,
             artifact_id: &artifact.artifact_id,
         },
-        &runtime_url,
+        &prepared_runtime.url,
     )?;
 
     if let Err(error) = launch_verified_artifact(&artifact_path, &handoff_path) {
@@ -705,14 +723,28 @@ fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyRes
 
 fn build_state(config: &AppConfig) -> AnyResult<PresentationState> {
     let catalog = load_catalog(config)?;
-    let selection = read_selection(config, &catalog)?;
-    build_state_from_catalog(config, catalog, selection)
+    let stored = read_stored_selection(config, &catalog)?;
+    let selection = stored.as_ref().map(|stored| PresentationSelection {
+        base_pack_id: stored.base_pack_id.clone(),
+        shell_provider_id: stored.shell_provider_id.clone(),
+    });
+    let execution_identity = stored.and_then(|stored| stored.execution_identity);
+    build_state_from_catalog_with_identity(config, catalog, selection, execution_identity)
 }
 
 fn build_state_from_catalog(
     config: &AppConfig,
+    catalog: PresentationCatalog,
+    selection: Option<PresentationSelection>,
+) -> AnyResult<PresentationState> {
+    build_state_from_catalog_with_identity(config, catalog, selection, None)
+}
+
+fn build_state_from_catalog_with_identity(
+    config: &AppConfig,
     mut catalog: PresentationCatalog,
     selection: Option<PresentationSelection>,
+    execution_identity: Option<crate::host_contract::ExecutionProfileIdentity>,
 ) -> AnyResult<PresentationState> {
     catalog.generated_at = now_seconds();
     for shell in &mut catalog.shell_providers {
@@ -734,6 +766,7 @@ fn build_state_from_catalog(
     Ok(PresentationState {
         catalog,
         selection,
+        execution_identity,
         materialization,
     })
 }
@@ -1592,6 +1625,15 @@ fn write_selection(
     catalog: &PresentationCatalog,
     selection: &PresentationSelection,
 ) -> AnyResult<()> {
+    write_selection_with_identity(config, catalog, selection, None)
+}
+
+fn write_selection_with_identity(
+    config: &AppConfig,
+    catalog: &PresentationCatalog,
+    selection: &PresentationSelection,
+    execution_identity: Option<&crate::host_contract::ExecutionProfileIdentity>,
+) -> AnyResult<()> {
     let base = catalog
         .base_packs
         .iter()
@@ -1621,7 +1663,13 @@ fn write_selection(
             .context("verified Shell artifact has no digest")?,
         platform: artifact.platform.clone(),
         architecture: artifact.architecture.clone(),
+        execution_identity: execution_identity.cloned(),
     };
+    if let Some(identity) = stored.execution_identity.as_ref() {
+        identity
+            .validate()
+            .context("selected presentation execution identity is invalid")?;
+    }
     let directory = config.user_data_dir.join(SELECTION_DIR);
     fs::create_dir_all(&directory).with_context(|| {
         format!(
@@ -1682,6 +1730,18 @@ fn read_selection(
     config: &AppConfig,
     catalog: &PresentationCatalog,
 ) -> AnyResult<Option<PresentationSelection>> {
+    Ok(
+        read_stored_selection(config, catalog)?.map(|stored| PresentationSelection {
+            base_pack_id: stored.base_pack_id,
+            shell_provider_id: stored.shell_provider_id,
+        }),
+    )
+}
+
+fn read_stored_selection(
+    config: &AppConfig,
+    catalog: &PresentationCatalog,
+) -> AnyResult<Option<StoredProfileSelection>> {
     let path = config
         .user_data_dir
         .join(SELECTION_DIR)
@@ -1713,6 +1773,11 @@ fn read_selection(
                 .context("saved exact profile selection is malformed")?;
             if stored.schema != SELECTION_SCHEMA {
                 bail!("saved selection is not a Profile v4 selection");
+            }
+            if let Some(identity) = stored.execution_identity.as_ref() {
+                identity
+                    .validate()
+                    .context("saved selection execution identity is invalid")?;
             }
             // A previously valid v4 selection is an exact authority binding,
             // not a durable preference. If any authenticated catalog binding
@@ -1753,10 +1818,7 @@ fn read_selection(
             if variant.sha256.as_deref() != Some(stored.shell_artifact_digest.as_str()) {
                 return Ok(None);
             }
-            Ok(Some(PresentationSelection {
-                base_pack_id: stored.base_pack_id,
-                shell_provider_id: stored.shell_provider_id,
-            }))
+            Ok(Some(stored))
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
@@ -2528,6 +2590,7 @@ mod tests {
             shell_artifact_digest: bound_digest,
             platform,
             architecture,
+            execution_identity: None,
         };
         fs::write(&selection_path, serde_json::to_vec_pretty(&stored).unwrap()).unwrap();
         assert_eq!(
