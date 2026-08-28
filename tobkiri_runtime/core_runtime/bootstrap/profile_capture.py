@@ -136,13 +136,24 @@ def host_profile_catalog(
     base_dir: Path | None = None,
     *,
     bundle_root: Path | None = None,
+    user_data_root: Path | None = None,
 ) -> BundledCatalog:
-    """Return the verified artifact catalog plus Host-owned Profile definitions."""
+    """Return artifacts plus Host-owned Profile definitions.
+
+    ``user_data_root`` is reserved for callers that already bound the Host
+    state to a canonical Authority path.  It takes precedence over the
+    ambient environment so a recapture cannot mix an Authority store from one
+    Host with Profile definitions from another.
+    """
 
     bundled = BundledCatalog.load(
         _bundle_root(base_dir) if bundle_root is None else bundle_root
     )
-    user_data = _user_data_root(base_dir)
+    user_data = (
+        Path(user_data_root).resolve()
+        if user_data_root is not None
+        else _user_data_root(base_dir)
+    )
     definitions = ProfileDefinitionStore(user_data)
     legacy_collection = user_data / "settings" / "startup_profiles.json"
     if (

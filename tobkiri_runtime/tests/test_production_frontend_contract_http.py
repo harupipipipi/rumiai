@@ -29,7 +29,6 @@ from core_runtime.frontend_contract_routes import (
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
-from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.errors import BackendUnavailableError
@@ -537,19 +536,45 @@ def test_runtime_surface_reads_use_the_canonical_broker_contract(
 
 def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     production_server,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    server, _session, _authority = production_server
+    from tests.conformance_support.packaged_profile import (
+        packaged_profile_bundle_root,
+    )
+
+    server, _session, authority = production_server
     cookie, csrf, origin = _authenticate(server)
-    definitions = ProfileDefinitionStore(profile_capture.runtime_user_data_root())
-    defaults = definitions.get_profile("defaults")
-    assert defaults is not None
+    status, registry_response, _ = _request(
+        server,
+        "GET",
+        "/api/v4/profiles",
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, registry_response
+    registry = registry_response["data"]
+    defaults = next(item for item in registry["profiles"] if item["profile_id"] == "defaults")
     for profile_id, display_name in (("alpha", "Alpha"), ("beta", "Beta")):
-        definitions.duplicate_profile(
-            "defaults",
-            new_profile_id=profile_id,
-            display_name=display_name,
-            expected_profile_revision=defaults.profile_revision,
+        status, registry_response, _ = _request(
+            server,
+            "POST",
+            "/api/v4/profiles/duplicate",
+            body={
+                "profile_id": "defaults",
+                "new_profile_id": profile_id,
+                "display_name": display_name,
+                "expected_profile_revision": defaults["profile_revision"],
+                "expected_store_generation": registry["generation"],
+            },
+            headers={
+                "Cookie": cookie,
+                "Origin": origin,
+                "X-Rumi-CSRF": csrf,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
         )
+        assert status == 200, registry_response
+        registry = registry_response["data"]
     status, catalog_response, _ = _request(
         server,
         "GET",
@@ -636,6 +661,96 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     )
     assert status == 200, activated
     assert activated["data"]["state"] == "active"
+
+    status, refreshed_profile, _ = _request(
+        server,
+        "GET",
+        _contract("GET", "/api/runtime-surface/profile"),
+        headers={"Cookie": cookie, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+    )
+    assert status == 200, refreshed_profile
+    refreshed = refreshed_profile["data"]
+    refreshed_identity = (
+        refreshed["profile_id"],
+        refreshed["profile_revision"],
+        refreshed["data"]["activation_record"]["activation_id"],
+        refreshed["plan_digest"],
+    )
+    assert refreshed_identity == (
+        activated["data"]["profile_id"],
+        refreshed["profile_revision"],
+        activated["data"]["activation_id"],
+        activated["data"]["plan_digest"],
+    )
+
+    # A process restart must bind the registry to the Authority path, even if
+    # an ambient environment override points at a different Host root.
+    restart_active = profile_capture.capture_active_profile()
+    authority_path = authority.path.resolve()
+    authority_user_data = authority_path.parent.parent
+    wrong_user_data = tmp_path / "wrong-user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(wrong_user_data))
+    restart_authority = AuthorityStore(authority_path)
+    restart_bindings = tuple(server._contract_routes.values())
+    restarted_session = capture_production_dispatch(
+        restart_active,
+        bundle_root=packaged_profile_bundle_root(),
+        ecosystem_root=RUNTIME_ROOT / "ecosystem",
+        authority_store=restart_authority,
+        frontend_contract_bindings=restart_bindings,
+    )
+    assert (
+        restarted_session.profile_id,
+        restart_active.resolved.plan["profile_revision"],
+        restarted_session.plan_digest,
+    ) == (
+        refreshed_identity[0],
+        refreshed_identity[1],
+        refreshed_identity[3],
+    )
+    restarted_session.close()
+
+    # Re-open the HTTP boundary with the freshly captured session and verify
+    # that the same identity is exposed after restart.
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(authority_user_data))
+    server.stop()
+    restarted_authority = AuthorityStore(authority_path)
+    restarted_session = capture_production_dispatch(
+        restart_active,
+        bundle_root=packaged_profile_bundle_root(),
+        ecosystem_root=RUNTIME_ROOT / "ecosystem",
+        authority_store=restarted_authority,
+        frontend_contract_bindings=restart_bindings,
+    )
+    restarted_server = PackAPIServer(
+        port=0,
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
+        dispatch_session=restarted_session,
+        contract_bindings=restart_bindings,
+    )
+    try:
+        restarted_server.start()
+        restart_cookie, _restart_csrf, _restart_origin = _authenticate(restarted_server)
+        status, restarted_profile, _ = _request(
+            restarted_server,
+            "GET",
+            _contract("GET", "/api/runtime-surface/profile"),
+            headers={
+                "Cookie": restart_cookie,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status == 200, restarted_profile
+        restarted = restarted_profile["data"]
+        assert (
+            restarted["profile_id"],
+            restarted["profile_revision"],
+            restarted["data"]["activation_record"]["activation_id"],
+            restarted["plan_digest"],
+        ) == refreshed_identity
+    finally:
+        restarted_server.stop()
+        restarted_session.close()
 
 
 def test_runtime_surface_operation_identity_invokes_exact_capability_binding(

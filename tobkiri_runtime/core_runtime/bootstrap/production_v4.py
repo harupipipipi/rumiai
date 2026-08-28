@@ -1,4 +1,4 @@
-"""Assemble the sole live Pack v4 composition from one active snapshot."""
+"""Assemble the live Pack v4 composition from one active snapshot."""
 
 from __future__ import annotations
 
@@ -242,6 +242,30 @@ def _pack_root_identities(pack_roots: Mapping[str, Path]) -> dict[str, tuple[int
         stat_result = root.stat()
         identities[pack_id] = (int(stat_result.st_dev), int(stat_result.st_ino))
     return identities
+
+
+def _host_profile_catalog(
+    bundle_root: Path,
+    *,
+    authority_user_data: Path,
+) -> BundledCatalog:
+    """Capture the Host catalog without dropping registry-owned Profiles.
+
+    ``BundledCatalog.load`` verifies the Host-global artifact inventory, but it
+    intentionally contains only packaged Profile documents.  Runtime capture
+    also needs the immutable successor definition selected by the Host
+    registry, especially after a Named Profile activation.  Keep both inputs
+    in one catalog snapshot so activation revalidation and dispatch cannot
+    disagree about Profile identity.
+    """
+
+    from .profile_capture import host_profile_catalog
+
+    return host_profile_catalog(
+        base_dir=authority_user_data,
+        bundle_root=bundle_root,
+        user_data_root=authority_user_data,
+    )
 
 
 def _shell_artifact(
@@ -525,6 +549,7 @@ def _commit_pack_control_authority(
 ) -> None:
     activation = active.activation
     profile = active.resolved.profile
+    profile_identity = str(profile["profile_id"])
     decided_at = datetime.fromisoformat(
         str(activation["created_at"]).replace("Z", "+00:00")
     ).timestamp()
@@ -547,10 +572,13 @@ def _commit_pack_control_authority(
     # of its durable identity.  This preserves prior rows without replaying or
     # colliding with them when an unchanged Pack is activated again.
     approval = ApprovalRecord(
-        approval_id=(f"approval.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
+        approval_id=(
+            f"approval.{profile_identity}.{authority_label}."
+            f"{operation_suffix}.{record_identity}"
+        ),
         snapshot_digest=canonical_digest(
             {
-                "ceremony": "defaults.activate",
+                "ceremony": f"{profile_identity}.activate",
                 "activation_id": activation["activation_id"],
                 "plan_digest": activation["plan_digest"],
                 "profile_authority_snapshot_digest": activation[
@@ -564,7 +592,7 @@ def _commit_pack_control_authority(
         actor_id=(
             "user.pack-approval"
             if pack_approval_revision is not None
-            else "user.defaults-confirmation"
+            else f"user.{profile_identity}-confirmation"
         ),
         decision="approved",
         decided_at=decided_at,
@@ -584,7 +612,10 @@ def _commit_pack_control_authority(
         else None
     )
     provider = ProviderAuthorityRecord(
-        record_id=(f"provider.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
+        record_id=(
+            f"provider.{profile_identity}.{authority_label}."
+            f"{operation_suffix}.{record_identity}"
+        ),
         provider=target,
         execution_domain_id=target_domain.domain_id,
         execution_domain_identity_digest=target_domain.identity_digest,
@@ -593,7 +624,7 @@ def _commit_pack_control_authority(
         security_epoch=int(activation["security_epoch"]),
         trust_provenance_digest=canonical_digest(
             {
-                "source": "locked-defaults-profile",
+                "source": f"locked-{profile_identity}-profile",
                 "plan_digest": activation["plan_digest"],
                 "target": target.to_dict(),
             }
@@ -612,7 +643,10 @@ def _commit_pack_control_authority(
         host_broker_binding="tobkiri.request-broker.v4",
     )
     grant = GrantRecord(
-        grant_id=(f"grant.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
+        grant_id=(
+            f"grant.{profile_identity}.{authority_label}."
+            f"{operation_suffix}.{record_identity}"
+        ),
         caller=caller,
         target=target,
         profile_id=str(profile["profile_id"]),
@@ -828,12 +862,16 @@ def capture_production_dispatch(
     profile_id = str(active.resolved.profile["profile_id"])
     authority_workspace = authority_user_data / "workspaces" / profile_id
     try:
+        catalog = _host_profile_catalog(
+            bundle_root,
+            authority_user_data=authority_user_data,
+        )
         activation_store = ActivationStore(
             authority_workspace / "activation",
             authority_workspace,
             profile_id=profile_id,
             authority=authority_store,
-            catalog=BundledCatalog.load(bundle_root),
+            catalog=catalog,
         )
         persisted_active = activation_store.load_active_snapshot()
     except Exception as exc:
@@ -850,7 +888,6 @@ def capture_production_dispatch(
     active = persisted_active
     activation_suffix = str(active.activation["fencing_token"])
 
-    catalog = BundledCatalog.load(bundle_root)
     profile = active.resolved.profile
     lock = active.resolved.lock
     plan = active.resolved.plan
