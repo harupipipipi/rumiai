@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import shutil
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -61,6 +62,16 @@ def _validate_digest(value: object, label: str) -> str:
     return value
 
 
+def _require_regular_file(path: Path, label: str) -> None:
+    """Reject links and special files before reading release metadata."""
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise InventoryError(f"{label} is unavailable: {path}") from error
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise InventoryError(f"{label} must be a regular file: {path}")
+
+
 def _target_contract(
     target: str, platform: str | None = None, architecture: str | None = None
 ) -> tuple[str, str, tuple[str, ...]]:
@@ -112,6 +123,8 @@ def _check_artifact_suffixes(
 
 
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
+    if path.is_symlink():
+        raise InventoryError(f"release metadata output may not be a symlink: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical_json(value))
 
@@ -184,6 +197,7 @@ def collect_target(
 
 
 def _load_object(path: Path) -> dict[str, Any]:
+    _require_regular_file(path, "release metadata")
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -271,6 +285,8 @@ def _required_target_set(required_targets: Sequence[str] | None) -> set[str]:
     values = list(TARGETS) if required_targets is None else list(required_targets)
     if not values:
         raise InventoryError("release inventory requires at least one target")
+    if any(not isinstance(value, str) or not value for value in values):
+        raise InventoryError("release inventory target requirement is malformed")
     if len(values) != len(set(values)):
         raise InventoryError("release inventory target requirement is duplicated")
     unsupported = sorted(set(values) - set(TARGETS))
@@ -437,6 +453,10 @@ def verify_inventory(
             raise InventoryError("release inventory artifact identity is malformed")
         if record_source_revision != source_revision:
             raise InventoryError("release inventory artifact source binding mismatch")
+        if target not in expected_targets:
+            raise InventoryError(
+                "release inventory artifact target is missing or unexpected"
+            )
         expected_platform, expected_architecture, suffixes = _target_contract(
             target, platform, architecture
         )

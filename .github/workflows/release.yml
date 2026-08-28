@@ -14,9 +14,9 @@ permissions:
 
 env:
   TOBKIRI_RELEASE_REPOSITORY: harupipipipi/tobkiri
-  # Keep the inventory contract identical to the target matrix above. Add a
-  # target here only in the same change that adds its real packaging job.
-  TOBKIRI_REQUIRED_RELEASE_TARGET: aarch64-apple-darwin
+  # Keep this JSON array identical to the target matrix below. Add a target
+  # here only in the same change that adds its real packaging job.
+  TOBKIRI_REQUIRED_RELEASE_TARGETS: '["aarch64-apple-darwin"]'
   PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
@@ -768,32 +768,47 @@ jobs:
           GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
         run: |
           import hashlib
+          import json
           import os
           import subprocess
           import sys
 
           root = os.environ["GATHER_ROOT"]
           inventory_path = os.path.join(root, "release-inventory.json")
-          subprocess.run(
-              [
-                  sys.executable,
-                  "scripts/release_inventory.py",
-                  "create",
-                  "--root",
-                  root,
-                  "--output",
-                  inventory_path,
-                  "--assets-dir",
-                  os.path.join(root, "release-assets"),
-                  "--source-revision",
-                  os.environ["SOURCE_REVISION"],
-                  "--tag",
-                  os.environ["GITHUB_REF_NAME"],
-                  "--required-target",
-                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
-              ],
-              check=True,
+          required_targets = json.loads(
+              os.environ["TOBKIRI_REQUIRED_RELEASE_TARGETS"]
           )
+          if (
+              not isinstance(required_targets, list)
+              or not required_targets
+              or any(
+                  not isinstance(target, str) or not target
+                  for target in required_targets
+              )
+              or len(required_targets) != len(set(required_targets))
+          ):
+              raise SystemExit(
+                  "TOBKIRI_REQUIRED_RELEASE_TARGETS must be a non-empty, "
+                  "duplicate-free JSON list"
+              )
+          command = [
+              sys.executable,
+              "scripts/release_inventory.py",
+              "create",
+              "--root",
+              root,
+              "--output",
+              inventory_path,
+              "--assets-dir",
+              os.path.join(root, "release-assets"),
+              "--source-revision",
+              os.environ["SOURCE_REVISION"],
+              "--tag",
+              os.environ["GITHUB_REF_NAME"],
+          ]
+          for required_target in required_targets:
+              command.extend(["--required-target", required_target])
+          subprocess.run(command, check=True)
           with open(inventory_path, "rb") as inventory_file:
               inventory_sha256 = "sha256:" + hashlib.sha256(
                   inventory_file.read()
@@ -808,30 +823,45 @@ jobs:
           SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
           GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
         run: |
+          import json
           import os
           import subprocess
           import sys
 
-          subprocess.run(
-              [
-                  sys.executable,
-                  "scripts/release_inventory.py",
-                  "verify",
-                  "--inventory",
-                  os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
-                  "--assets-dir",
-                  os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
-                  "--source-revision",
-                  os.environ["SOURCE_REVISION"],
-                  "--tag",
-                  os.environ["GITHUB_REF_NAME"],
-                  "--inventory-sha256",
-                  os.environ["INVENTORY_SHA256"],
-                  "--required-target",
-                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
-              ],
-              check=True,
+          required_targets = json.loads(
+              os.environ["TOBKIRI_REQUIRED_RELEASE_TARGETS"]
           )
+          if (
+              not isinstance(required_targets, list)
+              or not required_targets
+              or any(
+                  not isinstance(target, str) or not target
+                  for target in required_targets
+              )
+              or len(required_targets) != len(set(required_targets))
+          ):
+              raise SystemExit(
+                  "TOBKIRI_REQUIRED_RELEASE_TARGETS must be a non-empty, "
+                  "duplicate-free JSON list"
+              )
+          command = [
+              sys.executable,
+              "scripts/release_inventory.py",
+              "verify",
+              "--inventory",
+              os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
+              "--assets-dir",
+              os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
+              "--source-revision",
+              os.environ["SOURCE_REVISION"],
+              "--tag",
+              os.environ["GITHUB_REF_NAME"],
+              "--inventory-sha256",
+              os.environ["INVENTORY_SHA256"],
+          ]
+          for required_target in required_targets:
+              command.extend(["--required-target", required_target])
+          subprocess.run(command, check=True)
 
       - name: Attest the single release inventory subject
         uses: actions/attest-build-provenance@bd77c077858b8d561b7a36cbe48ef4cc642ca39d # v2.2.2
@@ -859,30 +889,45 @@ jobs:
           SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
           GATHER_ROOT: ${{ runner.temp }}/tobkiri-release-gather
         run: |
+          import json
           import os
           import subprocess
           import sys
 
-          subprocess.run(
-              [
-                  sys.executable,
-                  "scripts/release_inventory.py",
-                  "verify",
-                  "--inventory",
-                  os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
-                  "--assets-dir",
-                  os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
-                  "--source-revision",
-                  os.environ["SOURCE_REVISION"],
-                  "--tag",
-                  os.environ["GITHUB_REF_NAME"],
-                  "--inventory-sha256",
-                  os.environ["INVENTORY_SHA256"],
-                  "--required-target",
-                  os.environ["TOBKIRI_REQUIRED_RELEASE_TARGET"],
-              ],
-              check=True,
+          required_targets = json.loads(
+              os.environ["TOBKIRI_REQUIRED_RELEASE_TARGETS"]
           )
+          if (
+              not isinstance(required_targets, list)
+              or not required_targets
+              or any(
+                  not isinstance(target, str) or not target
+                  for target in required_targets
+              )
+              or len(required_targets) != len(set(required_targets))
+          ):
+              raise SystemExit(
+                  "TOBKIRI_REQUIRED_RELEASE_TARGETS must be a non-empty, "
+                  "duplicate-free JSON list"
+              )
+          command = [
+              sys.executable,
+              "scripts/release_inventory.py",
+              "verify",
+              "--inventory",
+              os.path.join(os.environ["GATHER_ROOT"], "release-inventory.json"),
+              "--assets-dir",
+              os.path.join(os.environ["GATHER_ROOT"], "release-assets"),
+              "--source-revision",
+              os.environ["SOURCE_REVISION"],
+              "--tag",
+              os.environ["GITHUB_REF_NAME"],
+              "--inventory-sha256",
+              os.environ["INVENTORY_SHA256"],
+          ]
+          for required_target in required_targets:
+              command.extend(["--required-target", required_target])
+          subprocess.run(command, check=True)
 
       - name: Upload one reviewable draft release
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
