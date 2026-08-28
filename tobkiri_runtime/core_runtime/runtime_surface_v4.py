@@ -411,6 +411,15 @@ class RuntimeProfileChangeService:
             "profile": dict(resolved.profile),
             "profile_lock": dict(resolved.lock),
             "resolved_plan": dict(resolved.plan),
+            "selection": {
+                "selected_profile_id": profile_id,
+                "execution_profile_id": str(current["profile_id"]),
+                "execution_profile_revision": revision,
+                "execution_plan_digest": plan_digest,
+                "execution_activation_id": str(
+                    current_data["activation_record"]["activation_id"]
+                ),
+            },
             "predecessor": {
                 "profile_revision": revision,
                 "plan_digest": plan_digest,
@@ -807,15 +816,22 @@ class RuntimeSurfaceService:
         *,
         expected_profile_revision: str | None = None,
         expected_plan_digest: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
     ) -> dict[str, object]:
         """Return the complete active Profile runtime projection."""
 
+        selected_id = _coalesce_selected_profile_id(
+            profile_id,
+            selected_profile_id,
+        )
         return self._run_read(
             "canonical runtime snapshot timed out",
             lambda deadline: self._read_profile(
                 deadline,
                 expected_profile_revision=expected_profile_revision,
                 expected_plan_digest=expected_plan_digest,
+                selected_profile_id=selected_id,
             ),
         )
 
@@ -825,8 +841,25 @@ class RuntimeSurfaceService:
         *,
         expected_profile_revision: str | None,
         expected_plan_digest: str | None,
+        selected_profile_id: str | None,
     ) -> dict[str, object]:
         snapshot = self._snapshot(deadline)
+        active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
+        if (
+            selected_profile_id is not None
+            and selected_profile_id != active_profile_id
+        ):
+            data = self._browsing_profile_projection(
+                snapshot,
+                selected_profile_id,
+            )
+            deadline.checkpoint()
+            return self._read_envelope(
+                snapshot,
+                surface="profile",
+                data=data,
+                selected_profile_id=selected_profile_id,
+            )
         self._check_expected_bindings(
             snapshot.active,
             expected_profile_revision=expected_profile_revision,
@@ -836,14 +869,25 @@ class RuntimeSurfaceService:
         deadline.checkpoint()
         return self._read_envelope(snapshot, surface="profile", data=data)
 
-    def read_profile_catalog(self, *, session_id: str | None = None) -> dict[str, object]:
+    def read_profile_catalog(
+        self,
+        *,
+        session_id: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> dict[str, object]:
         """Return all verified Profile definitions without changing selection."""
 
+        selected_id = _coalesce_selected_profile_id(
+            profile_id,
+            selected_profile_id,
+        )
         return self._run_read(
             "canonical Profile catalog timed out",
             lambda deadline: self._read_profile_catalog(
                 deadline,
                 session_id=session_id,
+                selected_profile_id=selected_id,
             ),
         )
 
@@ -852,6 +896,7 @@ class RuntimeSurfaceService:
         deadline: _ReadDeadline,
         *,
         session_id: str | None,
+        selected_profile_id: str | None,
     ) -> dict[str, object]:
         try:
             deadline.checkpoint()
@@ -883,19 +928,30 @@ class RuntimeSurfaceService:
                 catalog,
                 active,
                 candidates=candidate_map,
+                selected_profile_id=selected_profile_id,
             )
         except ProfileResolutionDenied as error:
             raise _map_profile_error(error) from error
         except RuntimeSurfaceError:
             raise
-        except (OSError, RuntimeError, ValueError) as error:
+        except ValueError as error:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "requested browsing Profile is unavailable",
+            ) from error
+        except (OSError, RuntimeError) as error:
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.API_FAILURE,
                 "canonical Profile catalog is unavailable",
             ) from error
         deadline.checkpoint()
         snapshot = RuntimeSurfaceSnapshot(active=active, catalog=catalog)
-        return self._read_envelope(snapshot, surface="profiles", data=projection)
+        return self._read_envelope(
+            snapshot,
+            surface="profiles",
+            data=projection,
+            selected_profile_id=selected_profile_id,
+        )
 
     def require_catalog_binding(
         self,
@@ -939,9 +995,15 @@ class RuntimeSurfaceService:
         *,
         expected_profile_revision: str | None = None,
         expected_plan_digest: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
     ) -> dict[str, object]:
         """Return a Pack, Contract, Operation, or principal projection."""
 
+        selected_id = _coalesce_selected_profile_id(
+            profile_id,
+            selected_profile_id,
+        )
         normalized = str(view or "").strip().lower()
         allowed = {"packs", "contracts", "operations", "principals"}
         if normalized not in allowed:
@@ -956,6 +1018,7 @@ class RuntimeSurfaceService:
                 deadline=deadline,
                 expected_profile_revision=expected_profile_revision,
                 expected_plan_digest=expected_plan_digest,
+                selected_profile_id=selected_id,
             ),
         )
 
@@ -966,8 +1029,28 @@ class RuntimeSurfaceService:
         deadline: _ReadDeadline,
         expected_profile_revision: str | None,
         expected_plan_digest: str | None,
+        selected_profile_id: str | None,
     ) -> dict[str, object]:
         snapshot = self._snapshot(deadline)
+        active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
+        if (
+            selected_profile_id is not None
+            and selected_profile_id != active_profile_id
+        ):
+            browsing = self._browsing_advanced_projection(
+                snapshot,
+                selected_profile_id,
+            )
+            data = {normalized: browsing[normalized]}
+            if normalized == "contracts":
+                data["routes"] = browsing["routes"]
+            deadline.checkpoint()
+            return self._read_envelope(
+                snapshot,
+                surface=normalized,
+                data=data,
+                selected_profile_id=selected_profile_id,
+            )
         self._check_expected_bindings(
             snapshot.active,
             expected_profile_revision=expected_profile_revision,
@@ -985,15 +1068,32 @@ class RuntimeSurfaceService:
             data["routes"] = advanced["routes"]
         return self._read_envelope(snapshot, surface=normalized, data=data)
 
-    def read_settings(self) -> dict[str, object]:
+    def read_settings(
+        self,
+        *,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> dict[str, object]:
         """Return user preferences and immutable runtime settings separately."""
 
+        selected_id = _coalesce_selected_profile_id(
+            profile_id,
+            selected_profile_id,
+        )
         return self._run_read(
             "canonical runtime settings timed out",
-            self._read_settings,
+            lambda deadline: self._read_settings(
+                deadline,
+                selected_profile_id=selected_id,
+            ),
         )
 
-    def _read_settings(self, deadline: _ReadDeadline) -> dict[str, object]:
+    def _read_settings(
+        self,
+        deadline: _ReadDeadline,
+        *,
+        selected_profile_id: str | None,
+    ) -> dict[str, object]:
         snapshot = self._snapshot(deadline)
         user_settings: dict[str, object] | None = None
         if self._user_settings_reader is not None:
@@ -1009,6 +1109,55 @@ class RuntimeSurfaceService:
                     "Launcher-local settings adapter is unavailable",
                 ) from error
         active = snapshot.active
+        active_profile_id = str(active.resolved.profile["profile_id"])
+        if (
+            selected_profile_id is not None
+            and selected_profile_id != active_profile_id
+        ):
+            entry = self._browsing_profile_entry(snapshot, selected_profile_id)
+            definition = snapshot.catalog.profiles[selected_profile_id]
+            data = {
+                "user_settings": {
+                    "scope": "user",
+                    "source": "launcher_local",
+                    "state": "unavailable_from_runtime"
+                    if user_settings is None
+                    else "available_from_explicit_adapter",
+                    "mutable_via_profile_activation": False,
+                    **(
+                        {"values": user_settings}
+                        if user_settings is not None
+                        else {}
+                    ),
+                },
+                "runtime_profile_settings": {
+                    "scope": "runtime_profile",
+                    "mutable_via_profile_activation": True,
+                    "state": "browsing_only",
+                    "profile_id": selected_profile_id,
+                    "profile_revision": canonical_digest(definition),
+                    "catalog_revision": definition.get("catalog_revision"),
+                    "plan_digest": None,
+                    "lock_digest": None,
+                    "execution_profile_id": active_profile_id,
+                    "execution_profile_revision": str(
+                        active.resolved.plan["profile_revision"]
+                    ),
+                    "execution_activation_id": str(
+                        active.activation["activation_id"]
+                    ),
+                    "execution_plan_digest": str(
+                        active.resolved.plan["plan_digest"]
+                    ),
+                },
+                "profile_catalog_entry": entry,
+            }
+            return self._read_envelope(
+                snapshot,
+                surface="settings",
+                data=data,
+                selected_profile_id=selected_profile_id,
+            )
         data = {
             "user_settings": {
                 "scope": "user",
@@ -1038,6 +1187,7 @@ class RuntimeSurfaceService:
         *,
         surface: str,
         data: Mapping[str, object],
+        selected_profile_id: str | None = None,
     ) -> dict[str, object]:
         """Bind one surface payload to the exact active canonical records."""
 
@@ -1045,7 +1195,7 @@ class RuntimeSurfaceService:
         profile = active.resolved.profile
         lock = active.resolved.lock
         plan = active.resolved.plan
-        return {
+        envelope: dict[str, object] = {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "surface": surface,
             "state": "ready",
@@ -1083,6 +1233,19 @@ class RuntimeSurfaceService:
             },
             "data": dict(data),
         }
+        if selected_profile_id is not None:
+            envelope.update(
+                {
+                    "selected_profile_id": selected_profile_id,
+                    "execution_profile_id": str(profile["profile_id"]),
+                    "selection_state": (
+                        "active_execution"
+                        if selected_profile_id == str(profile["profile_id"])
+                        else "browsing"
+                    ),
+                }
+            )
+        return envelope
 
     def _snapshot(self, deadline: _ReadDeadline) -> RuntimeSurfaceSnapshot:
         try:
@@ -1176,6 +1339,228 @@ class RuntimeSurfaceService:
                 "security_epoch": int(active.activation["security_epoch"]),
                 "fencing_token": int(active.activation["fencing_token"]),
             },
+        }
+
+    def _browsing_profile_entry(
+        self,
+        snapshot: RuntimeSurfaceSnapshot,
+        selected_profile_id: str,
+    ) -> Mapping[str, Any]:
+        """Return one non-active catalog row without creating an execution plan."""
+
+        from .profile_catalog_v4 import project_profile_catalog
+
+        try:
+            projection = project_profile_catalog(
+                snapshot.catalog,
+                snapshot.active,
+                selected_profile_id=selected_profile_id,
+            )
+        except ValueError as error:
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "requested browsing Profile is unavailable",
+            ) from error
+        entry = next(
+            (
+                item
+                for item in projection["profiles"]
+                if item["profile_id"] == selected_profile_id
+            ),
+            None,
+        )
+        if not isinstance(entry, Mapping):
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "requested browsing Profile is unavailable",
+            )
+        return entry
+
+    def _browsing_profile_projection(
+        self,
+        snapshot: RuntimeSurfaceSnapshot,
+        selected_profile_id: str,
+    ) -> dict[str, object]:
+        """Project a selected Profile while retaining the active execution context."""
+
+        entry = self._browsing_profile_entry(snapshot, selected_profile_id)
+        definition = snapshot.catalog.profiles[selected_profile_id]
+        active = snapshot.active
+        active_profile_id = str(active.resolved.profile["profile_id"])
+        return {
+            "selection": {
+                "state": "browsing",
+                "selected_profile_id": selected_profile_id,
+                "execution_profile_id": active_profile_id,
+                "execution_profile_revision": str(
+                    active.resolved.plan["profile_revision"]
+                ),
+                "execution_activation_id": str(active.activation["activation_id"]),
+                "execution_plan_digest": str(active.resolved.plan["plan_digest"]),
+            },
+            "profile": {
+                "profile_id": selected_profile_id,
+                "display_name": str(
+                    definition.get("display_name") or selected_profile_id
+                ),
+                "profile_revision": canonical_digest(definition),
+                "catalog_revision": definition.get("catalog_revision"),
+            },
+            "profile_document": dict(definition),
+            "base": dict(entry["bindings"]["base"]),
+            "shell": dict(entry["bindings"]["shell"]),
+            "application": dict(entry["bindings"]["application"]),
+            "pack_closure": list(entry["pack_closure"]),
+            "profile_catalog_entry": dict(entry),
+            "profile_lock": None,
+            "resolved_plan": None,
+            "activation_record": None,
+            "authority_snapshot": dict(entry["authority_snapshot"]),
+        }
+
+    def _browsing_advanced_projection(
+        self,
+        snapshot: RuntimeSurfaceSnapshot,
+        selected_profile_id: str,
+    ) -> dict[str, object]:
+        """Project inspectable catalog metadata without active invocation authority."""
+
+        entry = self._browsing_profile_entry(snapshot, selected_profile_id)
+        definition = snapshot.catalog.profiles[selected_profile_id]
+        closure = cast(list[Mapping[str, Any]], entry["pack_closure"])
+        packs: list[dict[str, object]] = []
+        contracts: list[dict[str, object]] = []
+        operations: list[dict[str, object]] = []
+        principals: list[dict[str, object]] = []
+        for locked in closure:
+            pack_id = str(locked["pack_id"])
+            manifest = snapshot.catalog.packs.get(pack_id)
+            if manifest is None:
+                continue
+            pack = manifest["pack"]
+            packs.append(
+                {
+                    "pack_id": pack_id,
+                    "role": str(locked.get("role") or "provider"),
+                    "kind": str(pack["kind"]),
+                    "version": str(pack["version"]),
+                    "display_name": str(pack["display_name"]),
+                    "artifact_digest": str(pack["artifact_digest"]),
+                    "artifact_ref": f"pack-v4://{pack_id}@{pack['artifact_digest']}",
+                    "artifacts": [
+                        _artifact_projection(pack_id, artifact)
+                        for artifact in manifest["artifacts"]
+                    ],
+                    "pack_dependencies": dict(
+                        manifest["requirements"]["pack_dependencies"]
+                    ),
+                    "contract_dependencies": [
+                        dict(item)
+                        for item in manifest["requirements"]["contract_dependencies"]
+                    ],
+                    "installed": False,
+                    "enabled": False,
+                    "approved": False,
+                    "required": True,
+                    "invokable_operations": [],
+                    "reason": "browsing_only",
+                }
+            )
+            for contract in manifest["contracts"]:
+                contract_id = str(contract["contract_id"])
+                revision = str(contract["revision_digest"])
+                functions = [
+                    str(function["id"])
+                    for function in manifest["functions"]
+                    if function["contract_revision_digest"] == revision
+                ]
+                contracts.append(
+                    {
+                        "pack_id": pack_id,
+                        "contract_id": contract_id,
+                        "revision_digest": revision,
+                        "operations": list(contract["operations"]),
+                        "operation_catalog": [],
+                        "schema_state": "browsing",
+                        "provider_semantics": None,
+                        "provenance": None,
+                        "provider_function_ids": sorted(functions),
+                    }
+                )
+                for operation_id in contract["operations"]:
+                    operation_name = str(operation_id)
+                    function_id = functions[0] if len(functions) == 1 else ""
+                    edge = next(
+                        (
+                            item
+                            for item in definition.get("requested_edges", [])
+                            if item.get("contract_id") == contract_id
+                            and item.get("operation_id") == operation_name
+                        ),
+                        {},
+                    )
+                    row = {
+                        "pack_id": pack_id,
+                        "owner_pack_id": pack_id,
+                        "contract_id": contract_id,
+                        "operation_id": operation_name,
+                        "contribution_id": (
+                            f"browsing::{selected_profile_id}::{pack_id}::"
+                            f"{contract_id}::{operation_name}"
+                        ),
+                        "catalog_digest": str(
+                            entry["definition"]["digest"]
+                        ),
+                        "domain_kind": "browsing",
+                        "artifact_digest": str(pack["artifact_digest"]),
+                        "function_id": function_id,
+                        "function_principal_id": (
+                            f"browsing::{selected_profile_id}::{function_id}"
+                        ),
+                        "contract_revision_digest": revision,
+                        "function_implementation_digest": None,
+                        "caller_function_id": str(
+                            edge.get("caller_function_id") or ""
+                        ),
+                        "target_provider_id": str(
+                            edge.get("target_provider_id") or function_id
+                        ),
+                        "authority_reference": None,
+                        "invokable": False,
+                        "invocation_reason": "browsing_only",
+                        "route": None,
+                    }
+                    operations.append(row)
+                    principals.append(
+                        {
+                            **row,
+                            "principal_id": row["function_principal_id"],
+                            "parent_artifact_digest": str(pack["artifact_digest"]),
+                            "status": "browsing",
+                            "authority": None,
+                        }
+                    )
+        return {
+            "packs": sorted(packs, key=lambda item: str(item["pack_id"])),
+            "contracts": sorted(
+                contracts,
+                key=lambda item: (
+                    str(item["pack_id"]),
+                    str(item["contract_id"]),
+                ),
+            ),
+            "operations": sorted(
+                operations,
+                key=lambda item: (
+                    str(item["contract_id"]),
+                    str(item["operation_id"]),
+                ),
+            ),
+            "principals": sorted(
+                principals,
+                key=lambda item: str(item["function_id"]),
+            ),
+            "routes": [],
         }
 
     @staticmethod
@@ -1450,20 +1835,15 @@ class RuntimeSurfaceService:
         from .frontend_contract_routes import load_frontend_contract_bindings
 
         runtime_root = Path(__file__).resolve().parents[1]
-        application = snapshot.catalog.packs.get("runtime.tauri.application.default")
-        if application is None:
-            raise RuntimeSurfaceError(
-                RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
-                "verified Application Pack is unavailable",
-            )
+        application = _active_application_manifest(snapshot)
+        map_artifact = _frontend_map_artifact(application)
         try:
             bindings = tuple(
                 load_frontend_contract_bindings(
                     runtime_root
                     / "ecosystem"
                     / "defaultspack"
-                    / "defaultspack"
-                    / "frontend_contract_map.v4.json",
+                    / Path(*PurePosixPath(str(map_artifact["path"])).parts),
                     application,
                 )
             )
@@ -1531,24 +1911,65 @@ def _map_profile_error(error: ProfileResolutionDenied) -> RuntimeSurfaceError:
 
 
 def _frontend_map_digest(snapshot: RuntimeSurfaceSnapshot) -> str:
-    application = snapshot.catalog.packs.get("runtime.tauri.application.default")
-    if application is None:
+    return str(_frontend_map_artifact(_active_application_manifest(snapshot))["digest"])
+
+
+def _active_application_manifest(
+    snapshot: RuntimeSurfaceSnapshot,
+) -> Mapping[str, Any]:
+    """Return the Application Pack selected by the active ResolvedPlan."""
+
+    application = snapshot.active.resolved.plan.get("application")
+    application_id = (
+        str(application.get("pack_id") or "")
+        if isinstance(application, Mapping)
+        else ""
+    )
+    if not application_id:
+        application_id = next(
+            (
+                str(item["pack_id"])
+                for item in snapshot.active.resolved.profile.get("packs", [])
+                if item.get("role") == "application"
+            ),
+            "",
+        )
+    manifest = snapshot.catalog.packs.get(application_id)
+    if manifest is None:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
-            "verified Application Pack is unavailable",
+            "verified active Application Pack is unavailable",
         )
+    return manifest
+
+
+def _frontend_map_artifact(application: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Find the unique frontend contract map admitted by an Application Pack."""
+
     matches = [
         artifact
-        for artifact in application["artifacts"]
-        if artifact.get("path") == "defaultspack/frontend_contract_map.v4.json"
+        for artifact in application.get("artifacts", [])
+        if isinstance(artifact, Mapping)
         and artifact.get("kind") == "asset"
+        and PurePosixPath(str(artifact.get("path") or "")).name
+        == "frontend_contract_map.v4.json"
     ]
     if len(matches) != 1:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
             "Frontend Contract Map artifact is not unique",
         )
-    return str(matches[0]["digest"])
+    path = PurePosixPath(str(matches[0].get("path") or ""))
+    if (
+        path.is_absolute()
+        or not path.parts
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+            "Frontend Contract Map artifact path is unsafe",
+        )
+    return matches[0]
 
 
 def _verified_route_projection(
@@ -2277,6 +2698,30 @@ def _required_string(value: object) -> str:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.INVALID_REQUEST,
             "required Profile ceremony binding is missing",
+        )
+    return normalized
+
+
+def _coalesce_selected_profile_id(
+    profile_id: str | None,
+    selected_profile_id: str | None,
+) -> str | None:
+    """Accept one explicit browsing selector without allowing ambiguity."""
+
+    if profile_id is not None and selected_profile_id is not None:
+        if str(profile_id) != str(selected_profile_id):
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "browsing Profile selectors disagree",
+            )
+    selected = selected_profile_id if selected_profile_id is not None else profile_id
+    if selected is None:
+        return None
+    normalized = str(selected).strip()
+    if not normalized:
+        raise RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.INVALID_REQUEST,
+            "browsing Profile selector is empty",
         )
     return normalized
 

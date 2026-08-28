@@ -267,7 +267,9 @@ class DispatchSession(Protocol):
         """Return the exact captured ResolvedPlan digest."""
 
 
-def _load_production_capture_inputs() -> tuple[
+def _load_production_capture_inputs(
+    active: Any | None = None,
+) -> tuple[
     Path, Path, Any, tuple[FrontendContractBinding, ...]
 ]:
     """Load canonical inputs for one production runtime capture."""
@@ -280,13 +282,69 @@ def _load_production_capture_inputs() -> tuple[
     runtime_root = Path(__file__).resolve().parents[1]
     bundle_root = _bundle_root()
     catalog = BundledCatalog.load(bundle_root)
+    application_id = ""
+    if active is not None:
+        resolved_plan = getattr(getattr(active, "resolved", None), "plan", None)
+        application = (
+            resolved_plan.get("application")
+            if isinstance(resolved_plan, Mapping)
+            else None
+        )
+        if isinstance(application, Mapping):
+            application_id = str(application.get("pack_id") or "")
+        if not application_id:
+            resolved_profile = getattr(
+                getattr(active, "resolved", None),
+                "profile",
+                None,
+            )
+            if isinstance(resolved_profile, Mapping):
+                application_id = next(
+                    (
+                        str(item["pack_id"])
+                        for item in resolved_profile.get("packs", [])
+                        if isinstance(item, Mapping)
+                        and item.get("role") == "application"
+                    ),
+                    "",
+                )
+    if not application_id:
+        application_ids = sorted(
+            pack_id
+            for pack_id, manifest in catalog.packs.items()
+            if manifest["pack"]["kind"] == "application"
+        )
+        if len(application_ids) != 1:
+            raise RuntimeError(
+                "active Profile Application Pack is unavailable or ambiguous"
+            )
+        application_id = application_ids[0]
+    application = catalog.packs.get(application_id)
+    if application is None:
+        raise RuntimeError("active Profile Application Pack is not in the bundle")
+    map_artifacts = [
+        artifact
+        for artifact in application.get("artifacts", [])
+        if isinstance(artifact, Mapping)
+        and artifact.get("kind") == "asset"
+        and PurePosixPath(str(artifact.get("path") or "")).name
+        == "frontend_contract_map.v4.json"
+    ]
+    if len(map_artifacts) != 1:
+        raise RuntimeError("active Profile Frontend Contract Map is unavailable")
+    map_path = PurePosixPath(str(map_artifacts[0]["path"]))
+    if (
+        map_path.is_absolute()
+        or not map_path.parts
+        or any(part in {"", ".", ".."} for part in map_path.parts)
+    ):
+        raise RuntimeError("active Profile Frontend Contract Map path is unsafe")
     bindings = load_frontend_contract_bindings(
         runtime_root
         / "ecosystem"
         / "defaultspack"
-        / "defaultspack"
-        / "frontend_contract_map.v4.json",
-        catalog.packs["runtime.tauri.application.default"],
+        / Path(*map_path.parts),
+        application,
     )
     return runtime_root, bundle_root, catalog, bindings
 
@@ -2429,11 +2487,11 @@ class PackAPIServer:
         session = activated_session
         server_captured_session = session is None
         try:
-            runtime_root, bundle_root, _catalog, bindings = (
-                _load_production_capture_inputs()
-            )
             if session is None:
                 active = capture_active_profile()
+                runtime_root, bundle_root, _catalog, bindings = (
+                    _load_production_capture_inputs(active)
+                )
                 authority = AuthorityStore(
                     runtime_user_data_root() / "authority" / "v4.sqlite3"
                 )
@@ -2452,6 +2510,10 @@ class PackAPIServer:
                 except Exception:
                     authority.close()
                     raise
+            else:
+                runtime_root, bundle_root, _catalog, bindings = (
+                    _load_production_capture_inputs()
+                )
             routes = contract_binding_map(bindings)
             self._validate_contract_capture(session, routes)
         except Exception:

@@ -1,4 +1,4 @@
-"""Finite, restart-safe capture of the bundled Defaults Profile v4."""
+"""Finite, restart-safe capture of Host-owned Profile v4 activations."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     resolve_default_profile,
 )
 from tobkiri_protocol.canonical import canonical_digest, strict_loads
+from tobkiri_protocol.ids import validate_canonical_id
 
 from ..authority.v4 import AuthorityStore
 from ..authority.v4_models import authority_digest
@@ -372,6 +373,98 @@ def _resolve_candidate(
     return resolved, confirmation
 
 
+def _resolve_profile_candidate(
+    profile_id: str,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[ResolvedDefaultProfile, dict[str, Any]]:
+    """Resolve one registry Profile using the same authority ceremony as Defaults."""
+
+    user_data = runtime_user_data_root(base_dir)
+    catalog = host_profile_catalog(base_dir)
+    source_profile = catalog.profiles.get(profile_id)
+    if source_profile is None:
+        raise ProfileResolutionDenied("Profile is unavailable from the Host registry")
+    bundle_root = Path(catalog.root)
+    bundle_lock_path = bundle_root / "bundle.lock.json"
+    if bundle_lock_path.is_symlink() or not bundle_lock_path.is_file():
+        raise ProfileResolutionDenied("Profile bundle lock is unavailable")
+    bundle_lock_digest = "sha256:" + hashlib.sha256(
+        bundle_lock_path.read_bytes()
+    ).hexdigest()
+    authority_path = user_data / "authority" / "v4.sqlite3"
+    if authority_path.is_file():
+        with AuthorityStore(authority_path) as authority:
+            security_epoch = authority.security_epoch
+            snapshot_digest = _authority_snapshot_digest(
+                authority, bundle_lock_digest
+            )
+    elif authority_path.exists():
+        raise ProfileResolutionDenied("Authority store path is not a regular file")
+    else:
+        security_epoch = 1
+        snapshot_digest = _genesis_authority_snapshot_digest(bundle_lock_digest)
+    authority_bindings = {
+        _edge_key(edge): _authority_reference(edge, snapshot_digest)
+        for edge in source_profile.get("requested_edges", [])
+    }
+    verified_artifacts = {
+        str(manifest["pack"]["artifact_digest"])
+        for manifest in catalog.packs.values()
+    }
+    resolved = resolve_default_profile(
+        catalog,
+        profile_id,
+        approved_artifact_digests=verified_artifacts,
+        authority_snapshot_digest=snapshot_digest,
+        authority_bindings=authority_bindings,
+        security_epoch=security_epoch,
+    )
+    confirmation = {
+        "confirmation_api_version": "io.tobkiri.profile-confirmation.v1",
+        "operation_id": "profile.activate",
+        "profile_id": profile_id,
+        "catalog_revision": resolved.profile["catalog_revision"],
+        "profile_revision": resolved.plan["profile_revision"],
+        "plan_digest": resolved.plan["plan_digest"],
+        "authority_snapshot_digest": snapshot_digest,
+        "security_epoch": security_epoch,
+        "base": dict(resolved.plan["base"]),
+        "shell": dict(resolved.plan["shell"]),
+        "bindings": [dict(binding) for binding in resolved.plan["bindings"]],
+    }
+    confirmation["confirmation_digest"] = canonical_digest(confirmation)
+    return resolved, confirmation
+
+
+def _ensure_profile_workspace(user_data: Path, profile_id: str) -> Path:
+    """Create the non-authoritative, Profile-scoped workspace layout."""
+
+    workspace = user_data / "workspaces" / profile_id
+    if workspace.is_symlink():
+        raise ProfileResolutionDenied("Profile workspace must not be symlinked")
+    workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for name in (
+        "activation",
+        "state",
+        "packs",
+        "conversation",
+        "settings",
+        "credentials",
+        "handoff",
+        "audit",
+        "artifacts",
+        "snapshots",
+    ):
+        directory = workspace / name
+        if directory.is_symlink() or directory.exists() and not directory.is_dir():
+            raise ProfileResolutionDenied(
+                "Profile workspace contains an unsafe state directory"
+            )
+        directory.mkdir(mode=0o700, exist_ok=True)
+    return workspace
+
+
 def prepare_default_profile_confirmation(
     *, base_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -379,6 +472,135 @@ def prepare_default_profile_confirmation(
 
     _resolved, confirmation = _resolve_candidate(base_dir=base_dir)
     return confirmation
+
+
+def prepare_profile_confirmation(
+    profile_id: str,
+    *,
+    base_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Return a read-only confirmation for any live Named Profile."""
+
+    _resolved, confirmation = _resolve_profile_candidate(
+        profile_id,
+        base_dir=base_dir,
+    )
+    return confirmation
+
+
+def capture_profile(
+    profile_id: str,
+    *,
+    base_dir: Path | None = None,
+    confirmation: Mapping[str, Any] | None = None,
+) -> ActiveDefaultProfile:
+    """Capture or activate any Named Profile through the canonical v4 ceremony.
+
+    The Profile workspace owns only that Profile's activation history and
+    state.  The committed active selection is always the Host-global pointer,
+    so changing from one Profile to another never writes selection state into
+    the previous Profile workspace.
+    """
+
+    try:
+        safe_profile_id = validate_canonical_id(profile_id, field="profile_id")
+    except Exception as error:
+        raise ProfileResolutionDenied("Profile ID is not canonical") from error
+    user_data = runtime_user_data_root(base_dir)
+    workspace = user_data / "workspaces" / safe_profile_id
+    state_root = workspace / "activation"
+    active_pointer = state_root / "active.json"
+    if workspace.is_symlink() or state_root.is_symlink() or active_pointer.is_symlink():
+        raise ProfileResolutionDenied("Profile activation state must not be symlinked")
+
+    pointers = ActiveProfileStore(user_data)
+    current = pointers.load(verify_snapshot=True)
+    target_exists = active_pointer.is_file()
+    if active_pointer.exists() and not target_exists:
+        raise ProfileResolutionDenied("Profile activation pointer is not a regular file")
+
+    if target_exists and confirmation is None and current is not None:
+        if current.profile_id != safe_profile_id:
+            raise ProfileResolutionDenied(
+                "explicit Profile activation confirmation is required"
+            )
+        _ensure_profile_workspace(user_data, safe_profile_id)
+        catalog = host_profile_catalog(base_dir)
+        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+            active = ActivationStore(
+                state_root,
+                workspace,
+                profile_id=safe_profile_id,
+                authority=authority,
+                catalog=catalog,
+            ).load_active_snapshot()
+        _publish_host_active_pointer(
+            active,
+            user_data=user_data,
+            replace_existing=False,
+        )
+        cache_active_profile(active, user_data=user_data)
+        return active
+
+    if confirmation is None:
+        raise ProfileResolutionDenied(
+            "explicit Profile activation confirmation is required"
+        )
+    resolved, expected_confirmation = _resolve_profile_candidate(
+        safe_profile_id,
+        base_dir=base_dir,
+    )
+    if dict(confirmation) != expected_confirmation:
+        raise ProfileResolutionDenied(
+            "Profile activation confirmation is stale or tampered"
+        )
+    workspace = _ensure_profile_workspace(user_data, safe_profile_id)
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        store = ActivationStore(
+            state_root,
+            workspace,
+            profile_id=safe_profile_id,
+            authority=authority,
+            catalog=host_profile_catalog(base_dir),
+        )
+        store.recover()
+        predecessor = store.load_active_snapshot() if target_exists else None
+        activation_id = (
+            f"activation:{safe_profile_id}-"
+            + resolved.plan["plan_digest"].removeprefix("sha256:")[:16]
+        )
+        created_at = datetime.now(timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+        predecessor_bindings = (
+            {}
+            if predecessor is None
+            else {
+                "expected_predecessor_profile_revision": str(
+                    predecessor.resolved.plan["profile_revision"]
+                ),
+                "expected_predecessor_plan_digest": str(
+                    predecessor.resolved.plan["plan_digest"]
+                ),
+                "expected_predecessor_activation_id": str(
+                    predecessor.activation["activation_id"]
+                ),
+            }
+        )
+        store.activate(
+            resolved,
+            activation_id=activation_id,
+            created_at=created_at,
+            **predecessor_bindings,
+        )
+        active = store.load_active_snapshot()
+    _publish_host_active_pointer(
+        active,
+        user_data=user_data,
+        replace_existing=True,
+    )
+    cache_active_profile(active, user_data=user_data)
+    return active
 
 
 def active_default_profile_exists(*, base_dir: Path | None = None) -> bool:
@@ -669,10 +891,12 @@ __all__ = [
     "active_default_profile_exists",
     "cache_active_profile",
     "capture_active_profile",
+    "capture_profile",
     "capture_default_profile",
     "host_profile_catalog",
     "invalidate_profile_capture_scope",
     "prepare_default_profile_confirmation",
+    "prepare_profile_confirmation",
     "profile_capture_scope",
     "runtime_user_data_root",
 ]

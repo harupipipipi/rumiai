@@ -330,12 +330,41 @@ class CapturedPackControlSession:
             raise PackControlUnapproved("control presentation operation is not declared")
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
-        self._reject_identity_override(arguments)
+        selected_profile_id = arguments.pop("selected_profile_id", None)
+        allow_selected_profile = operation_id in {
+            "profile.read",
+            "profile.catalog.read",
+            "profile.change.resolve",
+            "settings.read",
+        }
+        allow_selected_profile = allow_selected_profile or operation_id.startswith(
+            "topology."
+        )
+        self._reject_identity_override(
+            arguments,
+            allow_selected_profile=allow_selected_profile,
+        )
         if "approved" in arguments or "approval_token" in arguments:
             raise PackControlUnapproved("client approval assertions are not trusted")
         try:
             if operation_id == "profile.read":
+                requested_profile_id = arguments.pop("profile_id", None)
+                if selected_profile_id is not None and requested_profile_id is not None:
+                    if str(selected_profile_id) != str(requested_profile_id):
+                        raise PackControlInvalidRequest(
+                            "browsing Profile selectors disagree"
+                        )
+                requested_profile_id = (
+                    selected_profile_id
+                    if selected_profile_id is not None
+                    else requested_profile_id
+                )
                 return self._runtime_surface.read_profile(
+                    profile_id=(
+                        str(requested_profile_id)
+                        if requested_profile_id is not None
+                        else None
+                    ),
                     expected_profile_revision=_optional_string(
                         arguments.pop("expected_profile_revision", None)
                     ),
@@ -344,9 +373,25 @@ class CapturedPackControlSession:
                     ),
                 ) | _require_empty(arguments)
             if operation_id == "profile.catalog.read":
+                requested_profile_id = arguments.pop("profile_id", None)
+                if selected_profile_id is not None and requested_profile_id is not None:
+                    if str(selected_profile_id) != str(requested_profile_id):
+                        raise PackControlInvalidRequest(
+                            "browsing Profile selectors disagree"
+                        )
+                requested_profile_id = (
+                    selected_profile_id
+                    if selected_profile_id is not None
+                    else requested_profile_id
+                )
                 _require_empty(arguments)
                 return self._runtime_surface.read_profile_catalog(
-                    session_id=_panel_session_root(session_id)
+                    session_id=_panel_session_root(session_id),
+                    profile_id=(
+                        str(requested_profile_id)
+                        if requested_profile_id is not None
+                        else None
+                    ),
                 )
             if operation_id == "operation.status.read":
                 request_id = _required(
@@ -379,10 +424,31 @@ class CapturedPackControlSession:
                 ) as error:
                     raise PackControlUnavailable("operation status is unavailable") from error
             if operation_id == "settings.read":
+                requested_profile_id = arguments.pop("profile_id", None)
                 _require_empty(arguments)
-                return self._runtime_surface.read_settings()
+                return self._runtime_surface.read_settings(
+                    profile_id=(
+                        str(requested_profile_id)
+                        if requested_profile_id is not None
+                        else None
+                    )
+                )
             if operation_id.startswith("topology."):
                 view = operation_id.removeprefix("topology.").removesuffix(".read")
+                requested_profile_id = arguments.pop("profile_id", None)
+                if (
+                    selected_profile_id is not None
+                    and requested_profile_id is not None
+                    and str(selected_profile_id) != str(requested_profile_id)
+                ):
+                    raise PackControlInvalidRequest(
+                        "browsing Profile selectors disagree"
+                    )
+                requested_profile_id = (
+                    selected_profile_id
+                    if selected_profile_id is not None
+                    else requested_profile_id
+                )
                 revision = _optional_string(arguments.pop("expected_profile_revision", None))
                 plan_digest = _optional_string(arguments.pop("expected_plan_digest", None))
                 _require_empty(arguments)
@@ -390,7 +456,22 @@ class CapturedPackControlSession:
                     view,
                     expected_profile_revision=revision,
                     expected_plan_digest=plan_digest,
+                    profile_id=(
+                        str(requested_profile_id)
+                        if requested_profile_id is not None
+                        else None
+                    ),
                 )
+            if operation_id == "profile.change.resolve" and selected_profile_id is not None:
+                requested_profile_id = arguments.get("profile_id")
+                if (
+                    requested_profile_id is not None
+                    and str(requested_profile_id) != str(selected_profile_id)
+                ):
+                    raise PackControlInvalidRequest(
+                        "browsing Profile selectors disagree"
+                    )
+                arguments["profile_id"] = str(selected_profile_id)
             action = operation_id.removeprefix("profile.change.")
             handler = getattr(self._profile_changes, action)
             result = handler(arguments, session_id=_panel_session_root(session_id))
@@ -408,7 +489,12 @@ class CapturedPackControlSession:
                 return error.as_dict()
             raise
 
-    def _reject_identity_override(self, arguments: Mapping[str, Any]) -> None:
+    def _reject_identity_override(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        allow_selected_profile: bool = False,
+    ) -> None:
         expected = {
             "profile_id": self._binding.profile_id,
             "workspace_id": self._binding.workspace_id,
@@ -417,6 +503,8 @@ class CapturedPackControlSession:
             "catalog_revision": self._binding.catalog_revision,
         }
         for key, value in expected.items():
+            if key == "profile_id" and allow_selected_profile:
+                continue
             supplied = arguments.get(key)
             if supplied is not None and not hmac.compare_digest(str(supplied), value):
                 if key == "profile_revision":
@@ -820,21 +908,21 @@ def _catalog_payload(
 
 
 def _required_profile_pack_ids(profile_id: str) -> frozenset[str]:
-    """Return the immutable Pack closure declared by the bundled Profile."""
+    """Return the immutable Pack closure declared by one registry Profile."""
 
     from .bootstrap.profile_capture import host_profile_catalog
 
     catalog = host_profile_catalog()
     source = catalog.profiles.get(profile_id)
     if source is None:
-        raise PackControlDigestMismatch("bundled Defaults Profile is unavailable")
+        raise PackControlDigestMismatch("selected Profile is unavailable")
     selected = [str(item["pack_id"]) for item in source["packs"]]
     pending = list(selected)
     while pending:
         current_id = pending.pop(0)
         manifest = catalog.packs.get(current_id)
         if manifest is None:
-            raise PackControlDigestMismatch("bundled Defaults dependency is unavailable")
+            raise PackControlDigestMismatch("selected Profile dependency is unavailable")
         for dependency_id in manifest["requirements"]["pack_dependencies"]:
             dependency = str(dependency_id)
             if dependency not in selected:
@@ -982,6 +1070,22 @@ def _capture_binding(active: ActiveDefaultProfile | None = None) -> _Binding:
         profile_revision=profile_revision,
         plan_digest=str(state["resolved_plan"]["plan_digest"]),
         catalog_revision=catalog_revision,
+    )
+
+
+def _binding_for_resolved(resolved: Any) -> _Binding:
+    """Bind pre-activation Pack checks to the candidate Profile, not active state."""
+
+    profile = resolved.profile
+    plan = resolved.plan
+    profile_id = str(profile.get("profile_id") or "")
+    _safe_identity(profile_id, "Profile ID")
+    return _Binding(
+        profile_id=profile_id,
+        workspace_id=profile_id,
+        profile_revision=str(plan["profile_revision"]),
+        plan_digest=str(plan["plan_digest"]),
+        catalog_revision=control_catalog_revision(),
     )
 
 
@@ -1184,7 +1288,9 @@ def resolve_profile_pack_set(
         if all(value is not None for value in authoritative_bindings):
             requested = tuple(dict.fromkeys((*requested, *sorted(mandatory))))
         if not mandatory.issubset(requested):
-            raise PackControlUnapproved("the bundled Defaults Profile Pack set is immutable")
+            raise PackControlUnapproved(
+                "the selected Profile Pack set omits a mandatory Pack"
+            )
         additional_pack_ids = tuple(pack_id for pack_id in requested if pack_id not in mandatory)
         # Optional Pack operations are part of the immutable resolved Profile,
         # so mint the exact authority references before resolving the plan.
@@ -1194,7 +1300,7 @@ def resolve_profile_pack_set(
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state(profile_id)
-        binding = _capture_binding()
+        binding = _binding_for_resolved(baseline)
         selected_optional = requested_closure - mandatory
         for pack_id in sorted(selected_optional):
             record = load_pack_catalog()[pack_id]
@@ -1236,14 +1342,16 @@ def activate_resolved_profile_pack_set(
     from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
 
     from .authority.v4 import AuthorityStore
-    from .bootstrap.profile_capture import host_profile_catalog
+    from .bootstrap.profile_capture import (
+        _ensure_profile_workspace,
+        host_profile_catalog,
+    )
     from .active_profile_store_v4 import ActiveProfileStore
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
     user_data = _user_data_root()
     profile_id = str(resolved.profile["profile_id"])
-    workspace = user_data / "workspaces" / profile_id
-    workspace.mkdir(parents=True, exist_ok=True)
+    workspace = _ensure_profile_workspace(user_data, profile_id)
     pointers = ActiveProfileStore(user_data)
     predecessor = pointers.require(verify_snapshot=True)
     if (

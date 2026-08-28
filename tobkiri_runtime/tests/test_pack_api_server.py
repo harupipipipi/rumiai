@@ -743,7 +743,7 @@ def _prepare_refresh_race(
     monkeypatch.setattr(
         pack_api_server_module,
         "_load_production_capture_inputs",
-        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
+        lambda *_args, **_kwargs: (Path("/runtime"), Path("/bundle"), object(), ()),
     )
     monkeypatch.setattr(di_container_module, "get_container", object)
     monkeypatch.setattr(
@@ -773,7 +773,7 @@ def test_server_closes_server_captured_refresh_session_on_stop(
         dispatch_session=initial,  # type: ignore[arg-type]
     )
     generation = _prepare_refresh_race(server, monkeypatch)
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+    monkeypatch.setattr(profile_capture, "capture_active_profile", lambda: object())
     monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
     monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
     monkeypatch.setattr(
@@ -822,7 +822,7 @@ def test_server_refresh_reuses_exact_packvm_lifecycle_for_backend_capture(
         packvm_lifecycle=lifecycle,  # type: ignore[arg-type]
     )
     generation = _prepare_refresh_race(server, monkeypatch)
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+    monkeypatch.setattr(profile_capture, "capture_active_profile", lambda: object())
     monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
     monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
     seen: dict[str, object] = {}
@@ -1092,7 +1092,7 @@ def test_refresh_finishing_after_stop_restart_cannot_replace_new_handler(
     monkeypatch.setattr(
         pack_api_server_module,
         "_load_production_capture_inputs",
-        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
+        lambda *_args, **_kwargs: (Path("/runtime"), Path("/bundle"), object(), ()),
     )
     stale_entered = threading.Event()
     release_stale = threading.Event()
