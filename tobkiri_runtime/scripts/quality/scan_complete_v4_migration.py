@@ -65,20 +65,20 @@ def _nodeids() -> list[str]:
 def _counts(report: dict[str, Any]) -> dict[str, Any]:
     """Flatten evidence lists into handoff-friendly deterministic counts."""
     findings = report["findings"]
-    source_sets = report["pack_inventory"]["authority_source_sets"]
+    source_sets = report["pack_inventory"]["declared_source_sets"]
     return {
         "production_pack_directories": report["pack_inventory"][
             "production_pack_directories"
         ],
-        "expected_production_pack_directories": report["pack_inventory"][
-            "expected_production_pack_directories"
+        "catalog_pack_directories": report["pack_inventory"][
+            "catalog_pack_directories"
         ],
         "v4_artifacts_per_pack": report["pack_inventory"]["v4_artifacts_per_pack"],
         "v4_artifact_files": report["pack_inventory"]["v4_artifact_files"],
         "v4_pack_artifacts": len(report["pack_inventory"]["v4_pack_artifacts"]),
         "v4_profile_artifacts": len(report["pack_inventory"]["v4_profile_artifacts"]),
-        "authority_classification": report["pack_inventory"]["authority_counts"],
-        "manifest_authority_source_packs": len(source_sets["manifest_ids"]),
+        "migration_status": report["pack_inventory"]["migration_status_counts"],
+        "legacy_manifest_declared_packs": len(source_sets["manifest_ids"]),
         "v4_only_packs": len(source_sets["v4_only_ids"]),
         "canonical_source_packs": len(report["pack_inventory"]["canonical_source_ids"]),
         "gates": {
@@ -94,7 +94,7 @@ def build_evidence() -> dict[str, Any]:
     gate_module = _load_gate_module()
     report = gate_module._audit_snapshot()
     return {
-        "schema": "io.tobkiri.quality.complete-v4-migration-evidence.v1",
+        "schema": "io.tobkiri.quality.complete-v4-migration-evidence.v2",
         "source": {
             "test_file": TEST_PATH.relative_to(ROOT).as_posix(),
             "observed_head_sha": report["head_sha"],

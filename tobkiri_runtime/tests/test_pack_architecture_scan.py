@@ -35,6 +35,24 @@ def _pack(root: Path, pack_id: str) -> Path:
     (pack / "ecosystem.json").write_text(
         json.dumps({"id": pack_id}), encoding="utf-8"
     )
+    catalog_root = root / "tobkiri_runtime" / "schemas"
+    catalog_root.mkdir(parents=True, exist_ok=True)
+    pack_ids = sorted(
+        path.name
+        for path in (root / "tobkiri_runtime" / "ecosystem").iterdir()
+        if path.is_dir()
+    )
+    (catalog_root / "pack_v4_catalog.v1.json").write_text(
+        json.dumps(
+            {
+                "catalog_api_version": "io.tobkiri.pack-source-catalog.v1",
+                "excluded_packs": [],
+                "pack_ids": pack_ids,
+                "packs": [{"pack_id": item} for item in pack_ids],
+            }
+        ),
+        encoding="utf-8",
+    )
     return pack
 
 
@@ -81,6 +99,63 @@ def test_foreign_pack_branch_and_sibling_path_are_detected(tmp_path: Path) -> No
 
     assert "foreign_pack_id_branch" in rules
     assert "sibling_pack_path" in rules
+
+
+def test_defaultspack_webapp_has_no_scanner_exception(tmp_path: Path) -> None:
+    """The same direct-route rule applies to the bundled Pack UI."""
+    defaultspack = _pack(tmp_path, "defaultspack")
+    (defaultspack / "webapp").mkdir()
+    (defaultspack / "webapp" / "app.ts").write_text(
+        'fetch("/api/legacy-route");\n',
+        encoding="utf-8",
+    )
+
+    violations = _scanner().scan_repository(tmp_path)
+
+    assert any(
+        item.rule == "direct_implementation_route"
+        and item.source == "defaultspack"
+        for item in violations
+    )
+
+
+def test_product_favoritism_detects_alias_and_indirect_import(tmp_path: Path) -> None:
+    """Kernel code cannot hide a product Pack behind a literal alias."""
+    _pack(tmp_path, "pack_a")
+    _pack(tmp_path, "defaultspack")
+    kernel = tmp_path / "tobkiri_runtime" / "core_runtime"
+    kernel.mkdir(parents=True)
+    (kernel / "unsafe.py").write_text(
+        "import importlib\n"
+        "PREFERRED_PACK = 'defaultspack'\n"
+        "PREFERRED_MODULE = 'ecosystem.' + PREFERRED_PACK\n"
+        "if requested_pack == PREFERRED_PACK:\n"
+        "    importlib.import_module(PREFERRED_MODULE)\n",
+        encoding="utf-8",
+    )
+
+    rules = {
+        item.rule
+        for item in _scanner().scan_repository(tmp_path)
+        if item.source == "kernel"
+    }
+
+    assert {
+        "product_pack_reference",
+        "product_pack_branch",
+        "product_pack_import",
+    } <= rules
+
+
+def test_legacy_manifest_cannot_be_used_for_pack_discovery(tmp_path: Path) -> None:
+    """A legacy manifest without a v4 catalog is a fail-closed scan input."""
+    scanner = _scanner()
+    pack = tmp_path / "tobkiri_runtime" / "ecosystem" / "pack_a"
+    pack.mkdir(parents=True)
+    (pack / "ecosystem.json").write_text('{"id": "pack_a"}', encoding="utf-8")
+
+    with pytest.raises(scanner.PackCatalogError):
+        scanner.scan_repository(tmp_path)
 
 
 def test_unscoped_kernel_discovery_secret_and_domain_branch_are_detected(
@@ -349,18 +424,17 @@ def test_main_fails_for_expired_or_stale_exceptions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     scanner = _scanner()
+    _pack(tmp_path, "pack_a")
     baseline = tmp_path / "baseline.json"
+    reference = tmp_path / "reference.json"
     expired = _baseline_exception(line=10, sunset_at="2026-07-28")
-    baseline.write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "policy": "shrink_only_exact_edges",
-                "exceptions": [expired],
-            }
-        ),
-        encoding="utf-8",
-    )
+    expired_payload = {
+        "schema_version": 2,
+        "policy": "shrink_only_exact_edges",
+        "exceptions": [expired],
+    }
+    baseline.write_text(json.dumps(expired_payload), encoding="utf-8")
+    reference.write_text(json.dumps(expired_payload), encoding="utf-8")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -370,6 +444,8 @@ def test_main_fails_for_expired_or_stale_exceptions(
             str(tmp_path),
             "--baseline",
             str(baseline),
+            "--reference-baseline",
+            str(reference),
             "--today",
             "2026-07-29",
         ],
@@ -379,16 +455,13 @@ def test_main_fails_for_expired_or_stale_exceptions(
     assert "expired exceptions" in capsys.readouterr().err
 
     current = _baseline_exception(line=10)
-    baseline.write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "policy": "shrink_only_exact_edges",
-                "exceptions": [current],
-            }
-        ),
-        encoding="utf-8",
-    )
+    current_payload = {
+        "schema_version": 2,
+        "policy": "shrink_only_exact_edges",
+        "exceptions": [current],
+    }
+    baseline.write_text(json.dumps(current_payload), encoding="utf-8")
+    reference.write_text(json.dumps(current_payload), encoding="utf-8")
     monkeypatch.setattr(
         sys,
         "argv",
@@ -398,6 +471,8 @@ def test_main_fails_for_expired_or_stale_exceptions(
             str(tmp_path),
             "--baseline",
             str(baseline),
+            "--reference-baseline",
+            str(reference),
             "--today",
             "2026-07-29",
         ],
@@ -405,3 +480,30 @@ def test_main_fails_for_expired_or_stale_exceptions(
 
     assert scanner.main() == 2
     assert "resolved identities" in capsys.readouterr().err
+
+
+def test_main_rejects_candidate_baseline_without_reference(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A candidate cannot bootstrap its own exception authority."""
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "policy": "shrink_only_exact_edges",
+                "exceptions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["scan_pack_architecture.py", "--root", str(tmp_path), "--baseline", str(baseline)],
+    )
+
+    assert _scanner().main() == 2
+    assert "reference baseline is required" in capsys.readouterr().err

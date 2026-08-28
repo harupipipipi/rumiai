@@ -12,7 +12,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".jsx", ".dart"}
 IGNORED_SOURCE_DIRECTORY_NAMES = frozenset(
@@ -85,20 +85,63 @@ class BaselineError(ValueError):
     """Raised when an exception baseline is missing or can broaden silently."""
 
 
+class PackCatalogError(ValueError):
+    """Raised when the canonical Pack inventory cannot be trusted."""
+
+
+PACK_CATALOG_API_VERSION = "io.tobkiri.pack-source-catalog.v1"
+
+
+def _pack_catalog_path(ecosystem_dir: Path) -> Path:
+    """Return the canonical Pack catalog beside an ecosystem directory."""
+    return ecosystem_dir.parent / "schemas" / "pack_v4_catalog.v1.json"
+
+
+def _load_pack_catalog(ecosystem_dir: Path) -> dict[str, Any]:
+    """Load and minimally validate the v4 Pack inventory.
+
+    The scanner intentionally does not discover authority from legacy
+    ``ecosystem.json`` files.  Those files can still be inspected by an
+    explicitly offline migration tool, but they are not an architecture-scan
+    input.
+    """
+    path = _pack_catalog_path(ecosystem_dir)
+    if not path.is_file():
+        raise PackCatalogError(f"canonical v4 Pack catalog is missing: {path}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise PackCatalogError(f"canonical v4 Pack catalog is unreadable: {path}") from exc
+    if not isinstance(payload, dict):
+        raise PackCatalogError("canonical v4 Pack catalog must be an object")
+    if payload.get("catalog_api_version") != PACK_CATALOG_API_VERSION:
+        raise PackCatalogError("unknown canonical v4 Pack catalog version")
+    pack_ids = payload.get("pack_ids")
+    records = payload.get("packs")
+    if not isinstance(pack_ids, list) or not isinstance(records, list):
+        raise PackCatalogError("canonical v4 Pack catalog inventory is malformed")
+    if any(not isinstance(pack_id, str) or not pack_id.strip() for pack_id in pack_ids):
+        raise PackCatalogError("canonical v4 Pack catalog contains an invalid Pack ID")
+    if pack_ids != sorted(pack_ids) or len(set(pack_ids)) != len(pack_ids):
+        raise PackCatalogError("canonical v4 Pack catalog Pack IDs are not unique and sorted")
+    record_ids: list[str] = []
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("pack_id"), str):
+            raise PackCatalogError("canonical v4 Pack catalog contains a malformed record")
+        record_ids.append(record["pack_id"])
+    if record_ids != pack_ids:
+        raise PackCatalogError("canonical v4 Pack catalog IDs and records disagree")
+    return payload
+
+
 def discover_pack_roots(ecosystem_dir: Path) -> dict[str, Path]:
-    """Return manifest-backed pack roots without importing pack code."""
-    roots: dict[str, Path] = {}
-    if not ecosystem_dir.is_dir():
-        return roots
-    for manifest in sorted(ecosystem_dir.glob("*/ecosystem.json")):
-        try:
-            payload = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        pack_id = str(payload.get("id") or manifest.parent.name).strip()
-        if pack_id:
-            roots[pack_id] = manifest.parent.resolve()
-    return roots
+    """Return Pack roots from the canonical v4 inventory, never legacy files."""
+    payload = _load_pack_catalog(ecosystem_dir)
+    return {
+        pack_id: (ecosystem_dir / pack_id).resolve()
+        for pack_id in payload["pack_ids"]
+        if (ecosystem_dir / pack_id).is_dir()
+    }
 
 
 def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
@@ -236,10 +279,16 @@ def find_expired_baseline_exceptions(
 def scan_repository(root: Path) -> list[Violation]:
     """Scan all supported source files and return deterministic violations."""
     ecosystem = root / "tobkiri_runtime" / "ecosystem"
-    pack_roots = discover_pack_roots(ecosystem)
-    pack_names = set(pack_roots)
+    catalog = _load_pack_catalog(ecosystem)
+    pack_names = set(catalog["pack_ids"])
+    pack_roots = {
+        pack_id: (ecosystem / pack_id).resolve()
+        for pack_id in pack_names
+        if (ecosystem / pack_id).is_dir()
+    }
     violations: set[Violation] = set()
-    violations.update(_scan_manifest_graph(root, pack_roots))
+    violations.update(_scan_catalog_disk_alignment(root, ecosystem, pack_names))
+    violations.update(_scan_catalog_graph(root, catalog, pack_names))
     for path in _source_files(root):
         source_pack = _owning_pack(path, pack_roots)
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -255,11 +304,7 @@ def scan_repository(root: Path) -> list[Violation]:
             _scan_literal_paths(root, path, text, source_pack, pack_names)
         )
         violations.update(_scan_runtime_policy(root, path, text, source_pack))
-        if (
-            source_pack
-            and source_pack != "defaultspack"
-            and "/webapp/" in path.as_posix()
-        ):
+        if "/webapp/" in path.as_posix():
             for match in API_LITERAL_RE.finditer(text):
                 violations.add(
                     _violation(
@@ -274,6 +319,12 @@ def scan_repository(root: Path) -> list[Violation]:
                         match.group(0),
                     )
                 )
+        if path.suffix == ".py":
+            violations.update(
+                _scan_product_special_cases(
+                    root, path, text, source_pack, pack_names
+                )
+            )
     return _disambiguate_fingerprints(violations)
 
 
@@ -303,19 +354,55 @@ def _is_ignored_source_path(root: Path, path: Path) -> bool:
     )
 
 
-def _scan_manifest_graph(
-    root: Path, pack_roots: dict[str, Path]
+def _scan_catalog_disk_alignment(
+    root: Path, ecosystem: Path, pack_names: set[str]
 ) -> set[Violation]:
-    """Validate the complete declared pack dependency graph."""
+    """Report Pack directories that disagree with the canonical inventory."""
     found: set[Violation] = set()
-    known = set(pack_roots)
-    for pack_id, pack_root in pack_roots.items():
-        manifest = pack_root / "ecosystem.json"
-        try:
-            payload = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+    disk_names = {
+        path.name
+        for path in ecosystem.iterdir()
+        if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+    } if ecosystem.is_dir() else set()
+    for pack_id in sorted(pack_names - disk_names):
+        found.add(
+            _line_violation(
+                root,
+                _pack_catalog_path(ecosystem),
+                1,
+                "missing_declared_pack_directory",
+                "v4-pack-catalog",
+                pack_id,
+                _value_fingerprint("catalog-v1", f"missing:{pack_id}"),
+            )
+        )
+    for pack_id in sorted(disk_names - pack_names):
+        found.add(
+            _line_violation(
+                root,
+                ecosystem / pack_id,
+                1,
+                "unlisted_pack_directory",
+                "disk-ecosystem",
+                pack_id,
+                _value_fingerprint("catalog-v1", f"unlisted:{pack_id}"),
+            )
+        )
+    return found
+
+
+def _scan_catalog_graph(
+    root: Path, catalog: Mapping[str, Any], pack_names: set[str]
+) -> set[Violation]:
+    """Validate the complete dependency graph declared by the v4 catalog."""
+    found: set[Violation] = set()
+    catalog_path = _pack_catalog_path(root / "tobkiri_runtime" / "ecosystem")
+    records = catalog.get("packs", [])
+    for record in records:
+        if not isinstance(record, Mapping):
             continue
-        dependencies = payload.get("dependencies", [])
+        pack_id = str(record.get("pack_id") or "").strip()
+        dependencies = record.get("dependencies", [])
         if isinstance(dependencies, dict):
             dependencies = list(dependencies)
         if not isinstance(dependencies, list):
@@ -327,17 +414,17 @@ def _scan_manifest_graph(
                 ).strip()
             else:
                 target = str(dependency).strip()
-            if target and target not in known:
+            if target and target not in pack_names:
                 found.add(
                     _line_violation(
                         root,
-                        manifest,
+                        catalog_path,
                         1,
                         "unknown_manifest_dependency",
                         pack_id,
                         target,
                         _value_fingerprint(
-                            "manifest-v1",
+                            "catalog-v1",
                             json.dumps(
                                 {"pack": pack_id, "dependency": dependency},
                                 sort_keys=True,
@@ -427,6 +514,137 @@ def _scan_python(
                             _ast_fingerprint(node),
                         )
                     )
+    return found
+
+
+def _pack_references(value: str, pack_names: set[str]) -> set[str]:
+    """Return Pack IDs named by a module, path, or qualified identifier."""
+    if not value:
+        return set()
+    parts = set(part for part in re.split(r"[./:]", value) if part)
+    return {
+        pack_id
+        for pack_id in pack_names
+        if value == pack_id or pack_id in parts
+    }
+
+
+def _pack_values(
+    node: ast.AST,
+    aliases: Mapping[str, set[str]],
+    pack_names: set[str],
+) -> set[str]:
+    """Resolve the small constant subset needed for product-branch checks."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return _pack_references(node.value, pack_names)
+    if isinstance(node, ast.Name):
+        return set(aliases.get(node.id, set()))
+    if isinstance(node, ast.JoinedStr):
+        result: set[str] = set()
+        for value in node.values:
+            if isinstance(value, ast.FormattedValue):
+                result.update(_pack_values(value.value, aliases, pack_names))
+        return result
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _pack_values(node.left, aliases, pack_names) | _pack_values(
+            node.right, aliases, pack_names
+        )
+    return set()
+
+
+def _pack_aliases(tree: ast.AST, pack_names: set[str]) -> dict[str, set[str]]:
+    """Resolve literal and import aliases without executing application code."""
+    aliases: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for imported in node.names:
+                references = _pack_references(imported.name, pack_names)
+                if references:
+                    aliases[imported.asname or imported.name.split(".", 1)[0]] = references
+        elif isinstance(node, ast.ImportFrom):
+            module_references = _pack_references(node.module or "", pack_names)
+            for imported in node.names:
+                references = module_references or _pack_references(
+                    imported.name, pack_names
+                )
+                if references:
+                    aliases[imported.asname or imported.name] = references
+        elif isinstance(node, ast.Assign):
+            references = _pack_values(node.value, aliases, pack_names)
+            if references:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        aliases[target.id] = references
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            references = _pack_values(node.value, aliases, pack_names)
+            if references:
+                aliases[node.target.id] = references
+    return aliases
+
+
+def _scan_product_special_cases(
+    root: Path,
+    path: Path,
+    text: str,
+    source_pack: str,
+    pack_names: set[str],
+) -> set[Violation]:
+    """Reject product Pack special cases, including simple indirection.
+
+    Pack-owned code may name its own implementation, but kernel/Host code must
+    remain catalog-driven.  The check deliberately resolves only literals and
+    import aliases; dynamic values remain an explicit unknown for the runtime
+    gate rather than becoming a trusted exception here.
+    """
+    if source_pack in pack_names:
+        return set()
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError:
+        return set()
+    aliases = _pack_aliases(tree, pack_names)
+    found: set[Violation] = set()
+
+    def add(node: ast.AST, rule: str, target: str) -> None:
+        found.add(
+            _line_violation(
+                root,
+                path,
+                getattr(node, "lineno", 1),
+                rule,
+                source_pack,
+                target,
+                _ast_fingerprint(node),
+            )
+        )
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            module = (
+                ",".join(alias.name for alias in node.names)
+                if isinstance(node, ast.Import)
+                else node.module or ""
+            )
+            references = _pack_references(module, pack_names)
+            if references:
+                add(node, "product_pack_import", ",".join(sorted(references)))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            references = _pack_values(value, aliases, pack_names)
+            if references:
+                add(node, "product_pack_reference", ",".join(sorted(references)))
+        elif isinstance(node, ast.Call):
+            function = ast.unparse(node.func)
+            if function in {"importlib.import_module", "__import__"} and node.args:
+                references = _pack_values(node.args[0], aliases, pack_names)
+                if references:
+                    add(node, "product_pack_import", ",".join(sorted(references)))
+        elif isinstance(node, ast.Compare):
+            references = _pack_values(node.left, aliases, pack_names)
+            for comparator in node.comparators:
+                references.update(_pack_values(comparator, aliases, pack_names))
+            if references:
+                add(node, "product_pack_branch", ",".join(sorted(references)))
     return found
 
 
@@ -712,7 +930,7 @@ def _sarif(violations: list[Violation]) -> dict[str, Any]:
 
 
 def main() -> int:
-    """Run the repository scan and fail on non-baselined exact edges."""
+    """Run the repository scan against an independently supplied baseline."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).parents[3])
     parser.add_argument("--baseline", type=Path)
@@ -729,11 +947,25 @@ def main() -> int:
     baseline_path = args.baseline or (
         root / "scripts" / "quality" / "pack_architecture_baseline.json"
     )
+    if args.reference_baseline is None:
+        print(
+            "pack-architecture: protected reference baseline is required; "
+            "refusing to treat the candidate baseline as its own authority",
+            file=sys.stderr,
+        )
+        return 2
+    reference_path = args.reference_baseline.resolve()
+    if reference_path == baseline_path.resolve():
+        print(
+            "pack-architecture: candidate and reference baselines must be "
+            "different files",
+            file=sys.stderr,
+        )
+        return 2
     try:
         baseline = load_baseline(baseline_path)
-        if args.reference_baseline:
-            reference = load_baseline(args.reference_baseline)
-            verify_shrink_only_baseline(baseline, reference)
+        reference = load_baseline(args.reference_baseline)
+        verify_shrink_only_baseline(baseline, reference)
     except BaselineError as exc:
         print(f"pack-architecture: {exc}", file=sys.stderr)
         return 2
@@ -746,7 +978,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    violations = scan_repository(root)
+    try:
+        violations = scan_repository(root)
+    except PackCatalogError as exc:
+        print(f"pack-architecture: {exc}", file=sys.stderr)
+        return 2
     stale = find_stale_baseline_exceptions(violations, baseline)
     if stale:
         identities = ", ".join(str(item["identity"]) for item in stale)

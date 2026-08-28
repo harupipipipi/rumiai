@@ -1104,8 +1104,8 @@
     {
       "path": "scripts/migrate_pack_artifacts_v4.py",
       "type": "regular-file",
-      "size": 52776,
-      "sha256": "bb6969f41e1ba3cd86226ba79dcbd7afe3d48dc62a873edcef5d0743d0e67155",
+      "size": 47725,
+      "sha256": "cbb91bb02224c9b41dfda9658a65b4f71a6d55b5392398e6bad2cbef7465adc0",
       "executable": false
     },
     {
@@ -1146,8 +1146,8 @@
     {
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
-      "size": 72746,
-      "sha256": "192046aa541f89779b4add422b474d82e37c4c45ab7af96b78a084012327d133",
+      "size": 101893,
+      "sha256": "7f8efb9ebd8c5128233e30565606f9b9f98b53ba02ee12d7942977325e01a957",
       "executable": false
     },
     {
@@ -1188,8 +1188,8 @@
     {
       "path": "scripts/quality/scan_complete_v4_migration.py",
       "type": "regular-file",
-      "size": 10449,
-      "sha256": "ad1b4e673184d0e8109ca993cbbb6b0feb450a7a6b1d48cca4f3baf8e828948b",
+      "size": 10422,
+      "sha256": "f9d5d0c32e2afec472f434aae697e2181cd310d8e50cf1bca45cef22d15d6cf1",
       "executable": false
     },
     {
@@ -1209,8 +1209,8 @@
     {
       "path": "scripts/quality/scan_pack_architecture.py",
       "type": "regular-file",
-      "size": 26180,
-      "sha256": "b7cb9c1d9bfa43ca79ade57537dd22ef0d9bc2081c6a00dc5a8a9adbd45178df",
+      "size": 35788,
+      "sha256": "205eb12c38e76a5cbc025e890c7e2bd52b8017cfcfb0a484395384cf37a9d0ac",
       "executable": false
     },
     {

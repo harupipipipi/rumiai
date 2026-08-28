@@ -18,6 +18,7 @@ from scripts.migrate_pack_artifacts_v4 import (
     _render_record,
     _validate_catalog_payload,
     generate,
+    import_legacy,
     verify_rendered_artifacts,
 )
 from tobkiri_protocol.errors import SchemaValidationError
@@ -131,14 +132,60 @@ def test_v3_import_hashes_entrypoint_bytes_not_stale_projection_hashes(
     assert imported == {expected}
 
 
+def test_legacy_import_is_a_draft_and_does_not_promote_or_invent_owners(
+    tmp_path: Path,
+) -> None:
+    """Legacy conversion cannot write v4 authority or pick an owner by order."""
+    source_root = CATALOG.parents[1] / "ecosystem" / "rumi_provider_adapters_pack"
+    pack_root = tmp_path / source_root.name
+    pack_root.mkdir()
+    for name in ("ecosystem.json", "rumi.pack.v3.json"):
+        (pack_root / name).write_text(
+            (source_root / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    record = _import_record(pack_root)
+    assert record["authority"] == "migration-draft"
+    source_v3 = json.loads((pack_root / "rumi.pack.v3.json").read_text(encoding="utf-8"))
+    expected_owners = {
+        contract["id"]: contract["lifecycle"]["data_owner"]
+        for contract in source_v3["contracts"]["provides"]
+        if contract.get("lifecycle", {}).get("data_owner")
+    }
+    assert {
+        contract["contract_id"]: contract["owner"]
+        for contract in record["provided_contracts"]
+        if "owner" in contract
+    } == {
+        module_id.replace("rumi.", "tobkiri.", 1): owner
+        for module_id, owner in expected_owners.items()
+    }
+
+    with pytest.raises(PackV4MigrationError, match="requires --draft-output"):
+        import_legacy(check=False)
+
+
+def test_catalog_validation_does_not_use_a_pack_count_as_authority() -> None:
+    """The canonical source set is inventory-driven, not a magic total."""
+    payload = copy.deepcopy(_catalog())
+    payload["packs"].pop()
+    payload["pack_ids"].pop()
+
+    records = _validate_catalog_payload(payload)
+
+    assert len(records) == len(payload["pack_ids"])
+
+
 def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
-    """All 143 owned Packs must match a second byte-identical generation."""
+    """Every declared Pack must match a second byte-identical generation."""
+    pack_count = len(_catalog()["packs"])
     result = generate(check=True)
     assert result == {
-        "packs": 143,
-        "valid": 143,
+        "packs": pack_count,
+        "valid": pack_count,
         "contracts": 162,
-            "operations": 221,
+        "operations": 221,
     }
     payload = _catalog()
     assert payload["excluded_packs"] == sorted(EXCLUDED_PACKS)
@@ -161,7 +208,7 @@ def test_normal_generation_has_no_v3_or_legacy_authority_reads(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", guarded_read)
-    assert generate(check=True)["valid"] == 143
+    assert generate(check=True)["valid"] == len(_catalog()["packs"])
 
 
 @pytest.mark.parametrize("failure", ["duplicate", "missing", "unknown", "malformed"])

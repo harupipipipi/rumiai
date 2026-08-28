@@ -26,7 +26,6 @@ from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
-AUTHORITY = ROOT / "schemas" / "manifest_authority.v1.json"
 EXECUTABLE_SOURCES = ROOT / "schemas" / "executable_sources.v1.json"
 EXCLUDED_PACKS: frozenset[str] = frozenset()
 GENERATOR = "tobkiri.scripts.migrate_pack_artifacts_v4"
@@ -124,6 +123,24 @@ def _workspace_boundary(capabilities: Iterable[str], host_execution: bool) -> st
     if any(token in values for token in ("workspace", "file", "shell", "git")):
         return "workspace_brokered"
     return "pack_local"
+
+
+def _explicit_contract_owner(contract: Mapping[str, Any]) -> str | None:
+    """Return an owner explicitly present in the migration source.
+
+    Ownership is semantic input.  It must never be selected from the order of
+    Pack directories or from the set of providers discovered by this script.
+    """
+    lifecycle = contract.get("lifecycle")
+    candidates = (
+        contract.get("owner"),
+        lifecycle.get("owner") if isinstance(lifecycle, Mapping) else None,
+        lifecycle.get("data_owner") if isinstance(lifecycle, Mapping) else None,
+    )
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 def _approval_policy(
@@ -239,13 +256,21 @@ def _migration_source_view(path: Path) -> dict[str, Any]:
 def _source_evidence(pack_root: Path, paths: Iterable[Path]) -> list[dict[str, str]]:
     return [
         {
-            "path": path.relative_to(ROOT).as_posix(),
+            "path": _source_evidence_path(path),
             "rule_id": "pack-v4-one-way-migration-input",
             "digest": _digest(_migration_source_view(path)),
         }
         for path in paths
         if path.is_file() and path.is_relative_to(pack_root)
     ]
+
+
+def _source_evidence_path(path: Path) -> str:
+    """Return a stable relative label for repository or temporary inputs."""
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return f"external:{path.resolve().as_posix()}"
 
 
 def _entrypoint_implementation_digest(entrypoint: Mapping[str, Any]) -> str | None:
@@ -306,8 +331,7 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
             }
             for item in operation_sources
         ]
-        provided.append(
-            {
+        provided_contract = {
                 "contract_id": _contract_id(contract["id"]),
                 "version": contract["version"],
                 "provider_id": _canonical_id(
@@ -327,7 +351,10 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
                     if key in contract
                 },
             }
-        )
+        owner = _explicit_contract_owner(contract)
+        if owner is not None:
+            provided_contract["owner"] = owner
+        provided.append(provided_contract)
     executable_sources = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))["packs"]
     executable_source = executable_sources.get(pack_root.name)
     if executable_source is not None:
@@ -364,7 +391,7 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
             pack_data.get("display_name") or legacy.get("display_name") or pack_root.name
         ),
         "description": str(pack_data.get("description") or legacy.get("description") or ""),
-        "authority": "v4-authoritative",
+        "authority": "migration-draft",
         "source_provenance": {
             "owner": pack_root.name,
             "mode": "offline-one-way-import",
@@ -409,229 +436,48 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
     return record
 
 
-def _import_bundled_record(pack_id: str) -> dict[str, Any]:
-    """Import the two finite Defaults v4 sources without legacy authority."""
-    exact_source_path = (
-        ECOSYSTEM
-        / "defaultspack"
-        / "v4"
-        / "packs"
-        / f"{pack_id.replace('_', '-')}.pack.v4.json"
+def import_legacy(*, check: bool, output: Path | None = None) -> dict[str, Any]:
+    """Create an offline migration draft without changing v4 authority.
+
+    Legacy input is intentionally not promoted to the canonical catalog.  A
+    caller must choose an output outside the production catalog so a bulk
+    shape conversion cannot silently become an authoritative migration.
+    """
+    if output is None:
+        raise PackV4MigrationError(
+            "legacy import requires --draft-output; it only creates a draft"
+        )
+    output = output.resolve()
+    if output == CATALOG.resolve():
+        raise PackV4MigrationError(
+            "legacy migration draft cannot overwrite the canonical v4 catalog"
+        )
+    legacy_roots = sorted(
+        path.parent
+        for path in ECOSYSTEM.glob("*/ecosystem.json")
+        if path.is_file()
     )
-    if exact_source_path.is_file():
-        source_path = exact_source_path
-        source = json.loads(source_path.read_text(encoding="utf-8"))
-        executable = json.loads(
-            (ECOSYSTEM / pack_id / "executables.v4.json").read_text(encoding="utf-8")
-        )["variants"][0]
-        operation = executable["operations"][0]
-        function = source["functions"][0]
-        contract = source["contracts"][0]
-        return {
-            "pack_id": pack_id,
-            "version": source["pack"]["version"],
-            "kind": source["pack"]["kind"],
-            "display_name": source["pack"]["display_name"],
-            "description": (
-                "Finite read-only Pack catalog provider for the selected control-panel UI."
-            ),
-            "authority": "v4-authoritative",
-            "source_provenance": {
-                "owner": pack_id,
-                "mode": "canonical-v4",
-                "source_format": "pack.v4.json",
-                "historical_classification": "modern-only",
-            },
-            "dependencies": {},
-            "required_contracts": [],
-            "capabilities": ["pack.catalog.read"],
-            "network": {"allowed_domains": [], "allowed_ports": []},
-            "secrets": [],
-            "execution_boundary": "host_brokered",
-            "approval_policy": "capability_gated",
-            "workspace_boundary": "host_brokered",
-            "provided_contracts": [
-                {
-                    "contract_id": contract["contract_id"],
-                    "version": "1.0.0",
-                    "provider_id": function["id"],
-                    "operations": [
-                        {
-                            "id": operation["operation_id"],
-                            "entrypoint_id": operation["operation_id"],
-                            "implementation_digest": function["implementation_digest"],
-                        }
-                    ],
-                    "schemas": {
-                        "input": operation["input_schema"],
-                        "output": operation["output_schema"],
-                        "error": operation["error_schema"],
-                    },
-                    "cardinality": "one",
-                    "security": "sensitive",
-                    "failure": "fail_closed",
-                    "isolation": "in_process",
-                    "required_capabilities": ["pack.catalog.read"],
-                    "lifecycle": {
-                        "introduced": "1.0.0",
-                        "deprecated": False,
-                    },
-                }
-            ],
-            "legacy_operations": [],
-            "runtime_artifacts": list(source["artifacts"]),
-            "legacy_ids": [],
-            "migration": {
-                "compatibility": "none",
-                "removal_wave": 0,
-                "sunset_at": "2026-08-05",
-            },
-            "source_evidence": [],
-        }
-    source_name = (
-        "defaults-basepack.pack.v4.json" if pack_id == "defaults" else "defaultspack.pack.v4.json"
-    )
-    source_path = ECOSYSTEM / "defaultspack" / "v4" / "packs" / source_name
-    source = json.loads(source_path.read_text(encoding="utf-8"))
-    pack = source["pack"]
-    provided: list[dict[str, Any]] = []
-    executable_source: dict[str, Any] | None = None
-    implementation_digest: str | None = None
-    if pack_id == "defaultspack":
-        source_path = EXECUTABLE_SOURCES
-        pack = {
-            "id": "defaultspack",
-            "version": "4.0.0",
-            "kind": "normal_sandbox",
-            "display_name": "Tobkiri Defaults Providers",
-        }
-        executable_source = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))["packs"][
-            pack_id
-        ]
-        implementation_digest = _file_digest(
-            ECOSYSTEM / pack_id / executable_source["implementation_path"]
-        )
-        provided.append(
-            {
-                "contract_id": executable_source["contract_id"],
-                "version": "1.0.0",
-                "provider_id": executable_source["function_id"],
-                "operations": [
-                    {
-                        "id": executable_source["operation_id"],
-                        "entrypoint_id": executable_source["operation_id"],
-                        "implementation_digest": implementation_digest,
-                    }
-                ],
-                "schemas": {
-                    "input": executable_source["input_schema"],
-                    "output": executable_source["output_schema"],
-                    "error": executable_source["error_schema"],
-                },
-                "cardinality": "one",
-                "security": "restricted",
-                "failure": "fail_closed",
-                "isolation": "sandbox",
-                "required_capabilities": [],
-                "lifecycle": {
-                    "introduced": "4.0.0",
-                    "deprecated": False,
-                },
-            }
-        )
-    return {
-        "pack_id": pack_id,
-        "version": pack["version"],
-        "kind": "base" if pack_id == "defaults" else pack["kind"],
-        "display_name": pack["display_name"],
-        "description": "Canonical Defaults v4 composition artifact.",
-        "authority": "v4-authoritative",
-        "source_provenance": {
-            "owner": pack_id,
-            "mode": "canonical-v4",
-            "source_format": "pack.v4.json",
-            "historical_classification": "modern-only",
-        },
-        "dependencies": {},
-        "required_contracts": [],
-        "capabilities": [],
-        "network": {"allowed_domains": [], "allowed_ports": []},
-        "secrets": [],
-        "execution_boundary": ("declarative_only" if pack_id == "defaults" else "sandbox"),
-        "approval_policy": "none",
-        "workspace_boundary": "pack_local",
-        "provided_contracts": provided,
-        "legacy_operations": [],
-        "runtime_artifacts": (
-            [
-                {
-                    "path": executable_source["implementation_path"],
-                    "digest": implementation_digest,
-                    "kind": "executable",
-                }
-            ]
-            if executable_source is not None and implementation_digest is not None
-            else []
-        ),
-        "legacy_ids": [],
-        "migration": {
-            "compatibility": "none",
-            "removal_wave": 0,
-            "sunset_at": "2026-08-05",
-        },
-        "source_evidence": [
-            {
-                "path": source_path.relative_to(ROOT).as_posix(),
-                "rule_id": "canonical-bundled-v4-source",
-                "digest": _file_digest(source_path),
-            }
-        ],
-    }
-
-
-def _assign_contract_owners(records: list[dict[str, Any]]) -> None:
-    """Record one deterministic owner for every multiply-provided contract."""
-    providers: dict[str, list[str]] = {}
-    for record in records:
-        for contract in record["provided_contracts"]:
-            providers.setdefault(contract["contract_id"], []).append(record["pack_id"])
-    owners = {contract_id: sorted(pack_ids)[0] for contract_id, pack_ids in providers.items()}
-    for record in records:
-        for contract in record["provided_contracts"]:
-            contract["owner"] = owners[contract["contract_id"]]
-
-
-def import_legacy(*, check: bool) -> None:
-    authority_payload = json.loads(AUTHORITY.read_text(encoding="utf-8"))
-    authorities = authority_payload["packs"]
-    pack_names = sorted(set(authorities) - EXCLUDED_PACKS)
-    records = [
-        (
-            _import_bundled_record(name)
-            if name
-            in {
-                "defaults",
-                "defaultspack",
-                "tobkiri_host_pack_control",
-            }
-            else _import_record(ECOSYSTEM / name)
-        )
-        for name in pack_names
-    ]
-    _assign_contract_owners(records)
+    if not legacy_roots:
+        raise PackV4MigrationError("no legacy Pack sources were found")
+    records = [_import_record(pack_root) for pack_root in legacy_roots]
+    pack_ids = [str(record["pack_id"]) for record in records]
     payload = {
-        "catalog_api_version": "io.tobkiri.pack-source-catalog.v1",
+        "catalog_api_version": "io.tobkiri.pack-migration-draft.v1",
+        "status": "generated-draft",
         "migration_commit": START_COMMIT,
         "excluded_packs": sorted(EXCLUDED_PACKS),
-        "pack_ids": pack_names,
+        "pack_ids": pack_ids,
         "packs": records,
+        "note": "Offline input only; owner review and semantic conformance are required.",
     }
     text = _json_text(payload)
     if check:
-        if not CATALOG.is_file() or CATALOG.read_text(encoding="utf-8") != text:
-            raise PackV4MigrationError("canonical Pack v4 source catalog drift")
-        return
-    CATALOG.write_text(text, encoding="utf-8")
+        if not output.is_file() or output.read_text(encoding="utf-8") != text:
+            raise PackV4MigrationError("migration draft drift")
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+    return payload
 
 
 def _provenance(record: Mapping[str, Any], source_identity: str) -> dict[str, Any]:
@@ -660,6 +506,11 @@ def _contract_document(
     source_identity: str,
     source: Mapping[str, Any],
 ) -> dict[str, Any]:
+    owner = source.get("owner")
+    if not isinstance(owner, str) or not owner.strip():
+        raise PackV4MigrationError(
+            f"Contract owner is not explicit in the canonical source: {source['contract_id']}"
+        )
     schemas = source["schemas"]
     input_schema = schemas.get("input", EMPTY_SCHEMA)
     output_schema = schemas.get("output", schemas.get("event", EMPTY_SCHEMA))
@@ -709,7 +560,7 @@ def _contract_document(
         "contract_api_version": "io.tobkiri.contract.v4",
         "contract_id": source["contract_id"],
         "version": source["version"],
-        "owner": source["owner"],
+        "owner": owner,
         "status": "deprecated" if source["lifecycle"].get("deprecated") else "accepted",
         "operations": operations,
         "schema_catalog": schema_catalog,
@@ -1182,8 +1033,8 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
         raise PackV4MigrationError("canonical catalog contains duplicate Pack IDs")
     if pack_ids != sorted(pack_ids) or record_ids != pack_ids:
         raise PackV4MigrationError("canonical catalog has missing or unknown Pack IDs")
-    if len(records) != 143:
-        raise PackV4MigrationError("canonical catalog must contain exactly 143 Packs")
+    if not records:
+        raise PackV4MigrationError("canonical Pack source catalog must not be empty")
     required = {
         "version",
         "kind",
@@ -1221,6 +1072,14 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
             raise PackV4MigrationError(
                 f"canonical v4 authority provenance is invalid: {record['pack_id']}"
             )
+        for contract in record.get("provided_contracts", []):
+            if not isinstance(contract, Mapping) or not isinstance(
+                contract.get("owner"), str
+            ) or not contract["owner"].strip():
+                raise PackV4MigrationError(
+                    "canonical Contract ownership must be explicit: "
+                    f"{record['pack_id']}"
+                )
     return records
 
 
@@ -1281,16 +1140,21 @@ def generate(*, check: bool) -> dict[str, int]:
 
 
 def main() -> None:
-    """Run the one-way importer or deterministic v4 artifact generator."""
+    """Run the deterministic v4 artifact generator or an offline draft import."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--import-legacy", action="store_true")
+    parser.add_argument(
+        "--draft-output",
+        type=Path,
+        help="write an explicit offline migration draft; never the canonical catalog",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if args.import_legacy:
-        import_legacy(check=args.check)
-        if args.check:
-            generate(check=True)
+        import_legacy(check=args.check, output=args.draft_output)
         return
+    if args.draft_output is not None:
+        parser.error("--draft-output requires --import-legacy")
     print(json.dumps(generate(check=args.check), sort_keys=True))
 
 
