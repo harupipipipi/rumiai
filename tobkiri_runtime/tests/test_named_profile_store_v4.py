@@ -25,7 +25,11 @@ from core_runtime.profile_definition_store_v4 import (
     ProfileDefinitionStore,
     ProfileDefinitionStoreError,
 )
-from core_runtime.runtime_surface_v4 import RuntimeSurfaceService
+from core_runtime.runtime_surface_v4 import (
+    RuntimeSurfaceError,
+    RuntimeSurfaceErrorCode,
+    RuntimeSurfaceService,
+)
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 
 
@@ -408,6 +412,13 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     }
     assert browsing_profile["data"]["resolved_plan"] is None
     assert browsing_profile["data"]["activation_record"] is None
+    with pytest.raises(RuntimeSurfaceError) as stale:
+        browsing_surface.read_profile(
+            selected_profile_id="profile-a",
+            expected_profile_revision="sha256:" + "0" * 64,
+            expected_plan_digest=active_b.resolved.plan["plan_digest"],
+        )
+    assert stale.value.code is RuntimeSurfaceErrorCode.STALE_REVISION
     browsing_operations = browsing_surface.read_advanced(
         "operations",
         selected_profile_id="profile-a",

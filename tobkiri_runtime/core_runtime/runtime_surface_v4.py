@@ -844,6 +844,11 @@ class RuntimeSurfaceService:
         selected_profile_id: str | None,
     ) -> dict[str, object]:
         snapshot = self._snapshot(deadline)
+        self._check_expected_bindings(
+            snapshot.active,
+            expected_profile_revision=expected_profile_revision,
+            expected_plan_digest=expected_plan_digest,
+        )
         active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
         if (
             selected_profile_id is not None
@@ -860,11 +865,6 @@ class RuntimeSurfaceService:
                 data=data,
                 selected_profile_id=selected_profile_id,
             )
-        self._check_expected_bindings(
-            snapshot.active,
-            expected_profile_revision=expected_profile_revision,
-            expected_plan_digest=expected_plan_digest,
-        )
         data = self._profile_projection(snapshot, deadline=deadline)
         deadline.checkpoint()
         return self._read_envelope(snapshot, surface="profile", data=data)
@@ -1032,6 +1032,11 @@ class RuntimeSurfaceService:
         selected_profile_id: str | None,
     ) -> dict[str, object]:
         snapshot = self._snapshot(deadline)
+        self._check_expected_bindings(
+            snapshot.active,
+            expected_profile_revision=expected_profile_revision,
+            expected_plan_digest=expected_plan_digest,
+        )
         active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
         if (
             selected_profile_id is not None
@@ -1051,11 +1056,6 @@ class RuntimeSurfaceService:
                 data=data,
                 selected_profile_id=selected_profile_id,
             )
-        self._check_expected_bindings(
-            snapshot.active,
-            expected_profile_revision=expected_profile_revision,
-            expected_plan_digest=expected_plan_digest,
-        )
         advanced = self._advanced_projection(
             snapshot,
             packvm_readiness=self._packvm_readiness(deadline),
