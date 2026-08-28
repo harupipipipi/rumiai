@@ -142,7 +142,8 @@ def test_unsigned_shell_exception_is_bound_to_exact_generated_development_artifa
     assert '"platform-artifacts"' in source
     assert "expected_artifacts.is_dir()" in source
     assert "bundled_artifacts.is_dir()" in source
-    assert "checkout_artifacts_match or bundled_artifacts_match" in source
+    assert "bundled_artifacts_match or (" in source
+    assert "configured_app_matches and checkout_artifacts_match" in source
     assert "require_macos_code_signature=not _allow_unsigned_development_shell(catalog)" in source
 
 

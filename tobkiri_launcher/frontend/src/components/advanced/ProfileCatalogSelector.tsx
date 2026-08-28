@@ -9,6 +9,7 @@ import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPan
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import {
   extractExactProfileCatalog,
+  extractExactProfileCatalogSelectablePackIds,
   type RuntimeProfileCatalogEntry,
   type RuntimeProfileCatalogProjection,
 } from '@/src/lib/runtimeSurface';
@@ -66,6 +67,7 @@ function BindingCard({
 
 function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) {
   const {base, shell, application} = entry.bindings;
+  const selectablePackCount = extractExactProfileCatalogSelectablePackIds(entry)?.length ?? 0;
   return (
     <div className="mt-4 flex flex-col gap-4" aria-label={`Details for Profile ${entry.profile_id}`}>
       <section className="rounded-lg border border-border bg-bg-main p-4">
@@ -125,7 +127,10 @@ function ProfileDefinitionDetails({entry}: {entry: RuntimeProfileCatalogEntry}) 
       <section className="rounded-lg border border-border bg-bg-main p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="flex items-center gap-2 text-sm font-semibold text-text-main"><PackageCheck className="h-4 w-4" aria-hidden="true" />Authoritative Pack closure</h4>
-          <Badge variant="outline">{entry.pack_closure.length} exact rows</Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{entry.pack_closure.length} exact rows</Badge>
+            <Badge variant="outline">{selectablePackCount} selectable Packs</Badge>
+          </div>
         </div>
         <div className="mt-3 flex flex-col gap-2">
           {entry.pack_closure.map((pack) => (

@@ -1531,8 +1531,8 @@
     {
       "path": "tobkiri_protocol/schemas/pack_manifest_v4.schema.json",
       "type": "regular-file",
-      "size": 7822,
-      "sha256": "38ea3d19e207003bf4a8e07b08610c9ab3fd4e547113f74b1c9afcc282538900",
+      "size": 7841,
+      "sha256": "98e039485400b9cc8e5dbc8b163ce1b91929e87e42847e88529a4355b9f18606",
       "executable": false
     },
     {

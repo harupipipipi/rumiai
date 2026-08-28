@@ -635,6 +635,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeDisconnected: false,
   lastRuntimeHealthyAt: null,
   setRuntimeHealth: (health) => {
+    const wasRuntimeReady = get().runtimeReady;
     let parsedHealth: HealthResponseData;
     try {
       parsedHealth = parseHealthResponse(health);
@@ -661,6 +662,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: parsedHealth.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
     }));
+    if (!wasRuntimeReady && parsedHealth.runtime_ready) {
+      void refreshMountedRuntimeSurfaces();
+    }
   },
   refreshRuntimeHealth: async () => {
     try {

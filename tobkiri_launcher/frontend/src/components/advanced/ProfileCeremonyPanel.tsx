@@ -792,7 +792,10 @@ export function ProfileCeremonyPanel({
                 <h3 className="text-sm font-semibold text-text-main">Authoritative Pack closure</h3>
                 <p className="mt-1 text-xs text-text-muted">The selected Profile definition owns this exact closure. Pack rows are used only to report compatibility; they cannot add or remove Packs from a named Profile.</p>
               </div>
-              <Badge variant="outline">{desiredPackIds.length} requested</Badge>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Badge variant="outline">{catalogEntry?.pack_closure.length ?? 0} exact rows</Badge>
+                <Badge variant="outline">{desiredPackIds.length} selectable Packs</Badge>
+              </div>
             </div>
             {catalogEntry ? (
               <div className="mt-3 rounded-lg border border-border bg-bg-main p-4">

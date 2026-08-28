@@ -1805,8 +1805,7 @@ fn read_selection(
                 && shell.artifact.as_ref().is_some_and(|artifact| {
                     artifact.artifact_id == stored.shell_artifact_id
                         && artifact.status == "verified"
-                        && artifact.sha256.as_deref()
-                            == Some(stored.shell_artifact_digest.as_str())
+                        && artifact.sha256.as_deref() == Some(stored.shell_artifact_digest.as_str())
                 });
             if !catalog_digest_matches && !development_digest_matches {
                 return Ok(None);

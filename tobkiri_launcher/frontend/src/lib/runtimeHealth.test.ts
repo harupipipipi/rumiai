@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { describeRuntimeBadge, describeRuntimeBanner, runtimeMonitorDelay } from "./runtimeHealth";
 import {getRuntimeDispatchStatus, setRuntimeDispatchStatus} from "./runtimeDispatchGate";
+import {registerRuntimeSurfaceRefresher} from "./runtimeSurfaceRefresh";
 import {useAppStore} from "@/src/store";
 
 test("runtimeMonitorDelay polls slowly when the runtime is stable", () => {
@@ -102,4 +103,32 @@ test("the store cannot publish a contradictory health state to the dispatch gate
 
   useAppStore.setState(previousState, true);
   setRuntimeDispatchStatus(previousDispatchStatus);
+});
+
+test("runtime_ready refreshes surfaces that mounted during startup", async () => {
+  const previousState = useAppStore.getState();
+  const previousDispatchStatus = getRuntimeDispatchStatus();
+  let refreshes = 0;
+  const unregister = registerRuntimeSurfaceRefresher(async () => {
+    refreshes += 1;
+  });
+
+  try {
+    useAppStore.setState({runtimeReady: false, runtimeStatus: "panel_ready"});
+    setRuntimeDispatchStatus("panel_ready");
+    useAppStore.getState().setRuntimeHealth({
+      status: "ok",
+      needs_setup: false,
+      panel_ready: true,
+      runtime_ready: true,
+      runtime_status: "runtime_ready",
+      runtime_error: null,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    assert.equal(refreshes, 1);
+  } finally {
+    unregister();
+    useAppStore.setState(previousState, true);
+    setRuntimeDispatchStatus(previousDispatchStatus);
+  }
 });

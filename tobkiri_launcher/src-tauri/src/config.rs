@@ -102,13 +102,13 @@ impl AppConfig {
             dev_workspace_root
                 .as_ref()
                 .map(|workspace_root| {
-                workspace_root
-                    .join("tobkiri_launcher")
-                    .join("src-tauri")
-                    .join("target")
-                    .join("dev-state")
-                    .join("runs")
-                    .join(std::process::id().to_string())
+                    workspace_root
+                        .join("tobkiri_launcher")
+                        .join("src-tauri")
+                        .join("target")
+                        .join("dev-state")
+                        .join("runs")
+                        .join(std::process::id().to_string())
                 })
                 .unwrap_or(app_data_dir)
         };
@@ -529,8 +529,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("tobkiri_launcher_config_target_{unique}"));
-        let resource = root
-            .join("tobkiri_launcher/src-tauri/target/aarch64-apple-darwin/debug");
+        let resource = root.join("tobkiri_launcher/src-tauri/target/aarch64-apple-darwin/debug");
         let staged_app_py = resource.join("app/app.py");
         let repo_app_py = root.join("tobkiri_runtime/app.py");
         fs::create_dir_all(staged_app_py.parent().unwrap()).unwrap();
@@ -538,8 +537,7 @@ mod tests {
         fs::write(&staged_app_py, "print('staged')\n").unwrap();
         fs::write(&repo_app_py, "print('repo')\n").unwrap();
 
-        let config =
-            AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, root.join("tobkiri_runtime"));
         assert_eq!(config.venv_dir, root.join(".venv"));
@@ -567,8 +565,7 @@ mod tests {
         fs::write(&staged_app_py, "print('staged')\n").unwrap();
         fs::write(&repo_app_py, "print('repo')\n").unwrap();
 
-        let config =
-            AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, resource.join("app"));
         assert_eq!(config.dev_workspace_root, Some(root.clone()));

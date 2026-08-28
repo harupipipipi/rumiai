@@ -389,7 +389,9 @@ fn development_packvm_bundle_root(config: &AppConfig) -> Option<PathBuf> {
         || resources.file_name()? != "Resources"
         || contents.file_name()? != "Contents"
         || bundle.extension()? != "app"
-        || !bundle.join("Contents/MacOS/tobkiri-packvm-vz-helper").is_file()
+        || !bundle
+            .join("Contents/MacOS/tobkiri-packvm-vz-helper")
+            .is_file()
         || !bundle
             .join("Contents/Resources/packvm-vz-provisioning.v1.json")
             .is_file()

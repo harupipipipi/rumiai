@@ -217,44 +217,41 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         "Defaultspack application Pack v4",
     )?;
     #[cfg(debug_assertions)]
-    let (application_pack_root, application_pack) = if let Some(workspace_root) =
-        config.dev_workspace_root.as_ref()
-    {
-        let bundled_development_root = config.app_dir.join("bundled/dev-defaults");
-        let development_root_path = if bundled_development_root.is_dir() {
-            bundled_development_root
+    let (application_pack_root, application_pack) =
+        if let Some(workspace_root) = config.dev_workspace_root.as_ref() {
+            let bundled_development_root = config.app_dir.join("bundled/dev-defaults");
+            let development_root_path = if bundled_development_root.is_dir() {
+                bundled_development_root
+            } else {
+                workspace_root
+                    .join("tobkiri_launcher")
+                    .join("src-tauri")
+                    .join("target")
+                    .join("dev-defaults")
+            };
+            let development_root =
+                canonical_directory(&development_root_path, "development application Pack root")?;
+            verify_symlink_free_tree(&development_root, &development_root)?;
+            let development_bundle_root = canonical_child_directory(
+                &development_root,
+                Path::new("v4"),
+                "development Pack v4 root",
+            )?;
+            let development_lock = verify_bundle_lock(&development_bundle_root)?;
+            if !development_lock
+                .authority_digests
+                .contains_key(RUNTIME_PACK_PATH)
+            {
+                bail!("development application Pack is absent from its bundle lock");
+            }
+            let development_pack = read_json(
+                &development_bundle_root.join(RUNTIME_PACK_PATH),
+                "development Defaultspack application Pack v4",
+            )?;
+            (development_root, development_pack)
         } else {
-            workspace_root
-                .join("tobkiri_launcher")
-                .join("src-tauri")
-                .join("target")
-                .join("dev-defaults")
+            (pack_root.clone(), packaged_application_pack)
         };
-        let development_root = canonical_directory(
-            &development_root_path,
-            "development application Pack root",
-        )?;
-        verify_symlink_free_tree(&development_root, &development_root)?;
-        let development_bundle_root = canonical_child_directory(
-            &development_root,
-            Path::new("v4"),
-            "development Pack v4 root",
-        )?;
-        let development_lock = verify_bundle_lock(&development_bundle_root)?;
-        if !development_lock
-            .authority_digests
-            .contains_key(RUNTIME_PACK_PATH)
-        {
-            bail!("development application Pack is absent from its bundle lock");
-        }
-        let development_pack = read_json(
-            &development_bundle_root.join(RUNTIME_PACK_PATH),
-            "development Defaultspack application Pack v4",
-        )?;
-        (development_root, development_pack)
-    } else {
-        (pack_root.clone(), packaged_application_pack)
-    };
     #[cfg(not(debug_assertions))]
     let (application_pack_root, application_pack) = (pack_root.clone(), packaged_application_pack);
 
@@ -350,8 +347,7 @@ fn validate_application_pack(
             .as_deref()
             .is_some_and(|digest| digest != entrypoint_digest)
         || (!cfg!(debug_assertions)
-            && (selected_variant.sha256.is_none()
-                || selected_variant.entrypoint_sha256.is_none()))
+            && (selected_variant.sha256.is_none() || selected_variant.entrypoint_sha256.is_none()))
     {
         bail!("application Pack differs from its signed release artifact");
     }
