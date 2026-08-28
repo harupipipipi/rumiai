@@ -100,7 +100,11 @@ class AppLifecycleManager:
     setup completion として扱う。
     """
 
-    base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
+    # ``None`` means the canonical local-first user-data root.  An explicit
+    # base_dir remains available for isolated callers and tests, but the
+    # process-wide manager must not silently create a second runtime state
+    # tree beside the packaged runtime.
+    base_dir: Path | None = None
     packvm_lifecycle: Any | None = field(default=None, repr=False)
     _activation_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
@@ -133,6 +137,7 @@ class AppLifecycleManager:
                 "reason": "canonical_v4_profile_captured",
                 "setup_state": "complete",
                 "profile_id": active.resolved.profile["profile_id"],
+                "profile_revision": active.resolved.plan["profile_revision"],
                 "plan_digest": active.resolved.plan["plan_digest"],
                 "activation_id": active.activation["activation_id"],
             }
@@ -257,6 +262,7 @@ class AppLifecycleManager:
             "errors": [],
             "setup_state": "complete",
             "profile_id": active.resolved.profile["profile_id"],
+            "profile_revision": active.resolved.plan["profile_revision"],
             "plan_digest": active.resolved.plan["plan_digest"],
             "activation_id": active.activation["activation_id"],
             "restart_required": False,

@@ -19,7 +19,12 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     ResolvedDefaultProfile,
     resolve_default_profile,
 )
+from tobkiri_protocol.authority_binding import (
+    authority_edge_key,
+    authority_reference as protocol_authority_reference,
+)
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 
 from ..authority.v4 import AuthorityStore
 from ..authority.v4_models import authority_digest
@@ -80,10 +85,12 @@ def _activation_pointer_signature(path: Path) -> _ProfilePointerSignature | None
 
 def runtime_user_data_root(base_dir: Path | None = None) -> Path:
     """Return the configured Host state root without an authority fallback."""
+    if base_dir is not None:
+        return Path(base_dir).expanduser().resolve()
     configured = read_migrated_env("TOBKIRI_USER_DATA", "RUMI_USER_DATA")
     if configured:
-        return Path(configured).resolve()
-    runtime_root = base_dir or Path(__file__).resolve().parents[2]
+        return Path(configured).expanduser().resolve()
+    runtime_root = Path(__file__).resolve().parents[2]
     return (runtime_root / "user_data").resolve()
 
 
@@ -230,26 +237,66 @@ def _verify_installed_bundle_binding(runtime_root: Path, bundle_root: Path) -> N
 
 
 def _edge_key(edge: Mapping[str, Any]) -> str:
-    return "|".join(
-        str(edge[field])
-        for field in (
-            "caller_function_id",
-            "target_provider_id",
-            "contract_id",
-            "operation_id",
+    return authority_edge_key(edge)
+
+
+def _authority_reference(
+    edge: Mapping[str, Any],
+    snapshot_digest: str,
+    *,
+    scope_digest: str,
+) -> str:
+    """Return the shared opaque reference for one exact edge and scope."""
+
+    return protocol_authority_reference(
+        edge,
+        snapshot_digest,
+        requested_scope_digest=scope_digest,
+    )
+
+
+def _edge_scope_digest(catalog: BundledCatalog, edge: Mapping[str, Any]) -> str:
+    """Normalize one source edge before binding its Authority reference."""
+
+    contract_id = str(edge.get("contract_id") or "")
+    operation_id = str(edge.get("operation_id") or "")
+    target_provider_id = str(edge.get("target_provider_id") or "")
+    candidates: list[Mapping[str, Any]] = []
+    for manifest in catalog.packs.values():
+        functions = manifest.get("functions", ())
+        contracts = manifest.get("contracts", ())
+        if not isinstance(functions, list) or not isinstance(contracts, list):
+            continue
+        for function in functions:
+            if not isinstance(function, Mapping) or function.get("id") != target_provider_id:
+                continue
+            if operation_id not in function.get("operations", ()):
+                continue
+            for contract in contracts:
+                if (
+                    isinstance(contract, Mapping)
+                    and contract.get("contract_id") == contract_id
+                    and operation_id in contract.get("operations", ())
+                    and function.get("contract_revision_digest")
+                    == contract.get("revision_digest")
+                ):
+                    candidates.append(contract)
+    if len(candidates) != 1:
+        raise ProfileResolutionDenied(
+            f"Authority scope Contract is ambiguous for edge {_edge_key(edge)}"
         )
-    )
-
-
-def _authority_reference(edge: Mapping[str, Any], snapshot_digest: str) -> str:
-    digest = canonical_digest(
-        {
-            "schema": "io.tobkiri.profile-authority-edge.v1",
-            "edge": _edge_key(edge),
-            "profile_authority_snapshot_digest": snapshot_digest,
-        }
-    )
-    return f"authority-ref:{digest.removeprefix('sha256:')}"
+    try:
+        normalized = normalize_requested_scope_template(
+            edge["requested_scope_template"],
+            contract_id=contract_id,
+            operation_id=operation_id,
+            semantics_digest=str(candidates[0]["revision_digest"]),
+        )
+    except Exception as error:
+        raise ProfileResolutionDenied(
+            f"Authority scope is invalid for edge {_edge_key(edge)}"
+        ) from error
+    return canonical_digest(normalized)
 
 
 def _authority_snapshot_digest(
@@ -308,7 +355,11 @@ def _resolve_candidate(
     if source_profile is None:
         raise ProfileResolutionDenied("bundled defaults Profile is missing")
     authority_bindings = {
-        _edge_key(edge): _authority_reference(edge, snapshot_digest)
+        _edge_key(edge): _authority_reference(
+            edge,
+            snapshot_digest,
+            scope_digest=_edge_scope_digest(catalog, edge),
+        )
         for edge in source_profile["requested_edges"]
     }
     verified_artifacts = {

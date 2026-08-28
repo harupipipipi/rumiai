@@ -17,10 +17,12 @@ from pathlib import Path
 
 
 def _profile_path(base_dir):
-    user_data_dir = os.environ.get("RUMI_USER_DATA")
+    user_data_dir = os.environ.get("TOBKIRI_USER_DATA") or os.environ.get(
+        "RUMI_USER_DATA"
+    )
     if user_data_dir:
-        return Path(user_data_dir) / "settings" / "profile.json"
-    return base_dir / "user_data" / "settings" / "profile.json"
+        return Path(user_data_dir).expanduser().resolve() / "settings" / "profile.json"
+    return Path(base_dir).expanduser().resolve() / "user_data" / "settings" / "profile.json"
 
 
 def check_profile(base_dir=None):

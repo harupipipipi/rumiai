@@ -322,6 +322,7 @@ def test_dispatch_session_install_publishes_only_captured_instance() -> None:
         effect_scope_for=lambda _contract, _operation, _payload: {},
         providers={},
         profile_id="profile:installed-v4",
+        profile_revision="sha256:" + "0" * 64,
         plan_digest="sha256:" + "1" * 64,
     )
     install_dispatch_session(container, session)
@@ -333,6 +334,7 @@ def test_dispatch_session_install_publishes_only_captured_instance() -> None:
         effect_scope_for=lambda _contract, _operation, _payload: {},
         providers={},
         profile_id="",
+        profile_revision="sha256:" + "0" * 64,
         plan_digest="sha256:" + "1" * 64,
     )
     with pytest.raises(ValueError, match="profile_id"):

@@ -1819,8 +1819,13 @@ def _capability_invocation_target(
     if value is None:
         return None
     profile_id = str(active.resolved.profile["profile_id"])
+    profile_revision = str(active.resolved.plan["profile_revision"])
     plan_digest = str(active.resolved.plan["plan_digest"])
-    if value.get("profile_id") != profile_id or value.get("plan_digest") != plan_digest:
+    if (
+        value.get("profile_id") != profile_id
+        or value.get("profile_revision") != profile_revision
+        or value.get("plan_digest") != plan_digest
+    ):
         return None
     targets = value.get("targets")
     if not isinstance(targets, list) or any(not isinstance(item, Mapping) for item in targets):
@@ -1843,6 +1848,7 @@ def _capability_invocation_target(
     expected_hash = canonical_digest(
         {
             "profile_id": profile_id,
+            "profile_revision": profile_revision,
             "plan_digest": plan_digest,
             "contributions": digest_targets,
         }

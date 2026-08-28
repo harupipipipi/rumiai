@@ -122,6 +122,7 @@ class _CapturedConversationSession:
     """Finite captured Broker fixture with controllable readiness evidence."""
 
     profile_id = "defaults"
+    profile_revision = "sha256:" + "0" * 64
     plan_digest = "sha256:" + "1" * 64
 
     def __init__(self, targets: tuple[FrontendContractTarget, ...]) -> None:
@@ -137,6 +138,7 @@ class _CapturedConversationSession:
                     "function_id": target.function_id,
                     "operation_id": target.operation_id,
                     "profile_id": self.profile_id,
+                    "profile_revision": self.profile_revision,
                     "plan_digest": self.plan_digest,
                     "artifact_digest": "sha256:" + "2" * 64,
                 },

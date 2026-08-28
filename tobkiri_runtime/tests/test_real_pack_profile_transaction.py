@@ -19,6 +19,7 @@ from core_runtime.authority.v4 import AuthorityStore
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_PACK = "rumi_git_read_pack"
 BOOTSTRAP_SECRET = "isolated-host-owned-panel-bootstrap-secret"
+REAL_RUNTIME_REQUEST_TIMEOUT_SECONDS = 30
 
 
 _CHILD = r"""
@@ -190,7 +191,11 @@ def _request(
     body: object | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> tuple[int, dict[str, Any], list[tuple[str, str]]]:
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    connection = http.client.HTTPConnection(
+        "127.0.0.1",
+        port,
+        timeout=REAL_RUNTIME_REQUEST_TIMEOUT_SECONDS,
+    )
     encoded = None if body is None else json.dumps(body).encode("utf-8")
     request_headers = dict(headers or {})
     if encoded is not None:

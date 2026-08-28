@@ -152,6 +152,7 @@ def test_v4_dispatch_session_never_derives_identity_from_payload() -> None:
         effect_scope_for=lambda contract, operation, payload: expected_scope,
         providers={"contract.v4": ({"principal": "host-bound"},)},
         profile_id="defaults",
+        profile_revision="sha256:" + "0" * 64,
         plan_digest="sha256:" + "1" * 64,
     )
     assert session.invoke(
@@ -181,6 +182,7 @@ def test_dispatch_session_installation_rejects_noncanonical_identity() -> None:
         effect_scope_for=lambda _contract, _operation, _payload: {},
         providers={},
         profile_id="defaults",
+        profile_revision="sha256:" + "0" * 64,
         plan_digest="sha256:" + "2" * 64,
     )
     install_dispatch_session(container, session)

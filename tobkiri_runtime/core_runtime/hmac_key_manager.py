@@ -431,9 +431,16 @@ class HMACKeyManager:
             grace_period_seconds: グレースピリオド（秒）
         """
         if keys_path is None:
-            configured_user_data = os.environ.get("RUMI_USER_DATA", "").strip()
+            configured_user_data = (
+                os.environ.get("TOBKIRI_USER_DATA")
+                or os.environ.get("RUMI_USER_DATA")
+                or ""
+            ).strip()
             if configured_user_data:
-                keys_path = str(Path(configured_user_data) / _DEFAULT_KEYS_FILENAME)
+                keys_path = str(
+                    Path(configured_user_data).expanduser().resolve()
+                    / _DEFAULT_KEYS_FILENAME
+                )
             else:
                 try:
                     from .paths import USER_DATA_DIR

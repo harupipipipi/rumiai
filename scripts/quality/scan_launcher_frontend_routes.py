@@ -6,10 +6,19 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
+RUNTIME_ROOT = ROOT / "tobkiri_runtime"
+if str(RUNTIME_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_ROOT))
+
+from core_runtime.route_authority import (  # noqa: E402
+    RETIRED_FRONTEND_ROUTES,
+)
+
 DEFAULT_PANEL = (
     ROOT
     / "tobkiri_runtime"
@@ -28,12 +37,7 @@ DEFAULT_MAP = (
 )
 GENERIC_DISPATCH = "/api/v4/dispatch"
 CLIENT_SELECTED_FIELDS = ("contract_id", "operation_id")
-RETIRED_ROUTES = (
-    "/api/authority/events",
-    "/api/packs/scan",
-    "/api/routes/reload",
-    "/api/runtime/available",
-)
+RETIRED_ROUTES = RETIRED_FRONTEND_ROUTES
 
 
 def scan_panel(panel_root: Path, map_path: Path) -> list[dict[str, Any]]:

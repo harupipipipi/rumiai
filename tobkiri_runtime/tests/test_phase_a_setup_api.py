@@ -279,33 +279,35 @@ class TestCompleteSetup:
             {"error": "retired", "status_code": 410}
         )
 
-    def test_setup_pack_install_no_auth_required_only_during_initial_setup(self):
+    def test_setup_pack_install_requires_ceremony_or_panel_session(self):
         from core_runtime.pack_api_server import PackAPIHandler
 
         handler = object.__new__(PackAPIHandler)
         handler.path = "/api/setup/packs/install"
-        handler.client_address = ("198.51.100.7", 12345)
-        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.headers = {"Content-Type": "application/json"}
+        handler._check_auth = MagicMock(return_value=False)
         body = {"install_defaults_profile": False}
-        handler._parse_body = MagicMock(return_value=body)
+        handler._parse_object_body = MagicMock(return_value=body)
         handler._setup_install_pack = MagicMock(
             return_value={"error": "retired", "status_code": 410}
         )
         handler.wfile = BytesIO()
         handler._send_mapping_result = MagicMock()
         handler._send_response = MagicMock()
-        PackAPIHandler.app_lifecycle_manager = MagicMock()
-        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
-            "needs_setup": True,
-        }
+        handler._panel_auth_manager = MagicMock()
+        handler._panel_auth_manager.consume_ceremony_credential.return_value = False
 
         PackAPIHandler.do_POST(handler)
 
-        handler._check_auth.assert_not_called()
-        handler._setup_install_pack.assert_called_once_with(body)
-        handler._send_mapping_result.assert_called_once_with(
-            {"error": "retired", "status_code": 410}
+        handler._check_auth.assert_called_once_with(
+            "POST", "/api/setup/packs/install"
         )
+        handler._setup_install_pack.assert_not_called()
+        handler._send_mapping_result.assert_not_called()
+        response, status = handler._send_response.call_args.args
+        assert status == 401
+        assert response.success is False
 
     def test_setup_pack_install_requires_auth_after_setup_completed(self):
         from core_runtime.pack_api_server import PackAPIHandler
@@ -313,18 +315,19 @@ class TestCompleteSetup:
         handler = object.__new__(PackAPIHandler)
         handler.path = "/api/setup/packs/install"
         handler.client_address = ("198.51.100.7", 12345)
+        handler.headers = {"Content-Type": "application/json"}
         handler._check_auth = MagicMock(return_value=False)
         handler._discard_request_body = MagicMock()
+        handler._parse_object_body = MagicMock(return_value={})
         handler._send_response = MagicMock()
-        PackAPIHandler.app_lifecycle_manager = MagicMock()
-        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
-            "needs_setup": False,
-        }
+        handler._panel_auth_manager = None
 
         PackAPIHandler.do_POST(handler)
 
         handler._check_auth.assert_called_once_with("POST", "/api/setup/packs/install")
-        handler._discard_request_body.assert_called_once()
+        response, status = handler._send_response.call_args.args
+        assert status == 401
+        assert response.success is False
 
 
 class TestHealthPayload:

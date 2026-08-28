@@ -44,9 +44,14 @@ from .frontend_contract_routes import (
     resolve_contract_route,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.ids import validate_artifact_digest
 from .host_contract import host_contract_value
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
 from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
+from .route_authority import (
+    RETIRED_API_ROOTS,
+    is_retired_api_path,
+)
 from .authority.v4_models import AuthorityDenied
 from tobkiri_host.errors import HostCoreError
 
@@ -184,36 +189,7 @@ def _result_record_refs(result: Mapping[str, Any]) -> list[Mapping[str, str]]:
     return references
 
 
-_RETIRED_API_ROOTS = frozenset(
-    {
-        "auth",
-        "authority",
-        "blocks",
-        "capabilities",
-        "containers",
-        "desktop",
-        "flows",
-        "executors",
-        "functions",
-        "graphs",
-        "integrations",
-        "mobile",
-        "network",
-        "nodes",
-        "packs",
-        "panel",
-        "pip",
-        "privileges",
-        "profiles",
-        "routes",
-        "runtime",
-        "secrets",
-        "stores",
-        "units",
-        "viewer",
-        "webhooks",
-    }
-)
+_RETIRED_API_ROOTS = RETIRED_API_ROOTS
 
 _CONVERSATION_CAPABILITY_TARGET = (
     "defaults.conversation.complete",
@@ -265,6 +241,10 @@ class DispatchSession(Protocol):
     @property
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
+
+    @property
+    def profile_revision(self) -> str:
+        """Return the exact captured Profile document revision."""
 
 
 def _load_production_capture_inputs() -> tuple[
@@ -738,8 +718,7 @@ class PackAPIHandler(
 
     @staticmethod
     def _retired_api_path(path: str) -> bool:
-        parts = path.strip("/").split("/")
-        return len(parts) >= 2 and parts[0] == "api" and parts[1] in _RETIRED_API_ROOTS
+        return is_retired_api_path(path)
 
     def _send_retired_api(self, path: str) -> None:
         self._send_response(
@@ -1485,6 +1464,7 @@ class PackAPIHandler(
                 catalog_hash=canonical_digest(
                     {
                         "profile_id": "",
+                        "profile_revision": "",
                         "plan_digest": "",
                         "contributions": [],
                     }
@@ -1580,7 +1560,9 @@ class PackAPIHandler(
             "dynamic_host": {
                 "version": "tobkiri.ui.contribution.v1",
                 "profile_id": session.profile_id if session is not None else "",
-                "profile_revision": session.plan_digest if session is not None else "",
+                "profile_revision": (
+                    session.profile_revision if session is not None else ""
+                ),
                 "plan_hash": session.plan_digest if session is not None else "",
                 "contributions": [
                     self._capability_contribution(target, index, session)
@@ -1610,10 +1592,11 @@ class PackAPIHandler(
             ),
             "priority": priority,
             "owner_pack_id": target.owner_pack_id,
-            "owner_pack_hash": target.artifact_digest
-            or (session.plan_digest if session is not None else ""),
+            "owner_pack_hash": target.artifact_digest,
             "build_identity": target.function_id,
-            "resolved_profile_revision": session.plan_digest if session is not None else "",
+            "resolved_profile_revision": (
+                session.profile_revision if session is not None else ""
+            ),
             "resolved_plan_hash": session.plan_digest if session is not None else "",
             "descriptor_hash": canonical_digest(
                 {
@@ -1815,6 +1798,36 @@ class PackAPIHandler(
             extra_headers=[("Set-Cookie", cookie)],
         )
 
+    def _handle_setup_ceremony(self) -> None:
+        """Issue one native-only credential for the first-start activation."""
+
+        manager = self._panel_auth_manager
+        secret = self.headers.get("X-Rumi-Desktop-Bootstrap", "")
+        if (
+            manager is None
+            or not self._is_loopback_client(self.client_address)
+            or not manager.validate_bootstrap_secret(secret)
+        ):
+            self._discard_request_body()
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        self._discard_request_body()
+        self._send_response(APIResponse(True, data=manager.issue_ceremony_credential()))
+
+    def _require_json_content_type(self) -> bool:
+        """Require an explicit JSON media type for structured mutations."""
+
+        content_type = self.headers.get("Content-Type", "")
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type == "application/json":
+            return True
+        self._discard_request_body()
+        self._send_response(
+            APIResponse(False, error="JSON Content-Type is required"),
+            415,
+        )
+        return False
+
     def _setup_pre_auth_allowed(self) -> bool:
         lifecycle = self.__class__.app_lifecycle_manager
         if lifecycle is None:
@@ -1904,7 +1917,8 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap, X-Tobkiri-Request-ID",
+                "Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap, "
+                "X-Tobkiri-Setup-Ceremony, X-Tobkiri-Request-ID",
             )
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -1988,6 +2002,9 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             if body is not None:
                 self._handle_panel_exchange(body)
             return
+        if path == "/api/setup/ceremony":
+            self._handle_setup_ceremony()
+            return
         if path == "/api/setup/runtime/reconcile":
             if not self._check_auth("POST", path):
                 self._discard_request_body()
@@ -2030,15 +2047,72 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 self._discard_request_body()
                 self._send_response(APIResponse(False, error="Unauthorized"), 401)
                 return
+            self._discard_request_body()
+            refresh = self.__class__._runtime_refresh
+            lifecycle = self.__class__.app_lifecycle_manager
+            if refresh is None or lifecycle is None:
+                self._send_mapping_result({
+                    "error": "Canonical runtime reconciliation is unavailable",
+                    "status_code": 503,
+                    "state": "runtime_unavailable",
+                })
+                return
+            try:
+                refresh(None)
+                health = lifecycle.get_health()
+            except Exception as error:
+                from .app_lifecycle_manager import mark_runtime_failed
+
+                mark_runtime_failed("canonical runtime capture failed")
+                logger.warning(
+                    "Canonical runtime reconciliation failed",
+                    exc_info=error,
+                )
+                self._send_mapping_result({
+                    "error": "Canonical runtime reconciliation failed",
+                    "status_code": 503,
+                    "state": "runtime_unavailable",
+                })
+                return
+            self._send_mapping_result({
+                "state": health.get("runtime_status", "starting"),
+                "runtime_ready": health.get("runtime_ready", False),
+            })
+            return
+        if path == "/api/setup/packs/install":
+            if not self._require_json_content_type():
+                return
             body = self._parse_object_body()
-            if body is not None:
-                result = self._setup_install_pack(body)
-                self._send_mapping_result(result)
-                try:
-                    self.wfile.flush()
-                except self._CLIENT_DISCONNECT_EXCEPTIONS:
-                    self.close_connection = True
-                self._refresh_setup_runtime_after_response(result)
+            if body is None:
+                return
+            body_credential = body.pop("ceremony_credential", None)
+            header_credential = self.headers.get("X-Tobkiri-Setup-Ceremony", "").strip()
+            if body_credential is not None and not isinstance(body_credential, str):
+                self._send_response(APIResponse(False, error="Unauthorized"), 401)
+                return
+            if body_credential is not None and header_credential and (
+                not hmac.compare_digest(body_credential, header_credential)
+            ):
+                self._discard_request_body()
+                self._send_response(APIResponse(False, error="Unauthorized"), 401)
+                return
+            if not self._check_auth("POST", path):
+                ceremony_credential = header_credential or str(body_credential or "")
+                manager = self._panel_auth_manager
+                if (
+                    manager is None
+                    or not self._is_loopback_client(self.client_address)
+                    or not manager.consume_ceremony_credential(ceremony_credential)
+                ):
+                    self._send_response(APIResponse(False, error="Unauthorized"), 401)
+                    return
+            result = self._setup_install_pack(body)
+            self._send_mapping_result(result)
+            try:
+                self.wfile.flush()
+            except self._CLIENT_DISCONNECT_EXCEPTIONS:
+                self.close_connection = True
+            self._refresh_setup_runtime_after_response(result)
             return
         if path == "/api/v4/dispatch":
             self._discard_request_body()
@@ -2231,7 +2305,14 @@ class PackAPIServer:
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
-        if session.profile_id != "defaults" or not session.plan_digest.startswith("sha256:"):
+        try:
+            validate_artifact_digest(session.profile_revision, field="profile_revision")
+            validate_artifact_digest(session.plan_digest, field="plan_digest")
+        except Exception as error:
+            raise RuntimeError(
+                "frontend contracts require canonical Profile and plan digests"
+            ) from error
+        if session.profile_id != "defaults":
             raise RuntimeError("frontend contracts require the exact Defaults Profile")
         for binding in routes.values():
             for target in binding.targets:
@@ -2242,6 +2323,7 @@ class PackAPIServer:
                     if provider.get("provider_id") == target.provider_id
                     and provider.get("operation_id") == target.operation_id
                     and provider.get("profile_id") == session.profile_id
+                    and provider.get("profile_revision") == session.profile_revision
                     and provider.get("plan_digest") == session.plan_digest
                 )
                 if len(exact) != 1 or target.function_id != target.provider_id:

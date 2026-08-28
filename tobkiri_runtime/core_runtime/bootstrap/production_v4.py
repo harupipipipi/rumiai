@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import threading
@@ -36,6 +37,7 @@ from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.runtime import ProductionRuntimeV4, V4DispatchSession
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 from tobkiri_protocol.errors import ProtocolError
+from tobkiri_protocol.authority_binding import authority_reference
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
 
 from ..authority.v4 import (
@@ -877,6 +879,121 @@ def _provider_unavailable_bridge_result() -> dict[str, Any]:
     }
 
 
+def _validate_captured_authority_graph(
+    *,
+    bundle_root: Path,
+    authority_store: AuthorityStore,
+    profile: Mapping[str, Any],
+    lock: Mapping[str, Any],
+    plan: Mapping[str, Any],
+) -> None:
+    """Verify the exact edge, scope, and digest graph before Host capture."""
+
+    from .profile_capture import _authority_snapshot_digest
+
+    try:
+        bundle_lock_raw = (bundle_root / "bundle.lock.json").read_bytes()
+        bundle_lock_digest = "sha256:" + hashlib.sha256(bundle_lock_raw).hexdigest()
+        expected_snapshot = _authority_snapshot_digest(
+            authority_store,
+            bundle_lock_digest,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        raise AuthorityDenied("captured bundle Authority snapshot is unavailable") from exc
+
+    if any(
+        record.get("profile_authority_snapshot_digest") != expected_snapshot
+        for record in (profile, lock, plan)
+    ):
+        raise AuthorityDenied("captured Authority snapshot digest changed")
+
+    expected_profile_revision = canonical_digest(dict(profile))
+    expected_plan_digest = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    if (
+        plan.get("profile_revision") != expected_profile_revision
+        or lock.get("profile_revision") != expected_profile_revision
+        or plan.get("plan_digest") != expected_plan_digest
+        or lock.get("plan_digest") != expected_plan_digest
+        or lock.get("lock_digest")
+        != canonical_digest(
+            {key: value for key, value in lock.items() if key != "lock_digest"}
+        )
+    ):
+        raise AuthorityDenied("captured Profile revision and plan digest are inconsistent")
+
+    raw_bindings = plan.get("bindings")
+    raw_edges = profile.get("requested_edges")
+    references = profile.get("authority_references")
+    if (
+        not isinstance(raw_bindings, list)
+        or not isinstance(raw_edges, list)
+        or not isinstance(references, list)
+    ):
+        raise AuthorityDenied("captured Profile authority graph is incomplete")
+
+    binding_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for binding in raw_bindings:
+        if not isinstance(binding, Mapping):
+            raise AuthorityDenied("captured ResolvedPlan binding is invalid")
+        key = (
+            str(binding.get("contract_id") or ""),
+            str(binding.get("operation_id") or ""),
+        )
+        if not all(key) or key in binding_by_key:
+            raise AuthorityDenied("captured ResolvedPlan contains duplicate operation bindings")
+        binding_by_key[key] = binding
+
+    expected_keys: list[tuple[str, str]] = []
+    expected_references: list[str] = []
+    for edge in raw_edges:
+        if not isinstance(edge, Mapping):
+            raise AuthorityDenied("captured Profile edge is invalid")
+        key = (
+            str(edge.get("contract_id") or ""),
+            str(edge.get("operation_id") or ""),
+        )
+        if not all(key) or key in expected_keys:
+            raise AuthorityDenied("captured Profile contains duplicate operation edges")
+        expected_keys.append(key)
+        binding = binding_by_key.get(key)
+        if binding is None or binding.get("caller_function_id") != edge.get(
+            "caller_function_id"
+        ):
+            raise AuthorityDenied("captured Profile caller edge does not match its plan")
+        principal_payload = binding.get("function_principal")
+        if not isinstance(principal_payload, Mapping):
+            raise AuthorityDenied("captured Provider principal is invalid")
+        try:
+            target = FunctionPrincipal.from_dict(principal_payload)
+            scope = _committed_operation_scope(edge, target)
+        except (AuthorityDenied, KeyError, TypeError, ValueError) as exc:
+            raise AuthorityDenied("captured Profile scope is invalid") from exc
+        if target.function_id != edge.get("target_provider_id"):
+            raise AuthorityDenied("captured Profile target Provider does not match its plan")
+        scope_digest = canonical_digest(scope.to_dict())
+        if binding.get("requested_scope_digest") != scope_digest:
+            raise AuthorityDenied("captured Profile scope digest changed")
+        try:
+            expected_reference = authority_reference(
+                edge,
+                expected_snapshot,
+                requested_scope_digest=scope_digest,
+            )
+        except (TypeError, ValueError) as exc:
+            raise AuthorityDenied("captured Profile authority reference is invalid") from exc
+        if (
+            edge.get("authority_reference") != expected_reference
+            or binding.get("authority_reference") != expected_reference
+        ):
+            raise AuthorityDenied("captured Profile authority edge reference changed")
+        expected_references.append(expected_reference)
+
+    if set(binding_by_key) != set(expected_keys) or references != expected_references:
+        raise AuthorityDenied("captured Profile and ResolvedPlan operation sets differ")
+
+
 def capture_production_dispatch(
     active: ActiveDefaultProfile,
     *,
@@ -924,6 +1041,13 @@ def capture_production_dispatch(
     profile = active.resolved.profile
     lock = active.resolved.lock
     plan = active.resolved.plan
+    _validate_captured_authority_graph(
+        bundle_root=bundle_root,
+        authority_store=authority_store,
+        profile=profile,
+        lock=lock,
+        plan=plan,
+    )
     shell_id = str(profile["shell"]["pack_id"])
     shell = _shell_artifact(
         catalog,
@@ -1531,6 +1655,7 @@ def capture_production_dispatch(
         def __init__(self, envelope: Any) -> None:
             self._envelope = envelope
             self.profile_id = str(profile["profile_id"])
+            self.profile_revision = str(plan["profile_revision"])
             self.plan_digest = str(plan["plan_digest"])
 
         def provider_metadata(
@@ -1641,6 +1766,7 @@ def capture_production_dispatch(
                 catalog_bindings=catalog_bindings,
                 domain_ids=dynamic_domain_ids,
                 user_data_root=authority_user_data,
+                profile_revision=str(plan["profile_revision"]),
             )
         )
         expected_keys = {
@@ -1667,6 +1793,7 @@ def capture_production_dispatch(
                 plan_digest=str(plan["plan_digest"]),
                 security_epoch=int(active.activation["security_epoch"]),
                 invocation_context=invocation_context,
+                profile_revision=str(plan["profile_revision"]),
             ),
         )
     backend_registry = BackendRegistry(registered_backends)
@@ -1803,6 +1930,7 @@ def capture_production_dispatch(
                     else {}
                 ),
                 "profile_id": profile["profile_id"],
+                "profile_revision": plan["profile_revision"],
                 "plan_digest": plan["plan_digest"],
             },
         )
@@ -1891,6 +2019,7 @@ def capture_production_dispatch(
             )
             return snapshot.to_mapping(
                 profile_id=dispatch.profile_id,
+                profile_revision=dispatch.profile_revision,
                 plan_digest=dispatch.plan_digest,
             )
 

@@ -51,15 +51,36 @@ def test_committed_v4_activation_is_the_only_setup_completion(
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(
-        confirmation=prepare_default_profile_confirmation()
+        base_dir=tmp_path,
+        confirmation=prepare_default_profile_confirmation(base_dir=tmp_path),
     )
 
     status = AppLifecycleManager(base_dir=tmp_path).check_setup_status()
 
     assert status["needs_setup"] is False
     assert status["profile_id"] == active.resolved.profile["profile_id"]
+    assert status["profile_revision"] == active.resolved.plan["profile_revision"]
     assert status["plan_digest"] == active.resolved.plan["plan_digest"]
     assert status["activation_id"] == active.activation["activation_id"]
+
+
+def test_default_lifecycle_uses_canonical_local_user_data_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The process-wide lifecycle follows the configured local state root."""
+
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    active = capture_default_profile(
+        confirmation=prepare_default_profile_confirmation(),
+    )
+
+    status = AppLifecycleManager().check_setup_status()
+
+    assert status["needs_setup"] is False
+    assert status["activation_id"] == active.activation["activation_id"]
+    assert status["profile_revision"] == active.resolved.plan["profile_revision"]
 
 
 def test_complete_setup_never_creates_legacy_profile(
@@ -70,7 +91,10 @@ def test_complete_setup_never_creates_legacy_profile(
 
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    active = capture_default_profile(
+        base_dir=tmp_path,
+        confirmation=prepare_default_profile_confirmation(base_dir=tmp_path),
+    )
     legacy_path = user_data / "settings" / "profile.json"
 
     result = AppLifecycleManager(base_dir=tmp_path).complete_setup(
@@ -79,6 +103,7 @@ def test_complete_setup_never_creates_legacy_profile(
 
     assert result["success"] is True
     assert result["setup_state"] == "complete"
+    assert result["profile_revision"] == active.resolved.plan["profile_revision"]
     assert legacy_path.exists() is False
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from core_runtime.authority.v4 import AuthorityStore
+from tobkiri_protocol.ids import validate_artifact_digest
 
 from .artifact_compiler import CompiledPack, compile_pack_root, routes_for_plan
 from .backends import BackendRegistry
@@ -199,6 +200,7 @@ class V4DispatchSession:
             "backend_id": backend.status.backend_id,
             "backend_digest": backend.status.backend_digest,
             "profile_id": self.profile_id,
+            "profile_revision": self.profile_revision,
             "plan_digest": self.plan_digest,
         }
         if any(provider.get(key) != value for key, value in expected.items()):
@@ -268,10 +270,11 @@ def install_dispatch_session(
     """Publish the exact captured activation to worker, HTTP, and chat code."""
     if not session.profile_id.strip():
         raise ValueError("v4 dispatch session profile_id must be non-empty")
-    if not session.plan_digest.startswith("sha256:"):
-        raise ValueError("v4 dispatch session plan_digest must be canonical")
-    if session.profile_revision and not session.profile_revision.startswith("sha256:"):
-        raise ValueError("v4 dispatch session profile_revision must be canonical")
+    try:
+        validate_artifact_digest(session.plan_digest, field="plan_digest")
+        validate_artifact_digest(session.profile_revision, field="profile_revision")
+    except Exception as error:
+        raise ValueError("v4 dispatch session digests must be canonical") from error
     container.set_instance("v4_dispatch_session", session)
 
 

@@ -32,7 +32,9 @@ def test_profile_scoped_paths_use_only_verified_v4_activation(
     )
 
     assert active_profile_id() == "defaults"
-    assert resolve_runtime_user_data_dir() == tmp_path / "workspaces" / "defaults"
+    assert resolve_runtime_user_data_dir() == (
+        tmp_path / "workspaces" / "defaults" / "state"
+    )
     assert resolve_runtime_database_path() == (
         tmp_path / "workspaces" / "defaults" / "state" / "rumi.sqlite"
     )
@@ -57,7 +59,9 @@ def test_profile_scoped_paths_fail_closed_without_activation(
 
 
 def test_explicit_profile_helpers_are_workspace_scoped(tmp_path: Path) -> None:
-    assert profile_user_data_dir("p2", tmp_path) == tmp_path / "workspaces" / "p2"
+    assert profile_user_data_dir("p2", tmp_path) == (
+        tmp_path / "workspaces" / "p2" / "state"
+    )
     assert profile_database_path("p2", tmp_path) == (
         tmp_path / "workspaces" / "p2" / "state" / "rumi.sqlite"
     )

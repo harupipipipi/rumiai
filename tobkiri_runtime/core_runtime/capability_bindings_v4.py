@@ -19,6 +19,9 @@ class CapabilityDispatchSession(Protocol):
     @property
     def plan_digest(self) -> str: ...
 
+    @property
+    def profile_revision(self) -> str: ...
+
     def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, Any], ...]: ...
 
     def assert_operation_ready(self, contract_id: str, operation_id: str) -> None: ...
@@ -31,11 +34,18 @@ class CapabilityBindingSnapshot:
     catalog_hash: str
     targets: tuple[FrontendContractTarget, ...]
 
-    def to_mapping(self, *, profile_id: str, plan_digest: str) -> dict[str, object]:
+    def to_mapping(
+        self,
+        *,
+        profile_id: str,
+        profile_revision: str,
+        plan_digest: str,
+    ) -> dict[str, object]:
         """Return the finite Host-injection payload consumed by read models."""
 
         return {
             "profile_id": profile_id,
+            "profile_revision": profile_revision,
             "plan_digest": plan_digest,
             "catalog_hash": self.catalog_hash,
             "targets": [
@@ -99,6 +109,7 @@ def capture_capability_binding_snapshot(
         catalog_hash=canonical_digest(
             {
                 "profile_id": session.profile_id,
+                "profile_revision": session.profile_revision,
                 "plan_digest": session.plan_digest,
                 "contributions": [_target_digest_payload(target) for target in captured_targets],
             }
@@ -119,6 +130,7 @@ def _capture_static_target(
         and item.get("function_id") == target.function_id
         and item.get("operation_id") == target.operation_id
         and item.get("profile_id") == session.profile_id
+        and item.get("profile_revision") == session.profile_revision
         and item.get("plan_digest") == session.plan_digest
     )
     if len(providers) != 1:
@@ -165,6 +177,7 @@ def _capture_operation_target(
         and item.get("function_id") == function_id
         and item.get("operation_id") == operation_id
         and item.get("profile_id") == session.profile_id
+        and item.get("profile_revision") == session.profile_revision
         and item.get("plan_digest") == session.plan_digest
         and item.get("artifact_digest") == artifact_digest
     )
