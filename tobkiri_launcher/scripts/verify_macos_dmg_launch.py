@@ -11,6 +11,7 @@ both bound to paths created by this process and are cleaned up fail-closed.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import plistlib
@@ -25,10 +26,34 @@ from typing import Any, Sequence
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from scripts.release_inventory import ACTIVE_RELEASE_TARGETS  # noqa: E402
+
+def _load_active_release_targets() -> tuple[str, ...]:
+    """Load the root release authority without a shadowable package import.
+
+    Packaging tests intentionally run with ``tobkiri_runtime`` on
+    ``PYTHONPATH``.  That tree also has a ``scripts`` package, so importing
+    ``scripts.release_inventory`` by module name can resolve the wrong package.
+    The release inventory is a fixed repository file; load that exact file.
+    """
+
+    inventory_path = REPOSITORY_ROOT / "scripts" / "release_inventory.py"
+    spec = importlib.util.spec_from_file_location(
+        "tobkiri_release_inventory", inventory_path
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load release inventory: {inventory_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    targets = getattr(module, "ACTIVE_RELEASE_TARGETS", None)
+    if not isinstance(targets, tuple) or not all(
+        isinstance(target, str) for target in targets
+    ):
+        raise ImportError("release inventory has invalid active target authority")
+    return targets
+
+
+ACTIVE_RELEASE_TARGETS = _load_active_release_targets()
 from tobkiri_launcher.scripts.verify_packaged_python_dmg import (  # noqa: E402
     DmgVerificationError,
     Executable,
