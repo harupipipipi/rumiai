@@ -209,19 +209,92 @@ fn main() {
     bind_macos_artifact_policy().expect("failed to bind macOS artifact policy");
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
+    prepare_debug_tauri_resource_destination()
+        .expect("failed to prepare debug Tauri resource destination");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_setup_progress",
             "debug_approval_status",
             "arm_debug_approval",
             "revoke_debug_approval",
+            "restart_kernel",
+            "reauthorize_panel_session",
+            "open_external_url",
+            "close_current_window",
+            "open_authority_approval_window",
+            "open_ambient_trigger_window",
+            "open_finger_recording_window",
+            "open_defaultspack_main_window",
+            "open_defaults_console_window",
+            "open_host_permissions_window",
+            "authority_approval_context",
             "coding_approval_operator",
+            "send_to_background",
+            "show_app_window",
+            "get_background_control_status",
+            "get_desktop_system_info",
+            "get_host_permission_status",
+            "open_host_permission_settings",
+            "register_defaultspack_dock",
+            "launch_defaultspack_desktop",
             "get_presentation_catalog",
             "select_presentation",
             "launch_selected_presentation",
         ]),
     ))
     .expect("failed to build Tauri application manifest")
+}
+
+/// Tauri preserves the sealed source modes while copying the packaged Python
+/// tree into `target/debug/app`. Restore owner write access on that generated
+/// destination before the next debug copy so iterative builds can overwrite
+/// it. The sealed source tree and every non-debug build remain untouched.
+fn prepare_debug_tauri_resource_destination() -> io::Result<()> {
+    if std::env::var("PROFILE").as_deref() != Ok("debug") {
+        return Ok(());
+    }
+    let out_dir = PathBuf::from(
+        std::env::var_os("OUT_DIR").ok_or_else(|| invalid_release("Cargo OUT_DIR is missing"))?,
+    );
+    let profile_dir = out_dir
+        .ancestors()
+        .nth(3)
+        .ok_or_else(|| invalid_release("Cargo OUT_DIR has no profile directory"))?;
+    let resource_root = profile_dir.join("app");
+    if resource_root.exists() {
+        make_generated_tree_owner_writable(&resource_root)?;
+    }
+    Ok(())
+}
+
+fn make_generated_tree_owner_writable(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(invalid_release(format!(
+            "debug Tauri resource destination contains a symlink: {}",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            path,
+            fs::Permissions::from_mode(metadata.permissions().mode() | 0o200),
+        )?;
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)?;
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            make_generated_tree_owner_writable(&entry?.path())?;
+        }
+    }
+    Ok(())
 }
 
 fn bind_macos_artifact_policy() -> io::Result<()> {
@@ -531,6 +604,28 @@ fn stage_runtime_bundle() -> io::Result<()> {
 
     reset_staged_runtime(&staged_root)
         .map_err(|error| stage_error("reset staged runtime", error))?;
+    if core_build_stage() == CoreBuildStage::IntermediateShell {
+        // The Shell is only the presentation artifact consumed by the outer
+        // Launcher. It has no embedded Kernel/Python resources of its own, so
+        // requiring the production packaging toolchain here makes an ordinary
+        // unsigned developer build impossible for no security benefit.
+        println!("cargo:rustc-env=TOBKIRI_SEALED_PYTHON_MANIFEST_SHA256=");
+        println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_B64=");
+        println!("cargo:rustc-env=TOBKIRI_PRESENTATION_TRUST_KEY_ID=");
+        fs::write(
+            staged_root.join("intermediate-shell-stage.v1"),
+            b"io.tobkiri.intermediate-shell-stage.v1\n",
+        )?;
+        return write_runtime_resource_manifest(&staged_root);
+    }
+    if required_cargo_profile()? != "release" {
+        return stage_development_runtime_bundle(
+            &project_dir,
+            repo_root,
+            &runtime_root,
+            &staged_root,
+        );
+    }
     if !copy_tracked_runtime_tree(repo_root, &staged_root)
         .map_err(|error| stage_error("copy tracked runtime", error))?
     {
@@ -593,6 +688,59 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .map_err(|error| stage_error("seal staged runtime", error))?;
 
     Ok(())
+}
+
+fn stage_development_runtime_bundle(
+    project_dir: &Path,
+    repo_root: &Path,
+    runtime_root: &Path,
+    staged_root: &Path,
+) -> io::Result<()> {
+    copy_dir_recursive_filtered(runtime_root, staged_root, runtime_root)
+        .map_err(|error| stage_error("copy development runtime", error))?;
+    verify_canonical_host_package(staged_root, runtime_root)
+        .map_err(|error| stage_error("verify canonical Host package", error))?;
+    copy_generated_resource_dirs(project_dir, runtime_root, staged_root, None)
+        .map_err(|error| stage_error("copy development resources", error))?;
+    stage_setup_brand_icon(repo_root, staged_root)
+        .map_err(|error| stage_error("stage setup brand icon", error))?;
+
+    let bundled_src = project_dir.join("bundled");
+    copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))
+        .map_err(|error| stage_error("copy Launcher bundled resources", error))?;
+    let staged_catalog = staged_root
+        .join("bundled")
+        .join(PRESENTATION_CATALOG_FILENAME);
+    verify_staged_catalog(
+        &bundled_src.join(PRESENTATION_CATALOG_FILENAME),
+        &staged_catalog,
+    )
+    .map_err(|error| stage_error("verify development presentation catalog", error))?;
+
+    let development_defaults = project_dir.join("target/dev-defaults");
+    if development_defaults.join("v4/bundle.lock.json").is_file()
+        && development_defaults.join("platform-artifacts").is_dir()
+    {
+        copy_dir_recursive(
+            &development_defaults,
+            &staged_root.join("bundled/dev-defaults"),
+        )
+        .map_err(|error| stage_error("stage development Defaults bundle", error))?;
+    }
+
+    stage_pack_shell(repo_root, staged_root)
+        .map_err(|error| stage_error("stage development pack-shell", error))?;
+    let development_venv = repo_root.join(".venv");
+    if development_venv.join("bin/python3").is_file() {
+        copy_development_venv_tree(&development_venv, &staged_root.join("dev-venv"))
+            .map_err(|error| stage_error("stage development Python environment", error))?;
+        write_development_runtime_path(&staged_root.join("dev-venv"))
+            .map_err(|error| stage_error("bind development Python imports", error))?;
+    }
+    bind_sealed_python_root(&staged_root.join(SEALED_PYTHON_ROOT), false)
+        .map_err(|error| stage_error("bind development Python environment", error))?;
+    write_runtime_resource_manifest(staged_root)
+        .map_err(|error| stage_error("seal staged development runtime", error))
 }
 
 fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec<PathBuf>> {
@@ -5082,6 +5230,63 @@ fn copy_file(src: &Path, dst: &Path) -> io::Result<u64> {
         let _ = fs::set_permissions(dst, permissions);
     }
     Ok(bytes)
+}
+
+fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = dst.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&source_path)?;
+        if metadata.file_type().is_symlink() {
+            let resolved = fs::canonicalize(&source_path)?;
+            if !resolved.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("development venv symlink is not a file: {}", source_path.display()),
+                ));
+            }
+            copy_file(&resolved, &destination_path)?;
+        } else if metadata.is_dir() {
+            copy_development_venv_tree(&source_path, &destination_path)?;
+        } else if metadata.is_file() {
+            copy_file(&source_path, &destination_path)?;
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("development venv contains an unsupported entry: {}", source_path.display()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn write_development_runtime_path(venv_root: &Path) -> io::Result<()> {
+    let unix_site_packages = venv_root.join("lib/python3.13/site-packages");
+    let windows_site_packages = venv_root.join("Lib/site-packages");
+    let site_packages = if unix_site_packages.is_dir() {
+        unix_site_packages
+    } else if windows_site_packages.is_dir() {
+        windows_site_packages
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("development venv site-packages not found below {}", venv_root.display()),
+        ));
+    };
+    for entry in fs::read_dir(&site_packages)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("__editable__.tobkiri_runtime-") && name.ends_with(".pth") {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    fs::write(
+        site_packages.join("tobkiri_staged_runtime.pth"),
+        "import os,sys; sys.path.insert(0, os.path.dirname(sys.prefix))\n",
+    )
 }
 
 fn copy_tracked_runtime_tree(repo_root: &Path, staged_root: &Path) -> io::Result<bool> {

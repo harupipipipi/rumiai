@@ -87,6 +87,47 @@ def runtime_user_data_root(base_dir: Path | None = None) -> Path:
     return (runtime_root / "user_data").resolve()
 
 
+def _development_bundle_root(runtime_root: Path) -> Path | None:
+    """Return the verified generated bundle only for an explicit source launch."""
+
+    if os.environ.get("RUMI_ENVIRONMENT") != "development":
+        return None
+    configured_app = os.environ.get("RUMI_APP_DIR")
+    try:
+        configured_root = Path(configured_app).resolve(strict=True) if configured_app else None
+    except OSError:
+        return None
+    bundled_development_root = runtime_root / "bundled" / "dev-defaults"
+    bundled_development_bundle = bundled_development_root / "v4"
+    bundled_development_artifacts = bundled_development_root / "platform-artifacts"
+    if (
+        configured_root == runtime_root.resolve()
+        and bundled_development_bundle.is_dir()
+        and not bundled_development_bundle.is_symlink()
+        and bundled_development_artifacts.is_dir()
+        and not bundled_development_artifacts.is_symlink()
+    ):
+        return bundled_development_bundle
+    development_root = (
+        runtime_root.parent
+        / "tobkiri_launcher"
+        / "src-tauri"
+        / "target"
+        / "dev-defaults"
+    )
+    development_bundle = development_root / "v4"
+    development_artifacts = development_root / "platform-artifacts"
+    if (
+        configured_root == runtime_root.resolve()
+        and development_bundle.is_dir()
+        and not development_bundle.is_symlink()
+        and development_artifacts.is_dir()
+        and not development_artifacts.is_symlink()
+    ):
+        return development_bundle
+    return None
+
+
 def _bundle_root(base_dir: Path | None = None) -> Path:
     """Return the compile-time installed Defaults bundle location.
 
@@ -96,6 +137,9 @@ def _bundle_root(base_dir: Path | None = None) -> Path:
 
     del base_dir
     runtime_root = Path(__file__).resolve().parents[2]
+    development_bundle = _development_bundle_root(runtime_root)
+    if development_bundle is not None:
+        return development_bundle
     bundle_root = runtime_root / "ecosystem" / "defaultspack" / "v4"
     _verify_installed_bundle_binding(runtime_root, bundle_root)
     return bundle_root

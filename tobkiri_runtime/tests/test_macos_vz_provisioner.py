@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import threading
@@ -23,7 +24,10 @@ from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner impor
     _file_digest,
     _parse_image_descriptor,
 )
-from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
+from core_runtime.packvm_lifecycle_v4 import (
+    PackVMLifecycleV4,
+    _cleanup_binding_is_retryable,
+)
 from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.macos_vz_supervisor import (
     MacOSVZAgentIdentity,
@@ -59,6 +63,21 @@ def test_packvm_lifecycle_exposes_only_its_verified_backend_registration(
     lifecycle = PackVMLifecycleV4(provisioner=Provisioner())  # type: ignore[arg-type]
 
     assert lifecycle.production_backend_registration() is facts
+
+
+def test_failed_cleanup_binding_can_be_retried() -> None:
+    cleanup_id = "11111111-1111-1111-1111-111111111111"
+    operations = {
+        cleanup_id: {"operation_kind": "cleanup", "state": "failed"},
+    }
+
+    assert _cleanup_binding_is_retryable(
+        operations, cleanup_id, "22222222-2222-2222-2222-222222222222"
+    )
+    operations[cleanup_id]["state"] = "running"
+    assert not _cleanup_binding_is_retryable(
+        operations, cleanup_id, "22222222-2222-2222-2222-222222222222"
+    )
 
 
 @pytest.fixture
@@ -133,6 +152,52 @@ def provisioner_fixture(tmp_path: Path) -> tuple[MacOSVZProvisioner, MacOSVZAsse
         lambda _state, _manifest: None
     )
     return provisioner, manifest, base
+
+
+def test_operation_gate_adopts_only_an_exact_stale_owner_claim(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provisioner, _manifest, _base = provisioner_fixture
+    binding = {
+        "session_digest": _digest(b"session"),
+        "plan_digest": _digest(b"plan"),
+        "ceremony_nonce_digest": _digest(b"nonce"),
+    }
+    provisioner.mutation_claim_path.parent.mkdir(parents=True, mode=0o700)
+    _private_file(
+        provisioner.mutation_claim_path,
+        json.dumps(
+            {
+                "version": 1,
+                "operation": "provision",
+                "instance": "tobkiri-packvm-v4",
+                "owner_pid": 99_999_999,
+                "binding": binding,
+            }
+        ).encode(),
+    )
+    monkeypatch.setattr(macos_vz_provisioner, "_process_is_alive", lambda _pid: False)
+
+    with provisioner.operation_gate("provision", binding, recover_claim=True):
+        claim = json.loads(provisioner.mutation_claim_path.read_text())
+        assert claim["owner_pid"] == os.getpid()
+
+    assert not provisioner.mutation_claim_path.exists()
+
+
+def test_legacy_empty_recovery_root_is_bound_before_cleanup(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+) -> None:
+    provisioner, _manifest, _base = provisioner_fixture
+    root = provisioner.mutation_claim_path.parent / "instances" / "tobkiri-packvm-v4"
+    root.mkdir(parents=True, mode=0o700)
+    recovery = {"instance_root": str(root)}
+
+    bound = provisioner._bind_legacy_empty_recovery_root(root, recovery)
+
+    assert bound["instance_root_device"] == root.stat().st_dev
+    assert bound["instance_root_inode"] == root.stat().st_ino
 
 
 def test_allocate_creates_per_domain_cow_efi_and_seeds(
@@ -447,6 +512,36 @@ def test_lifecycle_never_selects_lima_as_its_default() -> None:
     lifecycle = PackVMLifecycleV4()
 
     assert isinstance(lifecycle._provisioner, MacOSVZProvisioner)
+
+
+def test_development_default_accepts_only_the_launcher_selected_app_bundle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    bundle = tmp_path / "Tobkiri Launcher Dev.app"
+    manifest = bundle / "Contents/Resources/packvm-vz-provisioning.v1.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+    monkeypatch.setenv("TOBKIRI_DEVELOPMENT_PACKVM_BUNDLE_ROOT", str(bundle))
+
+    lifecycle = PackVMLifecycleV4()
+
+    assert lifecycle._provisioner._bundle_root == bundle.resolve()
+    assert lifecycle._provisioner._asset_manifest_path == manifest.resolve()
+
+
+def test_production_ignores_development_packvm_bundle_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "production")
+    monkeypatch.setenv(
+        "TOBKIRI_DEVELOPMENT_PACKVM_BUNDLE_ROOT",
+        str(tmp_path / "Untrusted.app"),
+    )
+
+    lifecycle = PackVMLifecycleV4()
+
+    assert lifecycle._provisioner._bundle_root is None
 
 
 def _helper_process_for_test(response: bytes) -> _MacOSVZHelperProcess:

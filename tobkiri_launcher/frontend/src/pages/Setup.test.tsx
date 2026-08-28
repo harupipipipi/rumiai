@@ -60,6 +60,7 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /navigate\(panelRoutes\.home\)/);
   assert.match(setupSource, /typeof error === 'string' && error\.trim\(\)/);
   assert.match(setupSource, /refreshRuntimeHealth/);
+  assert.match(setupSource, /reconcileDefaultsRuntime/);
   assert.match(setupSource, /refreshMountedRuntimeSurfaces/);
   assert.match(setupSource, /refreshPackVMDoctor\(\{reconcile: false\}\)/);
   assert.match(setupSource, /if \(!packVmDoctor\)/);

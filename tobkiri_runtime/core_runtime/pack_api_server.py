@@ -1981,6 +1981,43 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             if body is not None:
                 self._handle_panel_exchange(body)
             return
+        if path == "/api/setup/runtime/reconcile":
+            if not self._check_auth("POST", path):
+                self._discard_request_body()
+                self._send_response(APIResponse(False, error="Unauthorized"), 401)
+                return
+            self._discard_request_body()
+            refresh = self.__class__._runtime_refresh
+            lifecycle = self.__class__.app_lifecycle_manager
+            if refresh is None or lifecycle is None:
+                self._send_mapping_result({
+                    "error": "Canonical runtime reconciliation is unavailable",
+                    "status_code": 503,
+                    "state": "runtime_unavailable",
+                })
+                return
+            try:
+                refresh(None)
+                health = lifecycle.get_health()
+            except Exception as error:
+                from .app_lifecycle_manager import mark_runtime_failed
+
+                mark_runtime_failed("canonical runtime capture failed")
+                logger.warning(
+                    "Canonical runtime reconciliation failed",
+                    exc_info=error,
+                )
+                self._send_mapping_result({
+                    "error": "Canonical runtime reconciliation failed",
+                    "status_code": 503,
+                    "state": "runtime_unavailable",
+                })
+                return
+            self._send_mapping_result({
+                "state": health.get("runtime_status", "starting"),
+                "runtime_ready": health.get("runtime_ready", False),
+            })
+            return
         if path == "/api/setup/packs/install":
             if not self._setup_pre_auth_allowed() and not self._check_auth("POST", path):
                 self._discard_request_body()
@@ -2310,6 +2347,9 @@ class PackAPIServer:
             close = getattr(previous, "close", None)
             if callable(close):
                 close()
+        from .app_lifecycle_manager import mark_runtime_ready
+
+        mark_runtime_ready()
 
     @staticmethod
     def _close_unpublished_session(

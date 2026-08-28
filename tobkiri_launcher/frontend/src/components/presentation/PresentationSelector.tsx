@@ -44,6 +44,10 @@ function artifactVariant(status: string): 'success' | 'warning' | 'destructive' 
   return 'outline';
 }
 
+function approvalAllowsSelection(state: string | undefined): boolean {
+  return state === 'verified' || state === 'not_required';
+}
+
 function AuthoritySummary({
   label,
   authority,
@@ -146,12 +150,18 @@ export function PresentationSelector({
     ? compatibleShellProviders(state.catalog, selectedBase.pack_id)
     : [];
   const compatibility = checkShellCompatibility(selectedBase, selectedShell);
-  const canSave = Boolean(
-    selection
-      && compatibility.compatible
-      && selectedShell?.artifact?.status === 'verified'
-      && !saving,
-  );
+  const saveBlockedReason = !selection
+    ? 'Choose a Base Pack and a compatible Shell Provider.'
+    : !compatibility.compatible
+      ? compatibility.reasons[0] ?? 'The selected Base Pack and Shell Provider are not compatible.'
+      : !approvalAllowsSelection(selectedBase?.approval.state)
+        ? 'The selected Base Pack is not approved.'
+        : !approvalAllowsSelection(selectedShell?.approval.state)
+          ? 'The selected Shell Provider is not approved.'
+          : selectedShell?.artifact?.status !== 'verified'
+            ? 'The selected Shell production artifact is not verified.'
+            : null;
+  const canSave = saveBlockedReason === null && !saving && !launching;
   const launchReason = launchDisabledReasonForSelection(
     state.materialization,
     state.selection,
@@ -191,7 +201,7 @@ export function PresentationSelector({
         </div>
       ) : null}
 
-      <fieldset>
+      <fieldset disabled={saving || launching}>
         <legend className="mb-2 text-sm font-semibold text-text-main">1. Base Pack</legend>
         <div className="grid gap-3">
           {state.catalog.base_packs.map((basePack) => {
@@ -227,7 +237,7 @@ export function PresentationSelector({
         </div>
       </fieldset>
 
-      <fieldset disabled={!selectedBase}>
+      <fieldset disabled={!selectedBase || saving || launching}>
         <legend className="mb-2 text-sm font-semibold text-text-main">2. Compatible Shell Provider</legend>
         <div className="grid gap-3">
           {compatibleShells.map((shell) => {
@@ -319,6 +329,7 @@ export function PresentationSelector({
             }}
             disabled={!canSave}
             loading={saving}
+            title={saveBlockedReason ?? 'Save the verified presentation selection'}
             data-testid="save-presentation"
           >
             Save presentation selection
@@ -328,7 +339,7 @@ export function PresentationSelector({
               type="button"
               variant="outline"
               onClick={() => void onLaunch()}
-              disabled={Boolean(launchReason) || launching}
+              disabled={Boolean(launchReason) || saving || launching}
               loading={launching}
               title={launchReason ?? 'Launch the verified production Shell artifact'}
               data-testid="launch-presentation"
@@ -337,6 +348,12 @@ export function PresentationSelector({
             </Button>
           ) : null}
         </div>
+        {saveBlockedReason ? (
+          <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-text-muted" data-testid="save-blocked-reason">
+            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+            <span>Save blocked: {saveBlockedReason}</span>
+          </p>
+        ) : null}
         {launchReason ? (
           <p className="mt-3 flex items-start gap-2 text-xs leading-5 text-text-muted" data-testid="launch-blocked-reason">
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />

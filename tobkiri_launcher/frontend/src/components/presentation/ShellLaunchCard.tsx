@@ -1,29 +1,34 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {MessageCircle, Monitor, Route} from 'lucide-react';
+import {AppWindow, Monitor, Route} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {
-  fetchFrontendCatalog,
   fetchPresentationState,
   isDesktopShellAvailable,
   launchSelectedPresentation,
 } from '@/src/lib/api';
-import type {ApiDynamicFrontendCatalog, ApiPresentationState} from '@/src/lib/apiTypes';
-import {isConversationCapabilityReady, launchDisabledReason} from '@/src/lib/presentation';
+import type {ApiPresentationState} from '@/src/lib/apiTypes';
+import {launchDisabledReason} from '@/src/lib/presentation';
 import {useAppStore} from '@/src/store';
 
 function formatError(error: unknown): string {
   return error instanceof Error && error.message.trim()
     ? error.message
-    : 'Tobkiri could not verify the selected Conversation surface.';
+    : 'Tobkiri could not verify the selected Defaults Profile application.';
 }
 
-export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
+export function ShellLaunchCard({
+  runtimeReady,
+  onChooseShell,
+}: {
+  runtimeReady: boolean;
+  onChooseShell?: () => void;
+}) {
   const addToast = useAppStore((state) => state.addToast);
   const [presentation, setPresentation] = useState<ApiPresentationState | null>(null);
-  const [frontendCatalog, setFrontendCatalog] = useState<ApiDynamicFrontendCatalog | null>(null);
   const [loading, setLoading] = useState(false);
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
@@ -34,16 +39,11 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     setLoading(true);
     setError(null);
     try {
-      const [nextPresentation, nextCatalog] = await Promise.all([
-        fetchPresentationState(),
-        fetchFrontendCatalog(),
-      ]);
+      const nextPresentation = await fetchPresentationState();
       setPresentation(nextPresentation);
-      setFrontendCatalog(nextCatalog);
     } catch (loadError) {
       setError(formatError(loadError));
       setPresentation(null);
-      setFrontendCatalog(null);
     } finally {
       setLoading(false);
     }
@@ -63,16 +63,13 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     )
     : null;
   const materialization = presentation?.materialization ?? null;
-  const capabilityReady = isConversationCapabilityReady(frontendCatalog);
+  const needsSelection = Boolean(presentation && !presentation.selection);
   const blockedReason = !runtimeReady
     ? 'The selected Shell becomes available after Tobkiri runtime readiness.'
     : !presentation?.selection
       ? 'No verified Shell selection is active.'
       : materialization
         ? launchDisabledReason(materialization)
-          ?? (!capabilityReady
-            ? 'The verified Conversation capability is not ready in the active v4 Profile.'
-            : null)
         : 'The selected Shell materialization is unavailable.';
 
   const launch = async () => {
@@ -81,14 +78,8 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
     setLaunching(true);
     setError(null);
     try {
-      const freshCatalog = await fetchFrontendCatalog();
-      setFrontendCatalog(freshCatalog);
-      if (!isConversationCapabilityReady(freshCatalog)) {
-        setError('The verified Conversation capability changed and is no longer ready.');
-        return;
-      }
       const result = await launchSelectedPresentation();
-      addToast(result.message || 'Tobkiri Conversation opened in the selected Shell.', 'success');
+      addToast(result.message || 'Defaults Profile opened in the selected Shell.', 'success');
     } catch (launchError) {
       setError(formatError(launchError));
     } finally {
@@ -102,21 +93,24 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
-            <MessageCircle className="h-4 w-4 text-accent" />
-            <CardTitle id="shell-launch-title">Tobkiri Conversation</CardTitle>
+            <AppWindow className="h-4 w-4 text-accent" />
+            <CardTitle id="shell-launch-title">Defaults Profile</CardTitle>
           </div>
           <Badge variant={blockedReason ? 'warning' : 'success'}>
             {blockedReason ? 'Unavailable' : 'Ready'}
           </Badge>
         </div>
         <p className="text-sm leading-relaxed text-text-muted">
-          Open the configured Conversation route through the selected Tobkiri Shell.
-          Launcher uses its typed Shell command; it does not navigate through a legacy panel route.
+          Open the active Defaults Profile application through the selected Tobkiri Shell.
+          Conversation is one route inside that application, not the application itself.
         </p>
       </CardHeader>
       <CardContent>
         {loading ? (
-          <p className="text-sm text-text-muted" role="status">Loading the selected Shell…</p>
+          <p className="flex items-center gap-2 text-sm text-text-muted" role="status" aria-busy="true">
+            <TobkiriLoadingMark />
+            Loading the selected Shell…
+          </p>
         ) : error ? (
           <div className="flex flex-wrap items-center gap-3" role="alert">
             <p className="flex-1 text-sm text-destructive">{error}</p>
@@ -133,17 +127,17 @@ export function ShellLaunchCard({runtimeReady}: {runtimeReady: boolean}) {
               </p>
               <p className="flex items-center gap-2 text-xs text-text-muted">
                 <Route className="h-3.5 w-3.5 shrink-0" />
-                <span>{blockedReason ?? 'Conversation route is provided by the selected Shell.'}</span>
+                <span>{blockedReason ?? 'Defaults Profile is ready in the selected Shell.'}</span>
               </p>
             </div>
             <Button
               className="min-h-11 shrink-0"
-              disabled={Boolean(blockedReason) || launching}
+              disabled={(Boolean(blockedReason) && (!needsSelection || !onChooseShell)) || launching}
               loading={launching}
-              onClick={() => void launch()}
+              onClick={() => needsSelection ? onChooseShell?.() : void launch()}
               aria-busy={launching}
             >
-              {launching ? 'Opening…' : 'Open Tobkiri Conversation'}
+              {launching ? 'Opening…' : needsSelection ? 'Choose Shell' : 'Open Defaults Profile'}
             </Button>
           </div>
         )}
