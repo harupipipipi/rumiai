@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import hashlib
 import subprocess
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,6 +22,51 @@ from ecosystem.rumi_git_publish_pack.runtime.publish import _arguments as publis
 from ecosystem.rumi_git_write_pack.runtime.write import _arguments as write_arguments
 from ecosystem.rumi_git_write_pack.runtime.write import GitWriteService
 from ecosystem.rumi_host_authority_bridge_pack.runtime import bridge
+from tobkiri_host.broker import RequestEnvelope
+from tobkiri_host.models import OpaqueAuthorityRef, RequestContext
+from tobkiri_host.ports import OpaqueInvocationLease
+
+
+def _authenticated_host_context() -> SimpleNamespace:
+    """Build the Host-only envelope used by the receipt boundary test."""
+
+    return SimpleNamespace(
+        envelope=RequestEnvelope(
+            context=RequestContext(
+                request_id="authority-test-request",
+                trace_id="authority-test-trace",
+                caller_principal=OpaqueAuthorityRef("host-caller"),
+                profile_id="host-profile",
+                activation_id="host-activation",
+                activation_digest="sha256:" + "a" * 64,
+                plan_digest="sha256:" + "b" * 64,
+                security_epoch=1,
+                caller_session_id="host-session",
+                caller_domain_id="host-caller-domain",
+                caller_boot_epoch=1,
+                target_domain_id="host-target-domain",
+                target_boot_epoch=1,
+                target_backend_digest="sha256:" + "c" * 64,
+                profile_authority_digest="sha256:" + "d" * 64,
+                fencing_token=1,
+                handle_namespace="host-handles",
+            ),
+            target_principal=OpaqueAuthorityRef("host-target"),
+            target_domain=OpaqueAuthorityRef("host-target-domain"),
+            contract_id="host.authority.v1",
+            contract_version="1.0.0",
+            operation_id="authorize",
+            payload={},
+            request_digest="sha256:" + "e" * 64,
+            deadline_monotonic=time.monotonic() + 30,
+            lease=OpaqueInvocationLease(b"host-lease"),
+            idempotency_key=None,
+        ),
+        caller_pack_id="host-caller-pack",
+        caller_function_id="host-caller-function",
+        profile_revision="host-profile-revision",
+        workspace_id="host-workspace",
+    )
 
 
 def test_unsigned_nonbuiltin_pack_requires_host_install_record(
@@ -243,11 +290,18 @@ def test_authority_receipt_is_durable_and_one_shot(
         "arguments": {"path": "safe.txt"},
         "approval_required": False,
     }
-    issued = bridge._authorize(scope)
+    host_context = _authenticated_host_context()
+    issued = bridge._authorize(scope, host_context=host_context)
     stored = list((tmp_path / "receipts").glob("*.json"))
     assert len(stored) == 1
     assert json.loads(stored[0].read_text())["status"] == "issued"
-    redeemed = bridge._redeem({**scope, "receipt": issued["receipt"]})
+    redeemed = bridge._redeem(
+        {**scope, "receipt": issued["receipt"]},
+        host_context=host_context,
+    )
     assert redeemed["authorized"] is True
-    replay = bridge._redeem({**scope, "receipt": issued["receipt"]})
+    replay = bridge._redeem(
+        {**scope, "receipt": issued["receipt"]},
+        host_context=host_context,
+    )
     assert replay["authorized"] is False

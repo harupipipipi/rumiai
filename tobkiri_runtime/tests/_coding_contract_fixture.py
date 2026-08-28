@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -30,6 +31,9 @@ from ecosystem.rumi_shell_policy_pack.runtime.policy import (
 from ecosystem.rumi_terminal_session_pack.runtime.sessions import (
     create_terminal_control,
 )
+from tobkiri_host.broker import RequestEnvelope
+from tobkiri_host.models import OpaqueAuthorityRef, RequestContext
+from tobkiri_host.ports import OpaqueInvocationLease
 
 from domain.coding.contract_adapter import (
     FILE_INSPECT,
@@ -60,6 +64,9 @@ class VerifiedCodingContracts:
     ) -> None:
         self.root = root.resolve(strict=True)
         self.workspace_id = workspace_id
+        self.profile_revision = "fixture-profile-revision-1"
+        self.caller_pack_id = "fixture.caller.pack"
+        self.caller_function_id = "fixture.caller.function"
         self.mount_revision = 1
         self.trusted = bool(trusted)
         self.label = workspace_id
@@ -68,6 +75,37 @@ class VerifiedCodingContracts:
         )
         self.selected_workspace_id = workspace_id
         self.revision = 1
+        self.envelope = RequestEnvelope(
+            context=RequestContext(
+                request_id="fixture-request",
+                trace_id="fixture-trace",
+                caller_principal=OpaqueAuthorityRef("fixture.caller"),
+                profile_id=self.profile_id,
+                activation_id="fixture-activation",
+                activation_digest="sha256:" + "a" * 64,
+                plan_digest="sha256:" + "b" * 64,
+                security_epoch=1,
+                caller_session_id="fixture-session",
+                caller_domain_id="fixture.caller.domain",
+                caller_boot_epoch=1,
+                target_domain_id="fixture.target.domain",
+                target_boot_epoch=1,
+                target_backend_digest="sha256:" + "c" * 64,
+                profile_authority_digest="sha256:" + "d" * 64,
+                fencing_token=1,
+                handle_namespace="fixture-handles",
+            ),
+            target_principal=OpaqueAuthorityRef("fixture.target"),
+            target_domain=OpaqueAuthorityRef("fixture.target.domain"),
+            contract_id="fixture.contract.v1",
+            contract_version="1.0.0",
+            operation_id="fixture.operation",
+            payload={},
+            request_digest="sha256:" + "e" * 64,
+            deadline_monotonic=time.monotonic() + 300,
+            lease=OpaqueInvocationLease(b"fixture-lease"),
+            idempotency_key=None,
+        )
         self.authority = create_authority_operation(self)
         self.file_inspect = FileInspectService(self)
         self.file_mutate = FileMutationService(self)
@@ -85,7 +123,8 @@ class VerifiedCodingContracts:
         payload: Mapping[str, Any],
         **_: Any,
     ) -> dict[str, Any]:
-        request = {"profile_id": self.profile_id, **dict(payload)}
+        request = dict(payload)
+        request["profile_id"] = self.profile_id
         if contract_id == WORKSPACE_RESOURCE:
             if operation == "list":
                 return {
@@ -101,12 +140,6 @@ class VerifiedCodingContracts:
         if contract_id == WORKSPACE_ACTION:
             return self._workspace_action(operation, request)
         if contract_id == HOST_AUTHORITY:
-            request.setdefault(
-                "_contract_consumer_pack_id",
-                "defaultspack"
-                if operation == "authorize"
-                else str(request.get("service_pack_id") or ""),
-            )
             if (
                 operation == "authorize"
                 and not self.trusted

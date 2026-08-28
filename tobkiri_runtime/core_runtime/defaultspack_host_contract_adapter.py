@@ -6,7 +6,6 @@ from typing import Any, Final, Mapping
 
 from core_runtime.di_container import get_container
 from core_runtime.global_contract_dispatch import invoke_global_contract
-from core_runtime.resolved_profile_scope import active_resolved_profile
 
 
 BROWSER_OBSERVE: Final[str] = "rumi.resource.browser.host.v1"
@@ -86,6 +85,9 @@ _FORBIDDEN_ARGUMENTS: Final[frozenset[str]] = frozenset(
         "authority_token",
         "viewer_" + "host_approved",
         "yolo_" + "mode",
+        "_contract_consumer_pack_id",
+        "_contract_consumer_function_id",
+        "_host_context",
     }
 )
 
@@ -108,8 +110,7 @@ def run_host_contract_action(
             "action": normalized_action,
         }
     registry = get_container().get_or_none("v4_dispatch_session")
-    plan = active_resolved_profile()
-    if registry is None or plan is None:
+    if registry is None:
         return {
             "status": "unavailable",
             "success": False,
@@ -131,13 +132,10 @@ def run_host_contract_action(
         request = {"text": str(request.get("text", request.get("content", "")))}
     elif target[0] == CLIPBOARD_READ:
         request = {}
-    request.update(
-        {
-            "profile_id": plan.profile_id,
-            "_contract_consumer_pack_id": "defaultspack",
-            "_contract_consumer_function_id": source_function_id,
-        }
-    )
+    # ``source_function_id`` is a local routing label.  It is deliberately
+    # not serialized as authority metadata; the captured Host session owns
+    # caller, Profile, activation, and Plan identity.
+    del source_function_id
     result = invoke_global_contract(registry, target[0], target[1], request)
     if not isinstance(result, dict):
         raise RuntimeError("host contract returned an invalid result")
