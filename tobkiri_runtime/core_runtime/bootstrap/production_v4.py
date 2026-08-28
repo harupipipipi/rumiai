@@ -88,6 +88,12 @@ _CONTROL_CONTRACTS = {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
 _PACKVM_BRIDGE_PROTOCOL = "io.tobkiri.packvm.bridge.v1"
 _PACKVM_BRIDGE_MAX_REQUEST_BYTES = 64 * 1024
 _PACKVM_BRIDGE_MAX_RESULT_BYTES = 512 * 1024
+# Keep resource-axis defaults aligned with the bounded admission queue.  A
+# request reservation remains held while a verified provider performs a
+# nested Host dispatch, so ResourceAmount's constructor defaults of one slot
+# would reject valid nested work before the queue bounds are reached.
+_DEFAULT_RUNTIME_RESOURCE_SLOTS = 256
+_DEFAULT_PROFILE_RESOURCE_SLOTS = 64
 
 
 @dataclass(frozen=True)
@@ -228,13 +234,23 @@ class _PlanAdmission(RequestAdmissionPort):
             default=runtime_limit - guard,
         )
         self._ledger = DurableResourceLedger(
-            runtime_limit=ResourceAmount(memory_bytes=runtime_limit),
+            runtime_limit=ResourceAmount(
+                memory_bytes=runtime_limit,
+                process_slots=_DEFAULT_RUNTIME_RESOURCE_SLOTS,
+                start_slots=_DEFAULT_RUNTIME_RESOURCE_SLOTS,
+            ),
             host_free_guard=ResourceAmount(
                 memory_bytes=guard,
                 process_slots=0,
                 start_slots=0,
             ),
-            profile_limits={profile_id: ResourceAmount(memory_bytes=profile_limit)},
+            profile_limits={
+                profile_id: ResourceAmount(
+                    memory_bytes=profile_limit,
+                    process_slots=_DEFAULT_PROFILE_RESOURCE_SLOTS,
+                    start_slots=_DEFAULT_PROFILE_RESOURCE_SLOTS,
+                )
+            },
             state_path=state_path,
             identity={
                 "profile_id": profile_id,
