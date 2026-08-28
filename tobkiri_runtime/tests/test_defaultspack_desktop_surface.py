@@ -318,14 +318,106 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                 clear=True,
             ):
                 with patch("core_runtime.pack_api_server.PackAPIServer", return_value=fake_server):
-                    with patch.object(desktop_app, "_wait_until_ready", return_value=True):
-                        with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
-                            with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
-                                result = desktop_app.main()
+                    with patch.object(
+                        desktop_app,
+                        "_wait_until_ui_ready",
+                        return_value={"status": "UP", "ready": True, "probes": {}},
+                    ):
+                        with patch(
+                            "defaultspack.native_webview.open_desktop_surface",
+                            return_value="webview",
+                        ):
+                            result = desktop_app.main()
 
         self.assertEqual(result, 0)
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
+
+    def test_desktop_app_does_not_open_surface_when_named_probe_is_down(self):
+        from defaultspack import desktop_app
+
+        class FakeServer:
+            def __init__(self, *_args, **_kwargs):
+                self.started = False
+                self.stopped = False
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                self.stopped = True
+
+        fake_server = FakeServer()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_path = root / "defaultspack-launch.jsonl"
+            user_data = root / "user_data"
+            self._activate_defaults(user_data)
+            env = {
+                "RUMI_DEFAULTSPACK_LAUNCH_LOG": str(log_path),
+                "RUMI_DEFAULTSPACK_OPEN_BROWSER": "1",
+                "RUMI_DEFAULTSPACK_SURFACE": "webview",
+                "TOBKIRI_USER_DATA": str(user_data),
+                "RUMI_USER_DATA": str(user_data),
+                "TOBKIRI_HOST_CONTRACT_PATH": str(user_data / "host_contract.json"),
+            }
+            readiness = {
+                "schema": "io.tobkiri.ui-readiness.v1",
+                "status": "DOWN",
+                "ready": False,
+                "probes": {
+                    "settings": {
+                        "status": "DOWN",
+                        "code": "PROBE_TIMEOUT",
+                    }
+                },
+            }
+            with patch.dict(os.environ, env, clear=True):
+                with patch(
+                    "core_runtime.pack_api_server.PackAPIServer",
+                    return_value=fake_server,
+                ):
+                    with patch.object(
+                        desktop_app,
+                        "_wait_until_ui_ready",
+                        return_value=readiness,
+                    ):
+                        with patch(
+                            "defaultspack.native_webview.open_desktop_surface"
+                        ) as open_surface:
+                            with self.assertRaisesRegex(
+                                RuntimeError,
+                                "failing probes: settings",
+                            ):
+                                desktop_app.main()
+
+            events = [
+                json.loads(line)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertTrue(fake_server.started)
+        self.assertTrue(fake_server.stopped)
+        open_surface.assert_not_called()
+        failed = next(event for event in events if event["event"] == "readiness_failed")
+        self.assertEqual(
+            failed["failures"],
+            [{"name": "settings", "code": "PROBE_TIMEOUT"}],
+        )
+
+    def test_arbitrary_degraded_readiness_does_not_allow_launch(self):
+        from defaultspack.desktop_app import _ui_readiness_allows_launch
+
+        assert not _ui_readiness_allows_launch(
+            {"status": "DEGRADED", "ready": True, "mode": "partial_bootstrap"}
+        )
+        assert _ui_readiness_allows_launch(
+            {
+                "status": "DEGRADED",
+                "ready": True,
+                "mode": "profile_reconfirmation_required",
+            }
+        )
 
     def test_valid_stale_profile_starts_ui_ready_reconfirmation_surface(self):
         from core_runtime.app_lifecycle_manager import (
@@ -385,18 +477,20 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                             FakeServer,
                         ):
                             with patch.object(
-                                desktop_app, "_wait_until_ready", return_value=True
+                                desktop_app,
+                                "_wait_until_ui_ready",
+                                return_value={
+                                    "status": "DEGRADED",
+                                    "ready": True,
+                                    "mode": "profile_reconfirmation_required",
+                                    "probes": {},
+                                },
                             ):
-                                with patch.object(
-                                    desktop_app,
-                                    "_wait_until_chat_ready",
-                                    return_value=True,
+                                with patch(
+                                    "defaultspack.native_webview.open_desktop_surface",
+                                    return_value="webview",
                                 ):
-                                    with patch(
-                                        "defaultspack.native_webview.open_desktop_surface",
-                                        return_value="webview",
-                                    ):
-                                        result = desktop_app.main()
+                                    result = desktop_app.main()
 
         self.assertEqual(result, 0)
         self.assertIsNone(captured["dispatch_session"])
@@ -445,18 +539,19 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             }
             with patch.dict(os.environ, env, clear=True):
                 with patch("core_runtime.pack_api_server.PackAPIServer", return_value=fake_server):
-                    with patch.object(desktop_app, "_wait_until_ready", return_value=True):
-                        with patch.object(desktop_app, "_wait_until_chat_ready", return_value=True):
-                            with patch.object(
-                                desktop_app,
-                                "_port_owner_snapshot",
-                                return_value=[{"pid": "123", "command": "python3"}],
+                    with patch.object(
+                        desktop_app,
+                        "_port_owner_snapshot",
+                        return_value=[{"pid": "123", "command": "python3"}],
+                    ):
+                        with patch(
+                            "defaultspack.native_webview.open_desktop_surface",
+                            return_value="browser",
+                        ):
+                            with self.assertRaisesRegex(
+                                OSError, "address already in use"
                             ):
-                                with patch("defaultspack.native_webview.open_desktop_surface", return_value="browser"):
-                                    with self.assertRaisesRegex(
-                                        OSError, "address already in use"
-                                    ):
-                                        desktop_app.main()
+                                desktop_app.main()
 
             self.assertFalse(fake_server.stopped)
             events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]

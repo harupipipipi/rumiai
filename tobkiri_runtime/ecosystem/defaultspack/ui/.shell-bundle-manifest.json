@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b42ece2e05b7e89452dd0b2bcef89f6dec5a148be13a2554686f4a0a7edbf8c6",
+    "digest": "f1ec1056f94d9355590d7bc76b068425b00613cdc076b6df269717ec44ad69d4",
     "entries": [
       {
         "path": "index.html",
@@ -440,8 +440,8 @@
       },
       {
         "path": "src/components/TobkiriLoadingScreen.test.tsx",
-        "size": 4457,
-        "sha256": "662d57d0e7035e39da38406f762d386d2c1fa35297e98f6c81e58cd4f94916ea"
+        "size": 5863,
+        "sha256": "84f2792a4b742d52f77398eb23d6633531e4f53ce22866c0b5b71420ba8a032d"
       },
       {
         "path": "src/components/TobkiriLoadingScreen.tsx",
@@ -1055,8 +1055,8 @@
       },
       {
         "path": "src/host/HostBootstrap.tsx",
-        "size": 5338,
-        "sha256": "dda9589e7fda67fd19f2aa5456b0b50e4aa88566aef0de416740857961d58dd7"
+        "size": 8628,
+        "sha256": "cc6a933d26c60e5e3f3f23da20ecf96a7ecdd7863df8e69a9d78908976d506f0"
       },
       {
         "path": "src/host/frontendContracts.ts",
@@ -1851,7 +1851,7 @@
     ]
   },
   "bundle": {
-    "digest": "6452bbd7184eb2fcaf39237cc3aae2ee663a0e8734cab7ac726958b6c71c92ff",
+    "digest": "18dfc90011db4f168873978242afd154ce181b6e6a2abe9a9bd47b735952e7e0",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1860,8 +1860,8 @@
       },
       {
         "path": "shell-app.js",
-        "size": 22380,
-        "sha256": "d2ffbc4b595c4afcd363316e939d272f227b5b394ad8110667428eeae1163ed4"
+        "size": 23877,
+        "sha256": "40d3f818fc50b13e9de846cf7d6431b2e6efa33675175ba24acb3943782ce7c2"
       },
       {
         "path": "shell-defaultspack-app.js",

@@ -30,6 +30,18 @@ from tobkiri_host.broker import RequestBroker
 from tobkiri_host.runtime import V4DispatchSession
 
 
+def test_kernel_runtime_mounts_preserve_panel_setup_and_defaultspack_ui() -> None:
+    """Explicit UI-readiness mounts must extend, not replace, Host surfaces."""
+
+    import core_runtime.bootstrap.runtime as runtime_bootstrap
+
+    mounts = runtime_bootstrap._runtime_web_mounts()
+    prefixes = [mount["path_prefix"] for mount in mounts]
+
+    assert prefixes == ["/panel", "/setup", "/desktops", "/chat", "/static"]
+    assert len(prefixes) == len(set(prefixes))
+
+
 def _free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))

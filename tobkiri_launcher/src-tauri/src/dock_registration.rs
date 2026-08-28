@@ -167,6 +167,10 @@ fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> Any
     let mut url = Url::parse(authenticated_url)
         .with_context(|| format!("invalid authenticated Defaultspack URL: {authenticated_url}"))?;
     let fragment = url.fragment().map(str::to_owned);
+    let panel_code = url
+        .query_pairs()
+        .find(|(key, _)| key == "code")
+        .map(|(_, value)| value.into_owned());
     let trimmed = path.trim();
     let path = if trimmed.is_empty() { "/chat" } else { trimmed };
     if path.contains("://") || path.starts_with("//") || path.contains('\\') {
@@ -182,6 +186,18 @@ fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> Any
     }
     url.set_path(pathname);
     url.set_query(query);
+    let retained = url
+        .query_pairs()
+        .filter(|(key, _)| key != "code")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    url.set_query(None);
+    if !retained.is_empty() {
+        url.query_pairs_mut().extend_pairs(retained);
+    }
+    if let Some(code) = panel_code {
+        url.query_pairs_mut().append_pair("code", &code);
+    }
     url.set_fragment(fragment.as_deref());
     Ok(url.to_string())
 }
@@ -222,28 +238,61 @@ fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     Ok(DEFAULTSPACK_DEFAULT_PORT)
 }
 
-fn is_defaultspack_http_ready(port: u16, bootstrap_secret: &str) -> bool {
-    crate::health_check::check_authenticated_health(port, bootstrap_secret).unwrap_or(false)
+fn check_defaultspack_http_ready(
+    port: u16,
+    bootstrap_secret: &str,
+) -> Option<crate::health_check::UIReadinessPayload> {
+    crate::health_check::check_authenticated_ui_readiness(port, bootstrap_secret)
+        .ok()
+        .flatten()
+        .filter(crate::health_check::ui_readiness_allows_launch)
 }
 
 fn wait_for_defaultspack_http_ready(
     port: u16,
     bootstrap_secret: &str,
     manager: &DefaultspackManager,
-) -> AnyResult<()> {
+    config: &AppConfig,
+    metadata: &DefaultspackDesktopMetadata,
+) -> AnyResult<crate::health_check::UIReadinessPayload> {
     let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
     let mut poll_count: u32 = 0;
+    let mut last_failures = Vec::new();
+    let mut last_assessment = None;
 
     loop {
         poll_count += 1;
-        if is_defaultspack_http_ready(port, bootstrap_secret) {
+        let assessment =
+            crate::health_check::check_authenticated_ui_readiness(port, bootstrap_secret)?;
+        if assessment
+            .as_ref()
+            .is_some_and(crate::health_check::ui_readiness_allows_launch)
+        {
             info!(
                 "wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}"
             );
-            return Ok(());
+            return Ok(assessment.expect("readiness was checked above"));
+        }
+        if let Some(readiness) = assessment.as_ref() {
+            last_failures = readiness
+                .probes
+                .iter()
+                .filter(|(_, probe)| probe.status != "UP")
+                .map(|(name, probe)| format!("{name}({})", probe.code))
+                .collect();
+            last_assessment = Some(readiness.clone());
         }
 
         if Instant::now() >= deadline {
+            if let Err(error) = write_guardian_readiness_audit(
+                config,
+                metadata,
+                last_assessment.as_ref(),
+                false,
+                false,
+            ) {
+                warn!("wait_for_defaultspack_http_ready: failed to audit readiness timeout: {error:#}");
+            }
             warn!(
                 "wait_for_defaultspack_http_ready: timed out after {poll_count} polls; stopping managed pack-shell"
             );
@@ -251,9 +300,13 @@ fn wait_for_defaultspack_http_ready(
                 warn!("wait_for_defaultspack_http_ready: failed to stop timed out pack-shell: {error:#}");
             }
             bail!(
-                "Defaultspack local server did not become ready at {} within {} seconds",
-                defaultspack_health_url(port),
-                DEFAULTSPACK_READY_TIMEOUT.as_secs()
+                "Defaultspack UI bootstrap did not become ready at http://127.0.0.1:{port}/ui-readiness within {} seconds{}",
+                DEFAULTSPACK_READY_TIMEOUT.as_secs(),
+                if last_failures.is_empty() {
+                    String::new()
+                } else {
+                    format!("; failing probes: {}", last_failures.join(", "))
+                }
             );
         }
 
@@ -519,11 +572,13 @@ fn ensure_defaultspack_desktop_ready(
     let managed_process = manager
         .has_managed_process()
         .context("failed to inspect managed Defaultspack process")?;
-    let mut server_ready = is_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret);
-    if server_ready && recover_authenticated_stale_defaultspack_listener(&manager, &metadata)? {
-        server_ready = false;
+    let mut readiness = check_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret);
+    if readiness.is_some()
+        && recover_authenticated_stale_defaultspack_listener(&manager, &metadata)?
+    {
+        readiness = None;
     }
-    if server_ready {
+    if readiness.is_some() {
         let listener = detect_port_listener(metadata.port)?.ok_or_else(|| {
             anyhow!("authenticated Defaultspack listener identity is unavailable")
         })?;
@@ -533,13 +588,13 @@ fn ensure_defaultspack_desktop_ready(
                 listener.pid
             );
             terminate_external_listener(listener.pid, metadata.port)?;
-            server_ready = false;
+            readiness = None;
         }
     }
 
-    if server_ready {
+    if readiness.is_some() {
         info!(
-            "launch_defaultspack_desktop_impl: authenticated health check passed, server already ready at {base_url}"
+            "launch_defaultspack_desktop_impl: authenticated UI readiness passed, server already ready at {base_url}"
         );
     } else {
         if !managed_process && detect_port_listener(metadata.port)?.is_some() {
@@ -561,8 +616,13 @@ fn ensure_defaultspack_desktop_ready(
             metadata.port,
             &panel_bootstrap_secret,
             manager.inner(),
+            config,
+            &metadata,
         ) {
-            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {base_url}"),
+            Ok(snapshot) => {
+                readiness = Some(snapshot);
+                info!("launch_defaultspack_desktop_impl: server became ready at {base_url}");
+            }
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
                 return Err(e);
@@ -583,7 +643,13 @@ fn ensure_defaultspack_desktop_ready(
         terminate_external_listener(listener.pid, metadata.port)?;
         manager.stop()?;
         manager.start_or_reuse(metadata.clone())?;
-        wait_for_defaultspack_http_ready(metadata.port, &panel_bootstrap_secret, manager.inner())?;
+        readiness = Some(wait_for_defaultspack_http_ready(
+            metadata.port,
+            &panel_bootstrap_secret,
+            manager.inner(),
+            config,
+            &metadata,
+        )?);
         listener = detect_port_listener(metadata.port)?
             .ok_or_else(|| anyhow!("replacement Defaultspack listener identity is unavailable"))?;
     }
@@ -599,7 +665,10 @@ fn ensure_defaultspack_desktop_ready(
         }
     }
     manager.register_launcher_owned_listener(&metadata, listener.pid, listener.command)?;
-    if let Err(error) = write_guardian_ready_audit(config, &metadata) {
+    let readiness = readiness.ok_or_else(|| anyhow!("UI readiness evidence was lost"))?;
+    if let Err(error) =
+        write_guardian_readiness_audit(config, &metadata, Some(&readiness), true, true)
+    {
         manager
             .stop()
             .context("failed to stop an unaudited Defaultspack guardian")?;
@@ -609,15 +678,33 @@ fn ensure_defaultspack_desktop_ready(
     Ok((metadata.port, panel_bootstrap_secret))
 }
 
-fn write_guardian_ready_audit(
+fn write_guardian_readiness_audit(
     config: &AppConfig,
     metadata: &DefaultspackDesktopMetadata,
+    readiness: Option<&crate::health_check::UIReadinessPayload>,
+    allowed: bool,
+    result_ok: bool,
 ) -> AnyResult<()> {
+    let failures = readiness
+        .map(|snapshot| {
+            snapshot
+                .probes
+                .iter()
+                .filter(|(_, probe)| probe.status != "UP")
+                .map(|(name, probe)| json!({"name": name, "code": probe.code}))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            vec![json!({
+                "name": "readiness_endpoint",
+                "code": "READINESS_ENDPOINT_UNAVAILABLE",
+            })]
+        });
     crate::host_audit::write_audit_log(
         &config.host_broker_audit_log_path(),
         &crate::host_audit::HostAuditEntry {
             audit_id: format!(
-                "defaultspack-guardian-ready-{}-{}",
+                "defaultspack-guardian-readiness-{}-{}",
                 crate::host_audit::now_epoch_seconds(),
                 std::process::id()
             ),
@@ -626,8 +713,8 @@ fn write_guardian_ready_audit(
             profile_id: Some(metadata.profile_id.clone()),
             pack_id: Some("defaultspack".to_string()),
             conversation_id: None,
-            allowed: true,
-            result_ok: true,
+            allowed,
+            result_ok,
             approval_token_present: None,
             approval_result: None,
             args_summary: json!({
@@ -637,9 +724,10 @@ fn write_guardian_ready_audit(
                 "artifact_digest": metadata.artifact_digest,
                 "function_id": metadata.function_id,
                 "provider_id": metadata.provider_id,
-                "health": "ready",
-                "local_auth": "verified",
-                "guardian": "registered",
+                "ui_readiness": readiness.map(|snapshot| snapshot.status.as_str()).unwrap_or("DOWN"),
+                "ui_readiness_failures": failures,
+                "readiness_auth": if readiness.is_some() { "verified" } else { "unavailable" },
+                "guardian": if result_ok { "registered" } else { "rejected" },
             }),
         },
     )
@@ -1069,8 +1157,6 @@ fn viewer_host_broker_connection_env_value(config: &AppConfig) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hmac::{Hmac, Mac};
-    use sha2::Sha256;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -1419,11 +1505,11 @@ mod tests {
     }
 
     #[test]
-    fn defaultspack_window_url_with_path_preserves_local_auth_fragment() {
+    fn defaultspack_window_url_with_path_preserves_local_auth_and_rejects_forged_code() {
         assert_eq!(
             defaultspack_window_url_with_path(
                 "http://127.0.0.1:8766/chat#rumi_local_auth=local-token",
-                "/chat?chat=abc-123"
+                "/chat?chat=abc-123&code=forged"
             )
             .unwrap(),
             "http://127.0.0.1:8766/chat?chat=abc-123#rumi_local_auth=local-token"
@@ -1461,7 +1547,7 @@ mod tests {
     }
 
     #[test]
-    fn guardian_readiness_requires_authenticated_health_challenge() {
+    fn guardian_readiness_requires_complete_authenticated_ui_contract() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
@@ -1469,35 +1555,63 @@ mod tests {
             let mut request = [0_u8; 4096];
             let length = stream.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..length]);
-            assert!(request.starts_with("GET /health "));
-            assert!(!request.to_ascii_lowercase().contains("authorization:"));
+            assert!(request.starts_with("GET /ui-readiness "));
             let challenge = request
                 .lines()
                 .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("X-Rumi-Desktop-Health-Challenge")
-                        .then(|| value.trim())
+                    line.split_once(':').and_then(|(name, value)| {
+                        name.eq_ignore_ascii_case("X-Rumi-Desktop-Health-Challenge")
+                            .then(|| value.trim())
+                    })
                 })
-                .expect("health challenge header");
-            let mut mac = Hmac::<Sha256>::new_from_slice(b"bootstrap-secret").unwrap();
-            mac.update(challenge.as_bytes());
-            let challenge_response = mac
-                .finalize()
-                .into_bytes()
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
-            let body = format!(
-                r#"{{"success":true,"data":{{"panel_ready":true,"desktop_challenge_response":"{challenge_response}"}}}}"#
+                .unwrap();
+            let authorization = request
+                .lines()
+                .find_map(|line| {
+                    line.split_once(':').and_then(|(name, value)| {
+                        name.eq_ignore_ascii_case("X-Tobkiri-UI-Readiness-Authorization")
+                            .then(|| value.trim())
+                    })
+                })
+                .unwrap();
+            assert_eq!(
+                authorization,
+                crate::health_check::ui_readiness_request_proof("local-bootstrap", challenge,)
             );
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            stream.write_all(response.as_bytes()).unwrap();
+            let response = json!({
+                "success": true,
+                "data": {
+                    "schema": "io.tobkiri.ui-readiness.v1",
+                    "status": "UP",
+                    "ready": true,
+                    "desktop_challenge_response": crate::health_check::ui_readiness_response_proof(
+                        "local-bootstrap",
+                        challenge,
+                    ),
+                    "probes": {
+                        "static_bundle": {"status": "UP", "code": "READY"},
+                        "chat_route": {"status": "UP", "code": "READY"},
+                        "ui_catalog": {"status": "UP", "code": "READY"},
+                        "settings": {"status": "UP", "code": "READY"},
+                        "model_catalog": {"status": "UP", "code": "READY"},
+                        "tool_catalog": {"status": "UP", "code": "READY"},
+                        "conversation_bootstrap": {"status": "UP", "code": "READY"},
+                        "default_conversation_load": {"status": "UP", "code": "READY"},
+                        "auth_session": {"status": "UP", "code": "READY"}
+                    }
+                }
+            })
+            .to_string();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response.len(),
+                response,
+            )
+            .unwrap();
         });
 
-        assert!(is_defaultspack_http_ready(port, "bootstrap-secret"));
+        assert!(check_defaultspack_http_ready(port, "local-bootstrap").is_some());
         server.join().unwrap();
     }
 
@@ -1524,17 +1638,61 @@ mod tests {
             provider_id: "runtime.tauri.application.default".into(),
         };
 
-        write_guardian_ready_audit(&config, &metadata).unwrap();
+        let readiness: crate::health_check::UIReadinessPayload = serde_json::from_value(json!({
+            "schema": "io.tobkiri.ui-readiness.v1",
+            "status": "UP",
+            "ready": true,
+            "probes": {
+                "static_bundle": {"status": "UP", "code": "READY"}
+            }
+        }))
+        .unwrap();
+        write_guardian_readiness_audit(&config, &metadata, Some(&readiness), true, true).unwrap();
 
         let audit = fs::read_to_string(config.host_broker_audit_log_path()).unwrap();
         assert!(audit.contains("launcher.defaultspack.guardian.prepare"));
-        assert!(audit.contains("\"health\":\"ready\""));
-        assert!(audit.contains("\"local_auth\":\"verified\""));
+        assert!(audit.contains("\"ui_readiness\":\"UP\""));
+        assert!(audit.contains("\"readiness_auth\":\"verified\""));
+        assert!(audit.contains("\"ui_readiness_failures\":[]"));
         assert!(audit.contains("\"guardian\":\"registered\""));
         assert!(audit.contains("\"profile_id\":\"defaults\""));
         assert!(audit.contains("\"artifact_digest\":\"sha256:3333"));
         assert!(audit.contains("\"function_id\":\"runtime.tauri.application.default\""));
         assert!(audit.contains("\"provider_id\":\"runtime.tauri.application.default\""));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn guardian_failure_audit_names_unavailable_readiness_endpoint() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-guardian-failure-audit-{}",
+            std::process::id()
+        ));
+        let config = test_config(&root);
+        let metadata = DefaultspackDesktopMetadata {
+            entrypoint: config
+                .app_dir
+                .join("ecosystem/defaultspack/defaultspack/desktop_app.py"),
+            argv: Vec::new(),
+            app_working_dir: config.app_dir.join("ecosystem/defaultspack"),
+            env_vars: Vec::new(),
+            port: DEFAULTSPACK_DEFAULT_PORT,
+            profile_id: "defaults".into(),
+            profile_digest: format!("sha256:{}", "1".repeat(64)),
+            catalog_revision: format!("sha256:{}", "2".repeat(64)),
+            artifact_digest: format!("sha256:{}", "3".repeat(64)),
+            function_id: "runtime.tauri.application.default".into(),
+            provider_id: "runtime.tauri.application.default".into(),
+        };
+
+        write_guardian_readiness_audit(&config, &metadata, None, false, false).unwrap();
+
+        let audit = fs::read_to_string(config.host_broker_audit_log_path()).unwrap();
+        assert!(audit.contains("\"allowed\":false"));
+        assert!(audit.contains("\"result_ok\":false"));
+        assert!(audit.contains("READINESS_ENDPOINT_UNAVAILABLE"));
+        assert!(audit.contains("\"readiness_auth\":\"unavailable\""));
+        assert!(audit.contains("\"guardian\":\"rejected\""));
         fs::remove_dir_all(root).unwrap();
     }
 }

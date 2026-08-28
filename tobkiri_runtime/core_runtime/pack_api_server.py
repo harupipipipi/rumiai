@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import heapq
 import hmac
 import logging
@@ -47,11 +46,51 @@ from tobkiri_protocol.canonical import canonical_digest
 from .host_contract import host_contract_value
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
 from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
+from .ui_readiness import (
+    UI_READINESS_AUTHORIZATION_HEADER,
+    UI_READINESS_CHALLENGE_HEADER,
+    UI_READINESS_PATH,
+    UIReadinessChecker,
+    build_ui_readiness_checker,
+    desktop_health_response_proof,
+    ui_readiness_request_proof,
+    ui_readiness_response_proof,
+)
 from .authority.v4_models import AuthorityDenied
 from tobkiri_host.errors import HostCoreError
 
 
 logger = logging.getLogger(__name__)
+
+
+def _ui_readiness_for_lifecycle(
+    checker: UIReadinessChecker,
+    lifecycle: LifecyclePort | None,
+    *,
+    force: bool = False,
+) -> dict[str, object]:
+    """Allow only the explicit profile-reconfirmation recovery surface."""
+
+    readiness = checker.snapshot(force=force)
+    health = lifecycle.get_health() if lifecycle is not None else {}
+    if health.get("runtime_status") != "profile_reconfirmation_required":
+        return readiness
+    probes = readiness.get("probes")
+    if not isinstance(probes, Mapping):
+        return readiness
+    surface_probes = ("static_bundle", "chat_route", "auth_session")
+    if not all(
+        isinstance(probes.get(name), Mapping) and probes[name].get("status") == "UP"
+        for name in surface_probes
+    ):
+        return readiness
+    readiness.update(
+        status="DEGRADED",
+        ready=True,
+        mode="profile_reconfirmation_required",
+    )
+    return readiness
+
 
 THREAD_JOIN_TIMEOUT_SECONDS = 5
 MAX_CONCURRENT_REQUESTS = 32
@@ -595,6 +634,7 @@ class PackAPIHandler(
     _packvm_lifecycle: PackVMLifecyclePort | None = None
     _workspace_binding_resolver: WorkspaceBindingResolver | None = None
     _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
+    _ui_readiness_checker: UIReadinessChecker | None = None
     app_lifecycle_manager: LifecyclePort | None = None
     _runtime_port = 8765
     _request_auth_mode: str | None = None
@@ -615,6 +655,7 @@ class PackAPIHandler(
         runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
+        ui_readiness_checker: UIReadinessChecker | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
@@ -628,6 +669,7 @@ class PackAPIHandler(
         bound_runtime_refresh = runtime_refresh
         bound_workspace_binding_resolver = workspace_binding_resolver
         bound_packvm_lifecycle = packvm_lifecycle
+        bound_ui_readiness_checker = ui_readiness_checker
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
@@ -638,6 +680,7 @@ class PackAPIHandler(
             _operation_journal = bound_operation_journal
             _packvm_lifecycle = bound_packvm_lifecycle
             _instance_web_mounts = bound_web_mounts
+            _ui_readiness_checker = bound_ui_readiness_checker
             _runtime_refresh = (
                 staticmethod(bound_runtime_refresh) if bound_runtime_refresh is not None else None
             )
@@ -1765,12 +1808,56 @@ class PackAPIHandler(
         )
         bootstrap_secret = host_contract_value("panel_bootstrap_secret")
         if challenge and bootstrap_secret:
-            health["desktop_challenge_response"] = hmac.new(
-                bootstrap_secret.encode("utf-8"),
-                challenge.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
+            health["desktop_challenge_response"] = desktop_health_response_proof(
+                bootstrap_secret,
+                challenge,
+            )
         self._send_response(APIResponse(True, data=health))
+
+    def _handle_ui_readiness(self) -> None:
+        """Return the bounded, named bootstrap assessment."""
+
+        challenge = self.headers.get(UI_READINESS_CHALLENGE_HEADER, "").strip()
+        authorization = self.headers.get(
+            UI_READINESS_AUTHORIZATION_HEADER,
+            "",
+        ).strip()
+        bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+        launcher_authenticated = bool(
+            challenge
+            and authorization
+            and bootstrap_secret
+            and hmac.compare_digest(
+                authorization,
+                ui_readiness_request_proof(bootstrap_secret, challenge),
+            )
+        )
+        panel_authenticated = False
+        if not launcher_authenticated:
+            panel_authenticated = self._check_auth("GET", UI_READINESS_PATH)
+        if not launcher_authenticated and not panel_authenticated:
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+
+        checker = self.__class__._ui_readiness_checker
+        if checker is None:
+            readiness: dict[str, object] = {
+                "schema": "io.tobkiri.ui-readiness.v1",
+                "status": "DOWN",
+                "ready": False,
+                "probes": {},
+            }
+        else:
+            readiness = _ui_readiness_for_lifecycle(
+                checker,
+                self.__class__.app_lifecycle_manager,
+            )
+        if launcher_authenticated:
+            readiness["desktop_challenge_response"] = ui_readiness_response_proof(
+                bootstrap_secret,
+                challenge,
+            )
+        self._send_response(APIResponse(True, data=readiness))
 
     def _handle_panel_bootstrap(self) -> None:
         manager = self._panel_auth_manager
@@ -1922,6 +2009,9 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         if path == "/health":
             self._handle_health()
             return
+        if path == UI_READINESS_PATH:
+            self._handle_ui_readiness()
+            return
         if path == "/":
             self.send_response(302)
             self.send_header("Location", "/panel/")
@@ -2062,6 +2152,7 @@ class PackAPIServer:
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
+        ui_readiness_checker: UIReadinessChecker | None = None,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -2076,6 +2167,10 @@ class PackAPIServer:
         self._contract_routes = contract_binding_map(contract_bindings)
         self._web_mounts = web_mounts
         self._workspace_binding_resolver = workspace_binding_resolver
+        self._ui_readiness_checker = ui_readiness_checker or self._build_ui_readiness_checker(
+            dispatch_session,
+            self._contract_routes,
+        )
         if packvm_lifecycle is None:
             from .packvm_lifecycle_v4 import PackVMLifecycleV4
 
@@ -2127,6 +2222,7 @@ class PackAPIServer:
                     runtime_refresh=self._runtime_refresh_callback(lifecycle_generation),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
+                    ui_readiness_checker=self._ui_readiness_checker,
                 )
                 server = _PackThreadingHTTPServer((self.host, self.port), handler)
             except Exception:
@@ -2174,6 +2270,28 @@ class PackAPIServer:
         """Verify the exact capture and route ownership before binding a socket."""
 
         self._validate_contract_capture(self._dispatch_session, self._contract_routes)
+
+    def _build_ui_readiness_checker(
+        self,
+        session: DispatchSession | None,
+        routes: Mapping[tuple[str, str], FrontendContractBinding],
+    ) -> UIReadinessChecker:
+        mounts = self._web_mounts or WebMountMixin._fixed_web_mounts()
+        return build_ui_readiness_checker(
+            dispatch_session=session,
+            contract_routes=routes,
+            web_mounts=tuple(mounts),
+            panel_auth_manager=self._panel_auth_manager,
+        )
+
+    def ui_readiness_snapshot(self, *, force: bool = False) -> dict[str, object]:
+        """Return the current named UI bootstrap assessment."""
+
+        return _ui_readiness_for_lifecycle(
+            self._ui_readiness_checker,
+            self.app_lifecycle_manager,
+            force=force,
+        )
 
     def _validate_contract_capture(
         self,
@@ -2269,6 +2387,7 @@ class PackAPIServer:
                     raise
             routes = contract_binding_map(bindings)
             self._validate_contract_capture(session, routes)
+            readiness_checker = self._build_ui_readiness_checker(session, routes)
         except Exception:
             self._close_unpublished_session(session, base_session=base_session)
             raise
@@ -2294,11 +2413,13 @@ class PackAPIServer:
                     runtime_refresh=self._runtime_refresh_callback(published_generation),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
+                    ui_readiness_checker=readiness_checker,
                 )
                 handler._runtime_port = self.port
                 self._dispatch_session = session
                 self._dispatch_session_owned_by_server = server_captured_session
                 self._contract_routes = routes
+                self._ui_readiness_checker = readiness_checker
                 self.handler_class = handler
                 if self.server is not None:
                     self.server.RequestHandlerClass = handler
