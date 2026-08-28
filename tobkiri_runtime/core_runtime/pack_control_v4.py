@@ -1322,6 +1322,12 @@ def activate_resolved_profile_pack_set(
         expected=predecessor,
         catalog_revision=str(resolved.plan["catalog_revision"]),
     )
+    from .bootstrap.profile_capture import cache_active_profile
+
+    cache_active_profile(
+        ActiveDefaultProfile(resolved=resolved, activation=activation),
+        user_data=user_data,
+    )
     return activation
 
 

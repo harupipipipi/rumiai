@@ -68,7 +68,6 @@ function profileCatalogEntry(profileId: string, active: boolean): RuntimeProfile
     display_name: profileId === 'defaults' ? 'Defaults Profile' : 'Alternate Profile',
     active,
     lifecycle_state: active ? 'active' : 'available',
-    active_revision_matches_definition: active,
     available: true,
     diagnostics: [],
     definition: {

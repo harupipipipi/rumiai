@@ -264,7 +264,6 @@ function profileCatalogData() {
     display_name: active ? 'Defaults' : 'Alternate',
     active,
     lifecycle_state: active ? 'active' as const : 'available' as const,
-    active_revision_matches_definition: active,
     available: true,
     diagnostics: [],
     definition: {

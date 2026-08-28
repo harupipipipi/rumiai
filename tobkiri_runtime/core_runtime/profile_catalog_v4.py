@@ -190,12 +190,7 @@ def _project_definition(
         ):
             diagnostics.append({"code": "APPLICATION_KIND_INVALID", "subject": pack_id})
 
-    definition_digest = canonical_digest(definition)
     is_active = profile_id == active_profile_id
-    definition_is_active = is_active and hmac.compare_digest(
-        definition_digest,
-        active_revision,
-    )
     candidate_review = candidate.get("review") if isinstance(candidate, Mapping) else None
     candidate_profile = (
         candidate_review.get("profile") if isinstance(candidate_review, Mapping) else None
@@ -211,7 +206,7 @@ def _project_definition(
             diagnostics,
             requested=requested,
         )
-    elif definition_is_active and active_profile is not None:
+    elif is_active and active_profile is not None:
         closure = _resolved_pack_closure(
             catalog,
             active_profile,
@@ -226,19 +221,12 @@ def _project_definition(
         "profile_id": profile_id,
         "display_name": str(definition.get("display_name") or profile_id),
         "active": is_active,
-        "lifecycle_state": (
-            "active"
-            if definition_is_active
-            else "successor_pending"
-            if is_active
-            else "available"
-        ),
-        "active_revision_matches_definition": definition_is_active,
+        "lifecycle_state": "active" if is_active else "available",
         "available": not diagnostics,
         "diagnostics": diagnostics,
         "definition": {
-            "digest": definition_digest,
-            "ref": f"profile-v4://{profile_id}/{definition_digest}",
+            "digest": canonical_digest(definition),
+            "ref": f"profile-v4://{profile_id}/{canonical_digest(definition)}",
             "catalog_revision": definition.get("catalog_revision"),
             "source_path": provenance.get("source_path"),
             "provenance": provenance,

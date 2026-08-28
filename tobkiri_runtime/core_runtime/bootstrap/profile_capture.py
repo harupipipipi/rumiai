@@ -83,6 +83,23 @@ def _activation_pointer_signature(path: Path) -> _ProfilePointerSignature | None
     )
 
 
+def cache_active_profile(
+    active: ActiveDefaultProfile,
+    *,
+    user_data: Path | None = None,
+) -> None:
+    """Seed the current operation scope after an atomic Profile activation."""
+
+    cache = _PROFILE_CAPTURE_SCOPE.get()
+    if cache is None:
+        return
+    root = user_data or runtime_user_data_root()
+    pointer_path = ActiveProfileStore(root).path
+    signature = _activation_pointer_signature(pointer_path)
+    if signature is not None:
+        cache[pointer_path] = (active, signature)
+
+
 def runtime_user_data_root(base_dir: Path | None = None) -> Path:
     """Return the configured Host state root without an authority fallback."""
     configured = read_migrated_env("TOBKIRI_USER_DATA", "RUMI_USER_DATA")
@@ -110,7 +127,11 @@ def host_profile_catalog(base_dir: Path | None = None) -> BundledCatalog:
     """Return the verified artifact catalog plus Host-owned Profile definitions."""
 
     bundled = BundledCatalog.load(_bundle_root(base_dir))
-    user_data = runtime_user_data_root(base_dir)
+    user_data = (
+        runtime_user_data_root()
+        if base_dir is None
+        else runtime_user_data_root(base_dir)
+    )
     definitions = ProfileDefinitionStore(user_data)
     legacy_collection = user_data / "settings" / "startup_profiles.json"
     if not definitions.list_profiles(include_tombstones=True) and legacy_collection.is_file():
@@ -410,8 +431,18 @@ def capture_active_profile(
 ) -> ActiveDefaultProfile:
     """Capture the exact Host-selected Profile without a Defaults fallback."""
 
-    user_data = runtime_user_data_root(base_dir)
+    user_data = (
+        runtime_user_data_root()
+        if base_dir is None
+        else runtime_user_data_root(base_dir)
+    )
     pointers = ActiveProfileStore(user_data)
+    cache = _PROFILE_CAPTURE_SCOPE.get()
+    if cache is not None:
+        signature = _activation_pointer_signature(pointers.path)
+        cached = cache.get(pointers.path)
+        if cached is not None and signature == cached[1]:
+            return cached[0]
     try:
         pointer = pointers.require(verify_snapshot=True)
     except ActiveProfileStoreError:
@@ -452,6 +483,7 @@ def capture_active_profile(
         raise ProfileResolutionDenied(
             "Host active pointer does not match the Profile activation"
         )
+    cache_active_profile(active, user_data=user_data)
     return active
 
 
@@ -614,6 +646,7 @@ __all__ = [
     "activation_audit_receipt",
     "active_profile_exists",
     "active_default_profile_exists",
+    "cache_active_profile",
     "capture_active_profile",
     "capture_default_profile",
     "host_profile_catalog",

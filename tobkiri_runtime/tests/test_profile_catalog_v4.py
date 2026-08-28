@@ -152,31 +152,6 @@ def test_catalog_refresh_exposes_new_profile_without_changing_active_pointer(
     assert active_runtime.activation == before_activation
 
 
-def test_active_profile_successor_does_not_relabel_running_revision(
-    active_runtime,
-) -> None:
-    """An edited definition stays distinct from the active execution revision."""
-
-    catalog = BundledCatalog.load(_bundle_root())
-    successor = {
-        **catalog.profiles["defaults"],
-        "display_name": "Defaults edited after activation",
-    }
-    edited_catalog = replace(
-        catalog,
-        profiles={**catalog.profiles, "defaults": successor},
-    )
-
-    projected = project_profile_catalog(edited_catalog, active_runtime)["profiles"][0]
-
-    assert projected["active"] is True
-    assert projected["lifecycle_state"] == "successor_pending"
-    assert projected["active_revision_matches_definition"] is False
-    assert projected["records"]["profile_revision"] == (
-        active_runtime.resolved.profile_revision
-    )
-
-
 def test_active_catalog_projects_exact_profile_lock_closure_and_current_records(
     active_runtime,
 ) -> None:
