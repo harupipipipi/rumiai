@@ -318,7 +318,7 @@ def test_packvm_invocation_requires_fresh_matching_host_attestation(
     monkeypatch.setattr(
         runtime_surface,
         "_captured_lifecycle_projection",
-        lambda: lifecycle,
+        lambda *_args, **_kwargs: lifecycle,
     )
 
     attested = {

@@ -2172,14 +2172,16 @@ def _normalized_plan_bindings(
 
 
 def _captured_lifecycle_projection(
-    snapshot: RuntimeSurfaceSnapshot,
+    snapshot: RuntimeSurfaceSnapshot | None = None,
 ) -> Mapping[str, Any]:
     """Read the exact active Pack-control catalog or fail the surface closed."""
 
     try:
         from .pack_control_v4 import capture_pack_control_catalog
 
-        return capture_pack_control_catalog(active=snapshot.active)
+        return capture_pack_control_catalog(
+            active=None if snapshot is None else snapshot.active
+        )
     except Exception as error:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.API_FAILURE,

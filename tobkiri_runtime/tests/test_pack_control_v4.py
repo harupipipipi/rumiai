@@ -185,7 +185,7 @@ def test_unapproved_revoke_does_not_hold_session_lock_during_slow_capture(
 
     monkeypatch.setattr(
         profile_capture,
-        "capture_default_profile",
+        "capture_active_profile",
         delayed_capture,
     )
     executor = ThreadPoolExecutor(max_workers=2)
@@ -232,7 +232,7 @@ def test_slow_catalog_capture_does_not_own_the_control_session_lock(
 
     monkeypatch.setattr(
         profile_capture,
-        "capture_default_profile",
+        "capture_active_profile",
         delayed_capture,
     )
     executor = ThreadPoolExecutor(max_workers=2)
