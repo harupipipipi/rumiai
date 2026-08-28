@@ -37,7 +37,7 @@ class ProductionRuntimeV4:
         pack_roots: Mapping[str, Path],
         supporting_artifacts: Sequence[PackArtifact],
         verified_effective_artifacts: Mapping[str, str],
-        authority_ceilings: Mapping[tuple[str, str], AuthorityCeilings],
+        authority_ceilings: Mapping[tuple[str, ...], AuthorityCeilings],
     ) -> "ProductionRuntimeV4":
         """Compile only exact plan Pack roots and capture the active graph."""
         binding_pack_ids = {item["pack_id"] for item in plan["bindings"]}
@@ -94,7 +94,7 @@ class ProductionRuntimeV4:
         *,
         broker: RequestBroker,
         context_for: Callable[..., RequestContext],
-        effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]],
+        effect_scope_for: Callable[..., Mapping[str, Any]],
         providers: Mapping[str, tuple[Mapping[str, Any], ...]],
         authority_control: AuthorityV4Adapter | None = None,
         current_capture_check: Callable[[], None] | None = None,
@@ -110,6 +110,8 @@ class ProductionRuntimeV4:
             providers=providers,
             profile_id=str(self.composition.profile["profile_id"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
+            profile_revision=str(self.composition.plan["profile_revision"]),
+            activation_id=str(self.composition.activation["activation_id"]),
             authority_control=authority_control,
             current_capture_check=current_capture_check,
             owned_authority_store=owned_authority_store,
@@ -124,10 +126,12 @@ class V4DispatchSession:
 
     broker: RequestBroker
     context_for: Callable[..., RequestContext]
-    effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]]
+    effect_scope_for: Callable[..., Mapping[str, Any]]
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
+    profile_revision: str = ""
+    activation_id: str = ""
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
@@ -199,6 +203,10 @@ class V4DispatchSession:
             "profile_id": self.profile_id,
             "plan_digest": self.plan_digest,
         }
+        if self.profile_revision:
+            expected["profile_revision"] = self.profile_revision
+        if self.activation_id:
+            expected["activation_id"] = self.activation_id
         if any(provider.get(key) != value for key, value in expected.items()):
             raise RuntimeError("selected Provider/backend metadata is stale or wrong")
 
@@ -225,6 +233,19 @@ class V4DispatchSession:
             context = self.context_for(contract_id, operation_id, session_id)
         else:
             context = self.context_for(contract_id, operation_id)
+        scope_parameter_count = len(inspect.signature(self.effect_scope_for).parameters)
+        if scope_parameter_count >= 4:
+            scope = self.effect_scope_for(
+                contract_id,
+                operation_id,
+                arguments,
+                context,
+            )
+        else:
+            # Compatibility for the small conformance adapters that still
+            # expose the original three-argument callback.  Production
+            # capture always supplies the context-aware form above.
+            scope = self.effect_scope_for(contract_id, operation_id, arguments)
         return self.broker.invoke(
             InvocationFrame(
                 contract_id=contract_id,
@@ -233,7 +254,7 @@ class V4DispatchSession:
                 payload=arguments,
             ),
             context,
-            effect_scope=self.effect_scope_for(contract_id, operation_id, arguments),
+            effect_scope=scope,
         )
 
 

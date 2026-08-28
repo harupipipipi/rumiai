@@ -179,6 +179,7 @@ class RequestBroker:
         request_digest = _digest(
             {
                 "request_id": context.request_id,
+                "profile_revision": context.profile_revision,
                 "activation_digest": context.activation_digest,
                 "plan_digest": context.plan_digest,
                 "target": binding.principal_ref.value,

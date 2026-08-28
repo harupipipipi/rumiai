@@ -229,6 +229,10 @@ class RequestContext:
     profile_authority_digest: str
     fencing_token: int
     handle_namespace: str
+    # Kept distinct from ``profile_id`` and the activation/plan digests.  Old
+    # conformance callers may omit it; production capture always supplies the
+    # signed ResolvedPlan profile revision.
+    profile_revision: str = ""
     delegation_chain: tuple[OpaqueAuthorityRef, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
@@ -236,6 +240,8 @@ class RequestContext:
         require_digest(self.plan_digest, "plan")
         require_digest(self.profile_authority_digest, "profile authority")
         require_digest(self.target_backend_digest, "target backend")
+        if self.profile_revision:
+            require_digest(self.profile_revision, "profile revision")
         if (
             self.security_epoch <= 0
             or self.caller_boot_epoch <= 0

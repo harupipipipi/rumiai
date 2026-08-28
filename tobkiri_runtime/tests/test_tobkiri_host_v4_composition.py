@@ -175,12 +175,16 @@ def _capture(tmp_path: Path):
     )
     ceilings = {
         (
+            "defaults",
+            "activation:defaults-v4",
             next(
                 principal
                 for (function_id, _operation_id), principal in principals.items()
                 if function_id == edge["caller_function_id"]
             ).principal_id,
             principals[(edge["target_provider_id"], edge["operation_id"])].principal_id,
+            edge["contract_id"],
+            edge["operation_id"],
         ): AuthorityCeilings(scope, scope, scope)
         for edge in resolved.profile["requested_edges"]
     }
@@ -233,7 +237,16 @@ def test_capture_rejects_stale_plan_extra_route_and_injected_authority(tmp_path:
         )
 
     injected = dict(ceilings)
-    injected[("sha256:" + "1" * 64, next(iter(ceilings))[1])] = next(iter(ceilings.values()))
+    injected[
+        (
+            "defaults",
+            "activation:defaults-v4",
+            "sha256:" + "1" * 64,
+            next(iter(ceilings))[3],
+            next(iter(ceilings))[4],
+            next(iter(ceilings))[5],
+        )
+    ] = next(iter(ceilings.values()))
     with pytest.raises(ResolutionError, match="authority ceilings"):
         HostV4Composition.capture(
             profile=resolved.profile,
