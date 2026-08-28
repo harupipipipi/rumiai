@@ -97,8 +97,9 @@ def test_bind_toolchain_requires_exact_regular_nonwritable_executables(
 
 
 def test_environment_writer_rejects_multiline_and_symlink(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     output = tmp_path / "environment"
     with pytest.raises(ToolIdentityError, match="unsafe environment"):
         _MODULE.write_environment_file(output, "KEY=value\nINJECT")
@@ -235,6 +236,7 @@ def test_release_digest_binds_commit_tree_and_manifest(tmp_path: Path) -> None:
 def test_append_git_environment_requires_complete_source_and_python_binding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
     python_root = tmp_path / "python"
     source_root = tmp_path / "source"
     python_root.mkdir()
