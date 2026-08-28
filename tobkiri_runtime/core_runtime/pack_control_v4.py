@@ -688,11 +688,20 @@ def capture_pack_control_session(
     )
 
 
-def capture_pack_control_catalog() -> Mapping[str, Any]:
-    """Capture the authoritative lifecycle projection for the active Profile."""
+def capture_pack_control_catalog(
+    *,
+    active_snapshot: ActiveDefaultProfile | None = None,
+) -> Mapping[str, Any]:
+    """Capture the authoritative lifecycle projection for the active Profile.
 
-    binding = _capture_binding()
-    return _catalog_payload(binding)
+    A caller that has already captured the active Profile may pass that exact
+    snapshot to avoid reopening the activation ceremony while projecting one
+    read.  The no-argument form remains the fresh Host boundary used by
+    standalone lifecycle reads.
+    """
+
+    binding = _capture_binding(active_snapshot)
+    return _catalog_payload(binding, active_snapshot=active_snapshot)
 
 
 class CapturedPackCatalogReader:

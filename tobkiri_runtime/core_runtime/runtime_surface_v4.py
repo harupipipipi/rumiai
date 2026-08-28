@@ -98,6 +98,12 @@ _READ_WORKER_COUNT = 4
 _READ_QUEUE_CAPACITY = 16
 _READ_WORKER_NAME_PREFIX = "tobkiri-runtime-read"
 _ReadResult = TypeVar("_ReadResult")
+_LIFECYCLE_ACTIVE_SNAPSHOT: contextvars.ContextVar[
+    ActiveDefaultProfile | None
+] = contextvars.ContextVar(
+    "tobkiri_runtime_surface_lifecycle_active_snapshot",
+    default=None,
+)
 
 
 class _ReadDeadline:
@@ -1186,7 +1192,11 @@ class RuntimeSurfaceService:
     ) -> dict[str, Any]:
         active = snapshot.active
         contract_catalogs = _validated_contract_catalogs(snapshot)
-        lifecycle = _captured_lifecycle_projection()
+        lifecycle_token = _LIFECYCLE_ACTIVE_SNAPSHOT.set(active)
+        try:
+            lifecycle = _captured_lifecycle_projection()
+        finally:
+            _LIFECYCLE_ACTIVE_SNAPSHOT.reset(lifecycle_token)
         lifecycle_packs = {str(item["pack_id"]): item for item in lifecycle["packs"]}
         selected = {
             str(item["identity"]): dict(item) for item in active.resolved.lock["effective_set"]
@@ -1754,7 +1764,9 @@ def _captured_lifecycle_projection() -> Mapping[str, Any]:
     try:
         from .pack_control_v4 import capture_pack_control_catalog
 
-        return capture_pack_control_catalog()
+        return capture_pack_control_catalog(
+            active_snapshot=_LIFECYCLE_ACTIVE_SNAPSHOT.get()
+        )
     except Exception as error:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.API_FAILURE,
