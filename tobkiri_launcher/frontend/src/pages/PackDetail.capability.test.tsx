@@ -6,7 +6,7 @@ import {JSDOM} from 'jsdom';
 import {MemoryRouter, Route, Routes} from 'react-router';
 
 import {type Pack, useAppStore} from '@/src/store';
-import type {ApiDynamicFrontendCatalog, ApiPackVMDoctor} from '@/src/lib/apiTypes';
+import type {ApiDynamicFrontendCatalog, ApiPackVMDoctor, PackControlBinding} from '@/src/lib/apiTypes';
 import {PackDetail} from './PackDetail';
 
 const operation = {
@@ -61,6 +61,14 @@ const catalog: ApiDynamicFrontendCatalog = {
   catalog_hash: 'sha256:catalog',
 };
 
+const activePackBinding: PackControlBinding = {
+  profile_id: pack.profileId,
+  workspace_id: pack.workspaceId,
+  profile_revision: pack.profileRevision,
+  plan_digest: pack.planDigest,
+  catalog_revision: pack.catalogRevision,
+};
+
 const healthyDoctor: ApiPackVMDoctor = {
   ready: true,
   backend_id: 'tobkiri.python-pack-v4',
@@ -101,6 +109,7 @@ async function renderDetail(root: Root): Promise<void> {
 function configureStore(currentPack: Pack, currentCatalog = catalog): void {
   useAppStore.setState({
     packs: [currentPack],
+    packCatalogBinding: activePackBinding,
     packsLoading: false,
     packsError: null,
     frontendCatalog: currentCatalog,
@@ -199,7 +208,8 @@ test('PackDetail exposes required Profile Packs without revoke or toggle actions
 
   try {
     await renderDetail(root);
-    assert.match(container.textContent ?? '', /Required by active Profile/);
+    assert.match(container.textContent ?? '', /Required by active execution Profile · profile-a/);
+    assert.match(container.textContent ?? '', /Host-global artifact inventory and install state/);
     assert.equal(container.querySelector('[role="switch"]'), null);
     assert.equal(container.querySelector('[aria-label^="Revoke approval"]'), null);
   } finally {

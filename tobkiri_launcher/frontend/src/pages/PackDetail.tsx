@@ -12,13 +12,16 @@ import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 import { FileInspectOperation } from '@/src/components/packs/FileInspectOperation';
 import { PackDiagnostics } from '@/src/components/packs/PackDiagnostics';
 import { PackVMLifecyclePanel } from '@/src/components/packs/PackVMLifecyclePanel';
+import { PackScopeSummary } from '@/src/components/packs/PackScopeSummary';
 import { userSafePackVMError } from '@/src/lib/packvmLifecycle';
+import { isPackInCatalogScope } from '@/src/lib/packScope';
 
 export function PackDetail() {
   const t = useT();
   const { id } = useParams();
   const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
+  const packCatalogBinding = useAppStore(state => state.packCatalogBinding);
   const packsLoading = useAppStore(state => state.packsLoading);
   const packsError = useAppStore(state => state.packsError);
   const packTogglePending = useAppStore(state => state.packTogglePending);
@@ -106,7 +109,11 @@ export function PackDetail() {
     );
   }
 
+  const packScopeAuthoritative = isPackInCatalogScope(pack, packCatalogBinding);
+  const scopedProfileId = packCatalogBinding?.profile_id ?? 'unavailable';
+
   const handleToggle = async () => {
+    if (!packScopeAuthoritative) return;
     const key = pack.enabled ? 'packs.toggle_off' : 'packs.toggle_on';
     if (await togglePack(pack.id)) addToast(t(key, { name: pack.name }), 'success');
   };
@@ -142,7 +149,7 @@ export function PackDetail() {
     && diagnostic.operation_id === operationId
   ));
   const contributionForOperation = (operationId: string, contractId: string) => (
-    backendUnavailableForOperation(operationId)
+    !packScopeAuthoritative || backendUnavailableForOperation(operationId)
       ? null
       : frontendCatalog?.contributions.find((contribution) => (
         contribution.owner_pack_id === pack.id
@@ -156,7 +163,7 @@ export function PackDetail() {
   );
 
   const handleRevoke = () => {
-    if (!pack.installed || !pack.approved || pack.type === 'core' || pack.required) return;
+    if (!packScopeAuthoritative || !pack.installed || !pack.approved || pack.type === 'core' || pack.required) return;
     showDialog({
       title: `Revoke ${pack.name} approval?`,
       message: `This will revoke Tobkiri approval and access for ${pack.name}. The Pack will be disabled, and its capabilities will be unavailable until a new approval succeeds.`,
@@ -184,8 +191,10 @@ export function PackDetail() {
                 <Badge variant={pack.installed ? 'success' : 'outline'}>
                   {pack.installed ? 'Installed' : 'Available'}
                 </Badge>
-                <Badge variant={pack.approved ? 'success' : approvalRevoked ? 'destructive' : 'warning'}>
-                  {pack.approved ? 'Approved' : approvalRevoked ? 'Approval revoked' : 'Needs approval'}
+                <Badge variant={packScopeAuthoritative ? (pack.approved ? 'success' : approvalRevoked ? 'destructive' : 'warning') : 'warning'}>
+                  {packScopeAuthoritative
+                    ? (pack.approved ? 'Approved' : approvalRevoked ? 'Approval revoked' : 'Needs approval')
+                    : 'Profile state unavailable'}
                 </Badge>
               </div>
               <p className="mt-0.5 text-sm text-text-muted">{pack.description}</p>
@@ -197,7 +206,7 @@ export function PackDetail() {
                 size="sm"
                 onClick={() => void handleInstall()}
                 loading={installing || Boolean(packInstallPending[pack.id])}
-                disabled={mutationResultUnknown}
+                disabled={!packScopeAuthoritative || mutationResultUnknown}
               >
                 Install
               </Button>
@@ -208,12 +217,18 @@ export function PackDetail() {
                     Tobkiri approval revoked. Approve again before enabling this Pack.
                   </span>
                 ) : null}
-                <Button size="sm" onClick={() => void handleApprove()} loading={approving} disabled={mutationResultUnknown}>
+                <Button size="sm" onClick={() => void handleApprove()} loading={approving} disabled={!packScopeAuthoritative || mutationResultUnknown}>
                   Approve
                 </Button>
               </div>
             ) : pack.required ? (
-              <Badge variant="secondary">Required by active Profile</Badge>
+              <Badge variant={packScopeAuthoritative ? 'secondary' : 'warning'}>
+                {packScopeAuthoritative
+                  ? `Required by active execution Profile · ${scopedProfileId}`
+                  : 'Profile-scoped requirement unavailable'}
+              </Badge>
+            ) : !packScopeAuthoritative ? (
+              <Badge variant="warning">Profile-scoped Pack actions unavailable</Badge>
             ) : (
               <>
                 <Button
@@ -223,7 +238,7 @@ export function PackDetail() {
                   onClick={handleRevoke}
                   loading={Boolean(packApprovalPending[pack.id])}
                   aria-busy={Boolean(packApprovalPending[pack.id])}
-                  disabled={pack.type === 'core' || Boolean(packApprovalPending[pack.id]) || mutationResultUnknown}
+                  disabled={!packScopeAuthoritative || pack.type === 'core' || Boolean(packApprovalPending[pack.id]) || mutationResultUnknown}
                   aria-label={`Revoke approval for ${pack.name}`}
                   title={pack.type === 'core' ? 'Core Packs cannot have approval revoked.' : undefined}
                 >
@@ -233,6 +248,8 @@ export function PackDetail() {
                 <Switch
                   checked={pack.enabled}
                   disabled={
+                    !packScopeAuthoritative
+                    ||
                     pack.type === 'core'
                     || Boolean(packTogglePending[pack.id])
                     || Boolean(packApprovalPending[pack.id])
@@ -247,6 +264,7 @@ export function PackDetail() {
             )}
           </div>
         </div>
+        <PackScopeSummary binding={packCatalogBinding} pack={pack} stale={Boolean(packsError)} />
         {mutationResultUnknown ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
             <span>The result of a Pack mutation is unknown. Refresh the authoritative catalog before trying again.</span>
@@ -369,6 +387,7 @@ export function PackDetail() {
                   const contribution = contributionForOperation(operation.operationId, operation.contractId);
                   const callable = operation.invokable
                     && Boolean(contribution)
+                    && packScopeAuthoritative
                     && !approvalRevoked
                     && !backendUnavailableForOperation(operation.operationId);
                   return (
@@ -394,6 +413,8 @@ export function PackDetail() {
                         <p className="mt-3 text-xs text-text-muted">
                           {approvalRevoked
                             ? 'Approval is revoked; invocation is unavailable.'
+                            : !packScopeAuthoritative
+                              ? 'The active execution Profile scope does not match this Pack; invocation is unavailable.'
                             : operation.invokable
                               ? 'Waiting for a verified Pack contribution from Tobkiri.'
                               : 'Tobkiri has not exposed a verified capability route.'}
@@ -413,6 +434,7 @@ export function PackDetail() {
             operation={operation}
             pack={pack}
             contributionVerified={Boolean(contributionForOperation(operation.operationId, operation.contractId))
+              && packScopeAuthoritative
               && !backendUnavailableForOperation(operation.operationId)
               && !frontendCatalog?.quarantined_pack_ids.includes(pack.id)}
             pending={Boolean(packOperationPending[`${pack.id}:${operation.operationId}`])

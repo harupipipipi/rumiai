@@ -149,7 +149,15 @@ function installFetchMock(): void {
     const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
-        ? {packs: [], count: 0}
+        ? {
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+          packs: [],
+          count: 0,
+        }
         : {
           pack_id: 'pack-a',
           enabled: true,
@@ -198,7 +206,15 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
-        ? {packs: [], count: 0}
+        ? {
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+          packs: [],
+          count: 0,
+        }
         : {
           pack_id: 'pack-a',
           enabled: true,

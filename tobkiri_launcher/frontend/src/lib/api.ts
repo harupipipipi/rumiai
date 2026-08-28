@@ -56,6 +56,7 @@ import {
   type NamedProfileRegistry,
   type UpdateNamedProfileInput,
 } from './profileRegistry';
+import {parsePacksResponse} from './packScope';
 export type {
   CreateNamedProfileInput,
   DeleteNamedProfileInput,
@@ -1008,7 +1009,7 @@ function validatePackApprovalResponse(value: unknown, packId: string): PackAppro
 }
 
 export function fetchPacks(): Promise<PacksResponseData> {
-  return dispatchPackControl<PacksResponseData>('catalog.read');
+  return dispatchPackControl<unknown>('catalog.read').then(parsePacksResponse);
 }
 
 export async function installPack(

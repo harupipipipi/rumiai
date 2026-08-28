@@ -15,6 +15,7 @@ import {
 import type {
   ApiDynamicFrontendCatalog,
   ApiPackVMDoctor,
+  PackControlBinding,
   ApiSupervisorDashboard,
   HealthResponseData,
   RuntimeStatus,
@@ -180,6 +181,7 @@ interface AppState {
   setRuntimeHealth: (health: HealthResponseData) => void;
   refreshRuntimeHealth: () => Promise<void>;
   packs: Pack[];
+  packCatalogBinding: PackControlBinding | null;
   packsLoading: boolean;
   packsError: string | null;
   packInstallPending: Record<string, boolean>;
@@ -679,6 +681,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   packs: [],
+  packCatalogBinding: null,
   packsLoading: false,
   packsError: null,
   packInstallPending: {},
@@ -745,7 +748,18 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...get().packMutationUnknown,
         };
         const reconciledPackUnknown = reconcilePackMutationJournal(packs, durablePackUnknown);
-        set({packs, packsError: null, packMutationUnknown: reconciledPackUnknown});
+        set({
+          packs,
+          packCatalogBinding: {
+            profile_id: data.profile_id,
+            workspace_id: data.workspace_id,
+            profile_revision: data.profile_revision,
+            plan_digest: data.plan_digest,
+            catalog_revision: data.catalog_revision,
+          },
+          packsError: null,
+          packMutationUnknown: reconciledPackUnknown,
+        });
         if (!options.skipMutationReconciliation) {
           scheduleHydratedPackStatusReconciliation(get, set);
         }

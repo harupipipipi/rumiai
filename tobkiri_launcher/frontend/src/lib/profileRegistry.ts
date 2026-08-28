@@ -4,6 +4,7 @@ export const PROFILE_REGISTRY_API_VERSION = 'io.tobkiri.profile-registry.v4' as 
 
 export interface NamedProfileRecord {
   profile_id: string;
+  /** Immutable definition-store revision for this Named Profile record. */
   profile_revision: string;
   profile: Record<string, unknown>;
   order: number;
@@ -18,6 +19,7 @@ export interface NamedProfileRegistry {
   profile_registry_api_version: typeof PROFILE_REGISTRY_API_VERSION;
   generation: number;
   active_profile_id: string | null;
+  /** Resolved/activated execution revision; it may differ from a definition revision. */
   active_profile_revision: string | null;
   profiles: NamedProfileRecord[];
   changed_profile?: NamedProfileRecord;
@@ -201,6 +203,9 @@ export function parseNamedProfileRegistry(value: unknown): NamedProfileRegistry 
     profileIds.add(profile.profile_id);
   }
   if (record.active_profile_id !== null) {
+    // The live pointer identifies the resolved execution snapshot. The selected
+    // record carries the immutable definition revision, so these digests are
+    // intentionally validated independently rather than compared for equality.
     const active = profiles.find((profile) => profile.profile_id === record.active_profile_id);
     if (!active) {
       throw new ProfileRegistryContractError('Profile registry active pointer references an unknown Profile.');

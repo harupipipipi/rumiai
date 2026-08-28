@@ -32,13 +32,16 @@ function profileRecord(
 function registry(
   profiles: Record<string, unknown>[],
   activeProfileId: string | null = (profiles[0]?.profile_id as string | null) ?? null,
+  activeProfileRevision?: string | null,
 ): Record<string, unknown> {
   const active = profiles.find((profile) => profile.profile_id === activeProfileId);
   return {
     profile_registry_api_version: PROFILE_REGISTRY_API_VERSION,
     generation: 3,
     active_profile_id: activeProfileId,
-    active_profile_revision: active?.profile_revision ?? null,
+    active_profile_revision: activeProfileRevision === undefined
+      ? active?.profile_revision ?? null
+      : activeProfileRevision,
     profiles,
   };
 }
@@ -54,6 +57,16 @@ test('Named Profile registry parser preserves definition records and separate ac
   assert.equal(parsed.active_profile_revision, digest('b'));
   assert.deepEqual(parsed.profiles.map((profile) => profile.profile_id), ['work-a', 'work-b']);
   assert.equal(parsed.profiles[1]?.parent_revision, digest('a'));
+});
+
+test('Named Profile registry accepts a resolved active revision distinct from the definition revision', () => {
+  const parsed = parseNamedProfileRegistry(registry([
+    profileRecord('work-a', digest('a')),
+  ], 'work-a', digest('e')));
+
+  assert.equal(parsed.profiles[0]?.profile_revision, digest('a'));
+  assert.equal(parsed.active_profile_id, 'work-a');
+  assert.equal(parsed.active_profile_revision, digest('e'));
 });
 
 test('Named Profile registry parser rejects malformed identity, active pointers, and tombstone leaks', () => {
