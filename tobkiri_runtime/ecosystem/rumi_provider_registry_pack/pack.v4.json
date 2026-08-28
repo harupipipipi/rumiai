@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:c6aa93fad9e77785ef7b511b0b1f42b732d99a4ebc3154a74c1b80063da53dc0",
+      "digest": "sha256:b8bc127a56861f779290a8fd5df824742023af770cd2ca317bee781342e56a44",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -26,7 +26,7 @@
       "path": "runtime/registry.py"
     },
     {
-      "digest": "sha256:06da1bcfbd044b2d5404ac5590dbfaeb406f64298f656a17561a820be46f73bf",
+      "digest": "sha256:338622dc1c012e8b6c2fb514e4b0c2e31c8c890300e89240ab4c7e18af314c27",
       "kind": "executable",
       "path": "runtime/service.py"
     }
@@ -87,9 +87,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:d8b575c92b22870e815345aa7df6971cbb1633dc6e11bb58901baed9c3250216",
-    "contract_catalog_digest": "sha256:089fa6add2f126578bf35ecb945493e2cde41427e3b1a7746883ae3c9ea92d84",
-    "source_identity": "sha256:864eefff99560b95998fdb286703df7760783e94bc9e10dd6aff524fc3ac3e9e"
+    "artifact_set_digest": "sha256:3ebcf088d1b4e83e77a4c95fdf1be476a5341c194adfe4faa8cd02fa67e0f583",
+    "contract_catalog_digest": "sha256:b62246b273a9a017cb2a9b3f0e196213950a307e112cd7471b57a343f03065f1",
+    "source_identity": "sha256:5771aa1e62a029bcca53663a4719f4532b63a69643b17d1d48cc986eaa803b0e"
   },
   "migration": {
     "compatibility": "read_only",
@@ -139,7 +139,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:d8b575c92b22870e815345aa7df6971cbb1633dc6e11bb58901baed9c3250216",
+    "artifact_digest": "sha256:3ebcf088d1b4e83e77a4c95fdf1be476a5341c194adfe4faa8cd02fa67e0f583",
     "display_name": "Rumi Provider Registry",
     "id": "rumi_provider_registry_pack",
     "kind": "host_extension",
@@ -149,7 +149,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:864eefff99560b95998fdb286703df7760783e94bc9e10dd6aff524fc3ac3e9e",
+        "digest": "sha256:5771aa1e62a029bcca53663a4719f4532b63a69643b17d1d48cc986eaa803b0e",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -160,7 +160,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:864eefff99560b95998fdb286703df7760783e94bc9e10dd6aff524fc3ac3e9e",
+    "source_digest": "sha256:5771aa1e62a029bcca53663a4719f4532b63a69643b17d1d48cc986eaa803b0e",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_provider_registry_pack"
   },

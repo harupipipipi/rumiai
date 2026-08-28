@@ -479,22 +479,22 @@
     {
       "path": "packs/rumi_provider_adapters_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:25d4927bd9ca74bedc53e5d8d935e447cd8285b2b0c046cd7ce82ece572d83c1"
+      "digest": "sha256:29d4eb77695b9b8ee5c4b306c3bcf9e37b37e4ef80e2b203a47bee76737493b4"
     },
     {
       "path": "packs/rumi_provider_adapters_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:3afd63200e1cc298af2d0cd89d98ae346bd8aa4fbe3beca1979859373534cb55"
+      "digest": "sha256:d46d5591c68c76d9780afe7abcc02303625b12d1b785221995befbb56e049317"
     },
     {
       "path": "packs/rumi_provider_registry_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:c6aa93fad9e77785ef7b511b0b1f42b732d99a4ebc3154a74c1b80063da53dc0"
+      "digest": "sha256:b8bc127a56861f779290a8fd5df824742023af770cd2ca317bee781342e56a44"
     },
     {
       "path": "packs/rumi_provider_registry_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:20499e6a93342eeec3e8d337720860da98339bc3046e08aefb5ffa5a09d9ead3"
+      "digest": "sha256:95d7862c16a81cd891cd692fbc728d2a2e7c6e7555deb8945234e26e3249b7ef"
     },
     {
       "path": "packs/rumi_repository_context_pack.executables.v4.json",

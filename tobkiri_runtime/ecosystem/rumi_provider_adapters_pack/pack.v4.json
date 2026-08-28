@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:25d4927bd9ca74bedc53e5d8d935e447cd8285b2b0c046cd7ce82ece572d83c1",
+      "digest": "sha256:29d4eb77695b9b8ee5c4b306c3bcf9e37b37e4ef80e2b203a47bee76737493b4",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -89,9 +89,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:7eb3df2032ff89de9dc850a300f961a4357b5ebd817e5ef40963bea8456c83af",
-    "contract_catalog_digest": "sha256:77d96d83ad89f8db8cc373a153d9c696b23ebf499c9722f2d363ef9725edd321",
-    "source_identity": "sha256:65e8567b9ad80d514ae4392ea790acf8b7b97c2f022d8caaa82ff5bfd4b2f599"
+    "artifact_set_digest": "sha256:e3eab60b60cd5c709fd404f00bad4dd4993f9bf9a79db648b4e41ecd4bf6e436",
+    "contract_catalog_digest": "sha256:d77ce926dd58b112982109da0f2b02180f984c5274b7eec8ef5f71e0117435de",
+    "source_identity": "sha256:59249bd75cf4a30ae8fde5f6c1995805dc658c529dfea4d490321efe87072ca3"
   },
   "migration": {
     "compatibility": "read_only",
@@ -153,7 +153,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:7eb3df2032ff89de9dc850a300f961a4357b5ebd817e5ef40963bea8456c83af",
+    "artifact_digest": "sha256:e3eab60b60cd5c709fd404f00bad4dd4993f9bf9a79db648b4e41ecd4bf6e436",
     "display_name": "Rumi Provider Adapters",
     "id": "rumi_provider_adapters_pack",
     "kind": "host_extension",
@@ -163,7 +163,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:65e8567b9ad80d514ae4392ea790acf8b7b97c2f022d8caaa82ff5bfd4b2f599",
+        "digest": "sha256:59249bd75cf4a30ae8fde5f6c1995805dc658c529dfea4d490321efe87072ca3",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -174,7 +174,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:65e8567b9ad80d514ae4392ea790acf8b7b97c2f022d8caaa82ff5bfd4b2f599",
+    "source_digest": "sha256:59249bd75cf4a30ae8fde5f6c1995805dc658c529dfea4d490321efe87072ca3",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_provider_adapters_pack"
   },

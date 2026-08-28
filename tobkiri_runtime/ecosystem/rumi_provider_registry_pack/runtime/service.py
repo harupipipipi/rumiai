@@ -26,6 +26,7 @@ class ProviderRegistryService:
         if operation in {
             "list",
             "get",
+            "rumi_provider_registry_pack.provider-registry-resource",
             "rumi_provider_registry_pack.provider-registry-resource.generate",
             "rumi_provider_registry_pack.provider-registry-resource.stream",
         }:

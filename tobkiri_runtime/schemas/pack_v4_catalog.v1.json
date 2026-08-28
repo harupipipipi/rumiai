@@ -10623,7 +10623,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:bf19eedbddeb69c07bf493e47c028dbe59d799c29d771ace792c0680f707ba60",
+          "digest": "sha256:71306c759aa92d5e3a3f7c796728a65f8e61b19ede8171807715c2407945b5e8",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10795,7 +10795,7 @@
           "path": "runtime/registry.py"
         },
         {
-          "digest": "sha256:06da1bcfbd044b2d5404ac5590dbfaeb406f64298f656a17561a820be46f73bf",
+          "digest": "sha256:338622dc1c012e8b6c2fb514e4b0c2e31c8c890300e89240ab4c7e18af314c27",
           "kind": "executable",
           "path": "runtime/service.py"
         }
