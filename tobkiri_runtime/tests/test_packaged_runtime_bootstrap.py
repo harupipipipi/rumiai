@@ -305,10 +305,27 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         catalog = load_packaged_profile_catalog()
         variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
         assert confirmation["shell"]["executable_artifact_digest"] == variant["entrypoint_digest"]
+        ceremony_request = Request(
+            f"http://127.0.0.1:{port}/api/setup/ceremony",
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Rumi-Desktop-Bootstrap": "first-request-bootstrap",
+            },
+            data=b"{}",
+        )
+        with urlopen(
+            ceremony_request,
+            timeout=coordination_timeout_seconds,
+        ) as response:
+            ceremony_credential = json.load(response)["data"]["ceremony_credential"]
         request = Request(
             f"http://127.0.0.1:{port}/api/setup/packs/install",
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "X-Tobkiri-Setup-Ceremony": ceremony_credential,
+            },
             data=json.dumps(
                 {
                     "setup_api_version": "io.tobkiri.setup-state.v4",
