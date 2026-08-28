@@ -52,7 +52,7 @@ PACKVM_CONTINUATION_KIND = "tobkiri.packvm.continuation.v1"
 PACKVM_BRIDGE_HOST_RESULT_KIND = "tobkiri.packvm.bridge.host-result.v1"
 PACKVM_BRIDGE_TARGET = {
     "contract_id": "tobkiri.service.ai.generate.v1",
-    "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+    "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
 }
 MAX_BRIDGE_REQUEST_BYTES = 64 * 1024
 MAX_BRIDGE_RESULT_BYTES = 512 * 1024

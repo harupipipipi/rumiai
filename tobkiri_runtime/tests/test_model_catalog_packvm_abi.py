@@ -49,7 +49,7 @@ def test_packvm_catalog_abi_delegates_only_the_exact_catalog_operations(
     (
         ("list", {}),
         ("rumi_model_catalog_pack.bundled-model-catalog", {}),
-        ("rumi_ai_gateway_pack.ai-gateway.generate", {}),
+        ("rumi_ai_gateway_pack.ai-gateway-generate", {}),
         ("rumi_model_catalog_pack.bundled-model-catalog.generate", []),
     ),
 )

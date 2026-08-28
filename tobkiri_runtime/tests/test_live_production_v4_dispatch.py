@@ -439,7 +439,7 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
             "version": 1,
             "target": {
                 "contract_id": "tobkiri.service.ai.generate.v1",
-                "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+                "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
             },
             "request": request,
             "request_digest": canonical_digest(request),
@@ -451,7 +451,7 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
                 "nonce": "a" * 48,
                 "target": {
                     "contract_id": "tobkiri.service.ai.generate.v1",
-                    "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+                    "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
                 },
                 "request_digest": canonical_digest(request),
             },
@@ -484,7 +484,7 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
         contract_id, operation_id, payload = invocations[0]
         assert (contract_id, operation_id) == (
             "tobkiri.service.ai.generate.v1",
-            "rumi_ai_gateway_pack.ai-gateway.generate",
+            "rumi_ai_gateway_pack.ai-gateway-generate",
         )
         assert payload["messages"] == request["messages"]
         assert payload["requirements"] == request["requirements"]

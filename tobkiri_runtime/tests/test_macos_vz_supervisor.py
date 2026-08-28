@@ -231,7 +231,7 @@ class _Transport:
                 }
                 target = {
                     "contract_id": "tobkiri.service.ai.generate.v1",
-                    "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+                    "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
                 }
                 bridge_request = {
                     "kind": "tobkiri.packvm.bridge.request.v1",
@@ -530,7 +530,7 @@ def test_signed_pending_bridge_uses_host_callback_and_resumes_once(tmp_path: Pat
     assert observed[0][0] is request
     assert observed[0][1]["target"] == {
         "contract_id": "tobkiri.service.ai.generate.v1",
-        "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+        "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
     }
 
     bridge_resume = transport.requests[-1]

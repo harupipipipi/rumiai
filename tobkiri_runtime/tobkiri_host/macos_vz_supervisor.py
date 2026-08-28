@@ -83,7 +83,7 @@ _GUEST_NONCE = re.compile(r"^[a-f0-9]{48}$")
 _BRIDGE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _CONVERSATION_BRIDGE_TARGET = {
     "contract_id": "tobkiri.service.ai.generate.v1",
-    "operation_id": "rumi_ai_gateway_pack.ai-gateway.generate",
+    "operation_id": "rumi_ai_gateway_pack.ai-gateway-generate",
 }
 
 

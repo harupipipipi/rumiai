@@ -31,7 +31,7 @@ from tobkiri_host.models import OpaqueAuthorityRef
 
 
 _FUNCTION_ID = "rumi_ai_gateway_pack.ai-gateway.generate"
-_OPERATION_ID = _FUNCTION_ID
+_OPERATION_ID = "rumi_ai_gateway_pack.ai-gateway-generate"
 _CONTRACT_ID = "tobkiri.service.ai.generate.v1"
 
 

@@ -133,7 +133,7 @@ _BASELINE_CONVERSATION_FUNCTION_ID = "defaultspack.conversation"
 _BASELINE_CONVERSATION_CALLER_ID = "shell.tauri.default"
 _BRIDGED_AI_GENERATE_KEY = (
     "tobkiri.service.ai.generate.v1",
-    "rumi_ai_gateway_pack.ai-gateway.generate",
+    "rumi_ai_gateway_pack.ai-gateway-generate",
 )
 _BRIDGED_AI_GENERATE_PACK_ID = "rumi_ai_gateway_pack"
 _BRIDGED_AI_GENERATE_FUNCTION_ID = "rumi_ai_gateway_pack.ai-gateway.generate"

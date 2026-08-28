@@ -77,6 +77,11 @@ MODEL_PROFILE_STREAM_OPERATION = (
 )
 MODEL_PROFILE_OPERATION = MODEL_PROFILE_GENERATE_OPERATION
 
+GENERATE_OPERATION = "rumi_ai_gateway_pack.ai-gateway-generate"
+STREAM_OPERATION = "rumi_ai_gateway_pack.ai-gateway-stream"
+_LEGACY_GENERATE_OPERATION = "rumi_ai_gateway_pack.ai-gateway.generate"
+_LEGACY_STREAM_OPERATION = "rumi_ai_gateway_pack.ai-gateway.stream"
+
 _DIAGNOSTIC_LIMIT = 256
 _DIAGNOSTICS: list[dict[str, Any]] = []
 _DIAGNOSTIC_LOCK = threading.Lock()
@@ -162,7 +167,8 @@ def create_generate_operation(client: GlobalContractClient):
             "generate",
             "invoke",
             "resolve",
-            "rumi_ai_gateway_pack.ai-gateway.generate",
+            GENERATE_OPERATION,
+            _LEGACY_GENERATE_OPERATION,
         }:
             raise ValueError(f"unknown generate operation: {name}")
         return _invoke(
@@ -181,7 +187,8 @@ def create_stream_operation(client: GlobalContractClient):
         if name not in {
             "stream",
             "invoke",
-            "rumi_ai_gateway_pack.ai-gateway.stream",
+            STREAM_OPERATION,
+            _LEGACY_STREAM_OPERATION,
         }:
             raise ValueError(f"unknown stream operation: {name}")
         return _invoke(client, payload, streaming=True)
@@ -282,16 +289,16 @@ HOST_PROVIDER_FACTORY = {
     _GENERATE_FUNCTION_ID: AIGatewayHostFactoryV4(
         _GENERATE_FUNCTION_ID,
         contract_id="tobkiri.service.ai.generate.v1",
-        operation_id=_GENERATE_FUNCTION_ID,
-        operation_name=_GENERATE_FUNCTION_ID,
+        operation_id=GENERATE_OPERATION,
+        operation_name=GENERATE_OPERATION,
         allowed_contract_ids=_GENERATE_ALLOWED_CONTRACTS,
         operation_factory=create_generate_operation,
     ),
     _STREAM_FUNCTION_ID: AIGatewayHostFactoryV4(
         _STREAM_FUNCTION_ID,
         contract_id="tobkiri.service.ai.stream.v1",
-        operation_id=_STREAM_FUNCTION_ID,
-        operation_name=_STREAM_FUNCTION_ID,
+        operation_id=STREAM_OPERATION,
+        operation_name=STREAM_OPERATION,
         allowed_contract_ids=_STREAM_ALLOWED_CONTRACTS,
         operation_factory=create_stream_operation,
     ),

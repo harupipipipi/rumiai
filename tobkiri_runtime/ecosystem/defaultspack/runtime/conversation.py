@@ -13,9 +13,9 @@ import secrets
 from typing import Any
 
 AI_GENERATE_CONTRACT = "tobkiri.service.ai.generate.v1"
-AI_GENERATE_OPERATION = "rumi_ai_gateway_pack.ai-gateway.generate"
+AI_GENERATE_OPERATION = "rumi_ai_gateway_pack.ai-gateway-generate"
 AI_STREAM_CONTRACT = "tobkiri.service.ai.stream.v1"
-AI_STREAM_OPERATION = "rumi_ai_gateway_pack.ai-gateway.stream"
+AI_STREAM_OPERATION = "rumi_ai_gateway_pack.ai-gateway-stream"
 _AI_CONTRACTS = frozenset({AI_GENERATE_CONTRACT, AI_STREAM_CONTRACT})
 
 # This module is both the in-Host compatibility entrypoint and the staged
