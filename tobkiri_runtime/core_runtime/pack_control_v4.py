@@ -1346,7 +1346,10 @@ def activate_resolved_profile_pack_set(
         _ensure_profile_workspace,
         host_profile_catalog,
     )
-    from .active_profile_store_v4 import ActiveProfileStore
+    from .active_profile_store_v4 import (
+        ActiveProfileStore,
+        ActiveProfileStoreConflict,
+    )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
     user_data = _user_data_root()
@@ -1354,15 +1357,26 @@ def activate_resolved_profile_pack_set(
     workspace = _ensure_profile_workspace(user_data, profile_id)
     pointers = ActiveProfileStore(user_data)
     predecessor = pointers.require(verify_snapshot=True)
-    if (
-        not hmac.compare_digest(
+    candidate_profile_revision = str(resolved.plan["profile_revision"])
+    candidate_plan_digest = str(resolved.plan["plan_digest"])
+    candidate_lock_digest = str(resolved.lock["lock_digest"])
+    pointer_is_candidate = (
+        predecessor.profile_id == profile_id
+        and hmac.compare_digest(
+            predecessor.profile_revision, candidate_profile_revision
+        )
+        and hmac.compare_digest(predecessor.plan_digest, candidate_plan_digest)
+        and hmac.compare_digest(predecessor.lock_digest, candidate_lock_digest)
+        and hmac.compare_digest(predecessor.activation_id, activation_id)
+    )
+    predecessor_is_expected = (
+        hmac.compare_digest(
             predecessor.profile_revision, expected_profile_revision
         )
-        or not hmac.compare_digest(predecessor.plan_digest, expected_plan_digest)
-        or not hmac.compare_digest(
-            predecessor.activation_id, expected_activation_id
-        )
-    ):
+        and hmac.compare_digest(predecessor.plan_digest, expected_plan_digest)
+        and hmac.compare_digest(predecessor.activation_id, expected_activation_id)
+    )
+    if not predecessor_is_expected and not pointer_is_candidate:
         raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     catalog = (
         BundledCatalog.load(bundle_root)
@@ -1380,7 +1394,18 @@ def activate_resolved_profile_pack_set(
         active_pointer = workspace / "activation" / "active.json"
         if active_pointer.is_file():
             active = store.load_active_snapshot()
-            if hmac.compare_digest(
+            if pointer_is_candidate:
+                if (
+                    not hmac.compare_digest(
+                        str(active.activation["activation_id"]), activation_id
+                    )
+                    or active.resolved != resolved
+                ):
+                    raise PackControlConflict(
+                        "Host active pointer is bound to another Profile activation"
+                    )
+                activation = dict(active.activation)
+            elif hmac.compare_digest(
                 str(active.activation["activation_id"]), activation_id
             ):
                 if active.resolved != resolved:
@@ -1407,6 +1432,10 @@ def activate_resolved_profile_pack_set(
                     ),
                 )
         else:
+            if pointer_is_candidate:
+                raise PackControlConflict(
+                    "Host active pointer references a missing Profile activation"
+                )
             created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             activation = store.activate(
                 resolved,
@@ -1423,13 +1452,31 @@ def activate_resolved_profile_pack_set(
         envelope = json.loads(envelope_path.read_bytes())
     except (OSError, json.JSONDecodeError) as error:
         raise PackControlConflict("activated Profile envelope is unavailable") from error
-    pointers.commit_activation(
-        activation,
-        activation_snapshot=envelope,
-        activation_snapshot_path=envelope_path.relative_to(user_data).as_posix(),
-        expected=predecessor,
-        catalog_revision=str(resolved.plan["catalog_revision"]),
-    )
+    if not pointer_is_candidate:
+        try:
+            pointers.commit_activation(
+                activation,
+                activation_snapshot=envelope,
+                activation_snapshot_path=envelope_path.relative_to(user_data).as_posix(),
+                expected=predecessor,
+                catalog_revision=str(resolved.plan["catalog_revision"]),
+            )
+        except ActiveProfileStoreConflict:
+            # A concurrent retry may have published this exact candidate
+            # between the predecessor read and the CAS.  The workspace
+            # activation above already verified the same immutable records, so
+            # an exact pointer match is a successful idempotent replay.
+            current = pointers.require(verify_snapshot=True)
+            if not (
+                current.profile_id == profile_id
+                and hmac.compare_digest(
+                    current.profile_revision, candidate_profile_revision
+                )
+                and hmac.compare_digest(current.plan_digest, candidate_plan_digest)
+                and hmac.compare_digest(current.lock_digest, candidate_lock_digest)
+                and hmac.compare_digest(current.activation_id, activation_id)
+            ):
+                raise
     from .bootstrap.profile_capture import cache_active_profile
 
     cache_active_profile(
