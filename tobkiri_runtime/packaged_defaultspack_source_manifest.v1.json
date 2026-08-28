@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26526,
-      "sha256": "63f56fe0c2a85aa4471c8e60e5cb04324e243f201bdf36c6b72846d27a28e4b8",
+      "sha256": "0db6da49317a6f8affd90b20bd0310d2b36dc76af6625ac7b8974f5cdd654310",
       "executable": false
     },
     {
@@ -153,7 +153,7 @@
       "path": "ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json",
       "type": "regular-file",
       "size": 3987,
-      "sha256": "6f57ee958afd1a8c393c3ec83c725520c2cd0eb8b5c55976f0abd4f6c8f4f2ff",
+      "sha256": "0964303d3ae86891b7aa0855d9dc5101206b1d61132076f08ae462640e676016",
       "executable": false
     },
     {
@@ -482,7 +482,7 @@
       "path": "ecosystem/defaultspack/v4/packs/rumi_host_authority_bridge_pack.executables.v4.json",
       "type": "regular-file",
       "size": 1634,
-      "sha256": "798c140f41b581b952069b322d0bd23629ab4b8e80d604d2e7507613fac0a43f",
+      "sha256": "78a35617044e609e18d26a948b559c5e7b50496f6a9886fde3587e42f115a4f4",
       "executable": false
     },
     {
@@ -685,14 +685,14 @@
       "path": "ecosystem/defaultspack/v4/packs/rumi_shell_execute_pack.executables.v4.json",
       "type": "regular-file",
       "size": 1595,
-      "sha256": "0f6bc89775c124ecd4334772183d0a335cb0afd90f1ff84b98e170c358b26f28",
+      "sha256": "d10f42fdcd5eaad15afb4476a30d4c948cbe5d3a1716b6c116e0af73dd0e5918",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_shell_execute_pack.pack.v4.json",
       "type": "regular-file",
       "size": 4634,
-      "sha256": "cf85635afed4375756e663395f0781f57aca712a9f1366d35f7f89700d6fe67d",
+      "sha256": "d89b484115a0bf3754e366f2b44cd87f793d6a9f059c800a57d96b5d46f57cae",
       "executable": false
     },
     {
@@ -1147,7 +1147,7 @@
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
       "size": 101893,
-      "sha256": "7f8efb9ebd8c5128233e30565606f9b9f98b53ba02ee12d7942977325e01a957",
+      "sha256": "38bfa1ea5250e7d4b454ba2ee6c018dc9c807fd39aeb514fa6248ea88871fab7",
       "executable": false
     },
     {

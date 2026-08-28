@@ -6967,7 +6967,7 @@
             {
               "entrypoint_id": "host-authority",
               "id": "rumi_host_authority_bridge_pack.host-authority",
-              "implementation_digest": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955"
+              "implementation_digest": "sha256:10273e7568c28a87082470e819d5fa224a4e8d4b9509abc86602f6da18e655aa"
             }
           ],
           "owner": "rumi_host_authority_bridge_pack",
@@ -6990,7 +6990,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955",
+          "digest": "sha256:10273e7568c28a87082470e819d5fa224a4e8d4b9509abc86602f6da18e655aa",
           "kind": "executable",
           "path": "runtime/bridge.py"
         }
@@ -12144,7 +12144,7 @@
             {
               "entrypoint_id": "shell-execute",
               "id": "rumi_shell_execute_pack.shell-execute",
-              "implementation_digest": "sha256:b65219636656e0e3f5c820ed34aeeb97462bf83b1fb5e3017c3accda7a74887d"
+              "implementation_digest": "sha256:2563a8f79d25909e701dd3662c623319a28eda0308ea4e5d1ccbfd45bb4be7ad"
             }
           ],
           "owner": "rumi_shell_execute_pack",
@@ -12186,7 +12186,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:b65219636656e0e3f5c820ed34aeeb97462bf83b1fb5e3017c3accda7a74887d",
+          "digest": "sha256:2563a8f79d25909e701dd3662c623319a28eda0308ea4e5d1ccbfd45bb4be7ad",
           "kind": "executable",
           "path": "runtime/execute.py"
         }
