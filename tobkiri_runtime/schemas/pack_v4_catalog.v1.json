@@ -1126,7 +1126,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:63b8edf52eb44cc495f33d4dfec5024623ece81f8521f0d51ede348eb24c9e00",
+          "digest": "sha256:ccc4ddc2da9ee2cd274656df2bd922613856770897eb0973ae4defdf68bfb163",
           "path": "ecosystem/rumi_ai_gateway_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10464,7 +10464,7 @@
             {
               "entrypoint_id": "provider-embedding",
               "id": "rumi_provider_adapters_pack.provider-embedding",
-              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
+              "implementation_digest": "sha256:421c3b398b4e8b4b3552a14a37ae22790ed85517c2bb5d3129d2fdbd5ea2b069"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10500,7 +10500,7 @@
             {
               "entrypoint_id": "provider-generate",
               "id": "rumi_provider_adapters_pack.provider-generate",
-              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
+              "implementation_digest": "sha256:421c3b398b4e8b4b3552a14a37ae22790ed85517c2bb5d3129d2fdbd5ea2b069"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10536,7 +10536,7 @@
             {
               "entrypoint_id": "provider-image",
               "id": "rumi_provider_adapters_pack.provider-image",
-              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
+              "implementation_digest": "sha256:421c3b398b4e8b4b3552a14a37ae22790ed85517c2bb5d3129d2fdbd5ea2b069"
             }
           ],
           "owner": "rumi_provider_adapters_pack",
@@ -10572,7 +10572,7 @@
             {
               "entrypoint_id": "provider-stream",
               "id": "rumi_provider_adapters_pack.provider-stream",
-              "implementation_digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e"
+              "implementation_digest": "sha256:421c3b398b4e8b4b3552a14a37ae22790ed85517c2bb5d3129d2fdbd5ea2b069"
             }
           ],
           "owner": "rumi_human_operator_provider_pack",
@@ -10610,7 +10610,7 @@
           "path": "runtime/__init__.py"
         },
         {
-          "digest": "sha256:7b1b003017a5646e3285f7dcb17cc7d997eb1ed1e631f7a0a12b3b5c587ae90e",
+          "digest": "sha256:421c3b398b4e8b4b3552a14a37ae22790ed85517c2bb5d3129d2fdbd5ea2b069",
           "kind": "executable",
           "path": "runtime/adapter.py"
         }

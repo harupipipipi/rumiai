@@ -18,12 +18,8 @@ from core_runtime.host_provider_backend_v4 import (
 )
 
 REGISTRY_CONTRACT = "tobkiri.resource.ai.provider.registry.v1"
-REGISTRY_GENERATE_OPERATION = (
-    "rumi_provider_registry_pack.provider-registry-resource.generate"
-)
-REGISTRY_STREAM_OPERATION = (
-    "rumi_provider_registry_pack.provider-registry-resource.stream"
-)
+REGISTRY_GENERATE_OPERATION = "rumi_provider_registry_pack.provider-registry-resource"
+REGISTRY_STREAM_OPERATION = REGISTRY_GENERATE_OPERATION
 REGISTRY_OPERATION = REGISTRY_GENERATE_OPERATION
 DEFAULT_JSON_HEADERS = {
     "Content-Type": "application/json",
