@@ -224,13 +224,26 @@ class AuthorityKernel:
             or host_extension_trust.revoked
         ):
             raise AuthorityValidationError("Host Extension trust snapshot mismatch")
+        persisted_trust = None
+        if host_extension_trust is not None:
+            persisted_trust = self.store.get_host_extension_trust(
+                host_extension_trust.trust_id
+            )
+            if persisted_trust is not None and persisted_trust != host_extension_trust:
+                raise AuthorityValidationError("Host Extension trust record is immutable")
         provider_ids = {item.provider.principal_id for item in provider_authorities}
+        new_provider_authorities: list[ProviderAuthorityRecord] = []
         for provider in provider_authorities:
             if provider.provider != approval.target:
                 raise AuthorityValidationError("Provider authority does not match Approval target")
             self._validate_provider_domain(provider, trust_override=host_extension_trust)
             if provider.security_epoch != approval.security_epoch:
                 raise AuthorityValidationError("Provider authority epoch mismatch")
+            persisted_provider = self.store.get_provider_authority(provider.record_id)
+            if persisted_provider is not None and persisted_provider != provider:
+                raise AuthorityValidationError("Provider authority record is immutable")
+            if persisted_provider is None:
+                new_provider_authorities.append(provider)
         for grant in grants:
             if (
                 grant.approval_id != approval.approval_id
@@ -256,9 +269,13 @@ class AuthorityKernel:
             ):
                 raise AuthorityValidationError("Grant activation does not match Provider domain")
         records = (
-            ((host_extension_trust,) if host_extension_trust is not None else ())
+            (
+                (host_extension_trust,)
+                if host_extension_trust is not None and persisted_trust is None
+                else ()
+            )
             + (approval,)
-            + provider_authorities
+            + tuple(new_provider_authorities)
             + grants
         )
         self.store.put_records_atomically(records)

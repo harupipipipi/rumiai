@@ -579,7 +579,7 @@ def _commit_pack_control_authority(
     identity_suffix = str(activation["activation_id"]).replace(":", ".")
     operation_suffix = target.operation_id.replace(".", "-")
     caller_suffix = caller.principal_id.removeprefix("sha256:")[:24]
-    operation_suffix = f"{operation_suffix}.{caller_suffix}"
+    caller_operation_suffix = f"{operation_suffix}.{caller_suffix}"
     authority_label = authority_label.replace("/", "-").replace(".", "-")
     approval_identity = (
         pack_approval_revision.removeprefix("sha256:")[:24]
@@ -597,7 +597,10 @@ def _commit_pack_control_authority(
     # of its durable identity.  This preserves prior rows without replaying or
     # colliding with them when an unchanged Pack is activated again.
     approval = ApprovalRecord(
-        approval_id=(f"approval.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
+        approval_id=(
+            f"approval.defaults.{authority_label}."
+            f"{caller_operation_suffix}.{record_identity}"
+        ),
         snapshot_digest=canonical_digest(
             {
                 "ceremony": "defaults.activate",
@@ -634,6 +637,9 @@ def _commit_pack_control_authority(
         else None
     )
     provider = ProviderAuthorityRecord(
+        # Provider authority is scoped to the exact target/domain. Multiple
+        # callers may share that verified Provider; their Grants remain
+        # caller-specific below.
         record_id=(f"provider.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
         provider=target,
         execution_domain_id=target_domain.domain_id,
@@ -662,7 +668,10 @@ def _commit_pack_control_authority(
         host_broker_binding="tobkiri.request-broker.v4",
     )
     grant = GrantRecord(
-        grant_id=(f"grant.defaults.{authority_label}.{operation_suffix}.{record_identity}"),
+        grant_id=(
+            f"grant.defaults.{authority_label}."
+            f"{caller_operation_suffix}.{record_identity}"
+        ),
         caller=caller,
         target=target,
         profile_id=str(profile["profile_id"]),
@@ -691,6 +700,22 @@ def _commit_pack_control_authority(
         control.commit_approval_bundle(
             approval,
             host_extension_trust=host_extension_trust,
+            provider_authorities=(provider,),
+            grants=(grant,),
+        )
+    elif (
+        existing[1] is None
+        and existing[2] == provider
+        and existing[3] is None
+        and (host_extension_trust is None or existing[0] == host_extension_trust)
+    ):
+        # Reuse one immutable ProviderAuthority for a shared target while
+        # adding the caller-specific Approval and Grant atomically.
+        control.commit_approval_bundle(
+            approval,
+            host_extension_trust=(
+                None if existing[0] is not None else host_extension_trust
+            ),
             provider_authorities=(provider,),
             grants=(grant,),
         )
