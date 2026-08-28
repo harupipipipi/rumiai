@@ -764,11 +764,17 @@ def capture_pack_control_session(
     )
 
 
-def capture_pack_control_catalog() -> Mapping[str, Any]:
+def capture_pack_control_catalog(
+    *, active: ActiveDefaultProfile | None = None
+) -> Mapping[str, Any]:
     """Capture the authoritative lifecycle projection for the active Profile."""
 
-    binding = _capture_binding()
-    return _catalog_payload(binding)
+    binding = (
+        _capture_binding()
+        if active is None
+        else _binding_for_resolved(active.resolved)
+    )
+    return _catalog_payload(binding, active_snapshot=active)
 
 
 class CapturedPackCatalogReader:
@@ -832,7 +838,10 @@ def _catalog_payload(
     state, active_profile = _active_profile(active_snapshot)
     active = set(active_profile.get("packs") or [])
     active_grant_bindings = _active_grant_bindings(state)
-    required_pack_ids = _required_profile_pack_ids(binding.profile_id)
+    required_pack_ids = _required_profile_pack_ids(
+        binding.profile_id,
+        active_snapshot=active_snapshot,
+    )
     plan_bindings = {
         (str(item.get("contract_id") or ""), str(item.get("operation_id") or ""))
         for item in state["resolved_plan"].get("bindings") or []
@@ -907,8 +916,28 @@ def _catalog_payload(
     return {"packs": packs, "count": len(packs), **_binding_payload(binding)}
 
 
-def _required_profile_pack_ids(profile_id: str) -> frozenset[str]:
+def _required_profile_pack_ids(
+    profile_id: str,
+    *,
+    active_snapshot: ActiveDefaultProfile | None = None,
+) -> frozenset[str]:
     """Return the immutable Pack closure declared by one registry Profile."""
+
+    if active_snapshot is not None:
+        active_profile_id = str(active_snapshot.resolved.profile["profile_id"])
+        if active_profile_id != profile_id:
+            raise PackControlDigestMismatch(
+                "active Profile does not match the lifecycle binding"
+            )
+        effective_set = active_snapshot.resolved.lock.get("effective_set")
+        if not isinstance(effective_set, list) or any(
+            not isinstance(item, Mapping) or not item.get("identity")
+            for item in effective_set
+        ):
+            raise PackControlDigestMismatch(
+                "active Profile effective Pack closure is invalid"
+            )
+        return frozenset(str(item["identity"]) for item in effective_set)
 
     from .bootstrap.profile_capture import host_profile_catalog
 
