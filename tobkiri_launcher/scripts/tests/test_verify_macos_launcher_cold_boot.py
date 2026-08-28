@@ -297,6 +297,35 @@ def test_cold_boot_rejects_healthy_kernel_not_owned_by_launched_app(
     ]
 
 
+def test_failure_diagnostic_includes_only_sanitized_bounded_kernel_log(
+    tmp_path: Path,
+) -> None:
+    config, diagnostics = _bundle_and_config(tmp_path)
+    log_path = config.app_data_dir / VERIFY.KERNEL_LOG_RELATIVE
+    log_path.parent.mkdir(parents=True)
+    log_path.write_text(
+        "discarded\n" * 5_000
+        + "token=not-printed-test-token\n"
+        + "kernel startup failed\n",
+        encoding="utf-8",
+    )
+
+    VERIFY._write_failure_diagnostic(
+        config,
+        18770,
+        _Process.pid,
+        VERIFY.ColdBootError("timed out"),
+        "launcher output",
+    )
+
+    diagnostic = json.loads(
+        (diagnostics / VERIFY.DIAGNOSTIC_FILENAME).read_text(encoding="utf-8")
+    )
+    assert diagnostic["kernel_log_tail"].endswith("kernel startup failed\n")
+    assert "not-printed-test-token" not in json.dumps(diagnostic)
+    assert len(diagnostic["kernel_log_tail"]) <= 8_000
+
+
 def test_cold_boot_fails_closed_when_ci_app_data_is_not_fresh(tmp_path: Path) -> None:
     config, _diagnostics = _bundle_and_config(tmp_path)
     config.app_data_dir.mkdir()

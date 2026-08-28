@@ -38,6 +38,7 @@ CI_EXECUTABLE_NAME = "tobkiri-launcher"
 EXECUTABLE_DIRECTORY_RELATIVE = Path("Contents/MacOS")
 INFO_PLIST_RELATIVE = Path("Contents/Info.plist")
 BROKER_CONNECTION_RELATIVE = Path("user_data/host_broker/connection.json")
+KERNEL_LOG_RELATIVE = Path("logs/kernel.log")
 BROKER_HEALTH_PATH = "/api/host/health"
 KERNEL_HEALTH_PATH = "/health"
 PANEL_BOOTSTRAP_PATH = "/panel/"
@@ -537,6 +538,22 @@ def _sanitize_diagnostic_text(value: str) -> str:
     return value[-8_000:]
 
 
+def _kernel_log_tail(app_data_dir: Path) -> str:
+    """Return a bounded, sanitized Kernel log tail from the exact app-data root."""
+
+    path = app_data_dir / KERNEL_LOG_RELATIVE
+    try:
+        _canonical_regular_file(path, "Kernel log")
+        with path.open("rb") as source:
+            source.seek(0, os.SEEK_END)
+            size = source.tell()
+            source.seek(max(0, size - _OutputCollector._MAX_CAPTURE_BYTES))
+            payload = source.read(_OutputCollector._MAX_CAPTURE_BYTES)
+    except (ColdBootError, OSError):
+        return ""
+    return _sanitize_diagnostic_text(payload.decode("utf-8", errors="replace"))
+
+
 def _write_failure_diagnostic(
     config: ColdBootConfig,
     broker_port: Optional[int],
@@ -551,6 +568,7 @@ def _write_failure_diagnostic(
         "kernel_port": config.kernel_port,
         "launcher_pid": launcher_pid,
         "error": _sanitize_diagnostic_text(str(error)),
+        "kernel_log_tail": _kernel_log_tail(config.app_data_dir),
         "process_output_tail": _sanitize_diagnostic_text(output),
     }
     destination = config.diagnostics_dir / DIAGNOSTIC_FILENAME
