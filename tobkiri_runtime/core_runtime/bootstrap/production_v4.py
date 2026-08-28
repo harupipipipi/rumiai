@@ -1219,9 +1219,9 @@ def capture_production_dispatch(
         )
         callers_by_operation.setdefault(key, {})[caller.principal_id] = caller
         scopes_by_operation.setdefault(key, {})[caller.principal_id] = scope
-    for key, callers in callers_by_operation.items():
-        if len(callers) == 1:
-            caller_by_operation[key] = next(iter(callers.values()))
+    for key, operation_callers in callers_by_operation.items():
+        if len(operation_callers) == 1:
+            caller_by_operation[key] = next(iter(operation_callers.values()))
     for key, scopes in scopes_by_operation.items():
         scope_values = tuple(scopes.values())
         if not scope_values or any(scope != scope_values[0] for scope in scope_values[1:]):
@@ -1493,20 +1493,20 @@ def capture_production_dispatch(
             session_id=f"session.provider.built-in.{target_suffix}.{activation_suffix}",
             principal=target,
         )
-        callers = tuple(
+        host_callers = tuple(
             sorted(
                 callers_by_operation.get(key, {}).values(),
                 key=lambda principal: principal.principal_id,
             )
         )
-        if not callers:
+        if not host_callers:
             raise AuthorityDenied("built-in Host Provider caller edge is unavailable")
-        for caller in callers:
+        for host_caller in host_callers:
             _commit_pack_control_authority(
                 authority_store,
                 authority_control,
                 active=active,
-                caller=caller,
+                caller=host_caller,
                 target=target,
                 target_domain=target_domain,
                 scope=scope_by_operation[key],

@@ -5,7 +5,12 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {Button} from './Button';
 
 test('loading buttons expose busy state and a standard inline spinner', () => {
-  const markup = renderToStaticMarkup(<Button loading>Saving</Button>);
+  const onClick = () => undefined;
+  const markup = renderToStaticMarkup(
+    <Button loading onClick={onClick}>
+      Saving
+    </Button>,
+  );
 
   assert.match(markup, /aria-busy="true"/);
   assert.match(markup, /disabled=""/);
@@ -15,7 +20,8 @@ test('loading buttons expose busy state and a standard inline spinner', () => {
 });
 
 test('idle buttons do not render a loading indicator', () => {
-  const markup = renderToStaticMarkup(<Button>Save</Button>);
+  const onClick = () => undefined;
+  const markup = renderToStaticMarkup(<Button onClick={onClick}>Save</Button>);
 
   assert.doesNotMatch(markup, /aria-busy="true"/);
   assert.doesNotMatch(markup, /data-loading-indicator="spinner"/);

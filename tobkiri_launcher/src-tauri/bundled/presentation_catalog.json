@@ -50,7 +50,7 @@
     },
     {
       "contract_id": "conversation.turn.v1",
-      "digest": "sha256:4ab185713b507f4cece1a3fadadcd9b8ed0918f66570d9d6d7b3b22f0ebca59a",
+      "digest": "sha256:0ef73c1cefe9b0dc26c2c6fbad7ac8c07a6e444031894f649fb51791793b4735",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/defaultspack.pack.v4.json"
     },
@@ -86,37 +86,37 @@
     },
     {
       "contract_id": "tobkiri.host.control-presentation.v4",
-      "digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+      "digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
       "revision": "4.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/tobkiri-host-pack-control.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.host.pack-control.v4",
-      "digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+      "digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
       "revision": "4.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/tobkiri-host-pack-control.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.resource.ai.model.catalog.v1",
-      "digest": "sha256:edab2fe547a7bb14d2c96ea62a5354a59065a37aeaa112dfc19e63c0b84af35c",
+      "digest": "sha256:f47ca2d3cfd137907f7741569a1e689b5c75d7e2bf7506cb492fc7ac5ec2fcd5",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_model_catalog_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.resource.ai.model.profile.v1",
-      "digest": "sha256:75ff08968e2f78d676df1e8d7279fa8cdebf943a76b7349c563714b077f838d0",
+      "digest": "sha256:41f821d3fa1cce92584e1b9eb60fff1fa3cfcbb7e548fd50f6af2a9b09e0d5da",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_model_registry_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.resource.ai.provider.health.v1",
-      "digest": "sha256:5636a93e43b5226774e2add17ae792f15ec4ff53fd6202d5027dfc3a1ea840a4",
+      "digest": "sha256:a81ca07b769ea4dfa715076ee0389778db91707fb3b4db1e410a9e0f9f7ecceb",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_provider_registry_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.resource.ai.provider.registry.v1",
-      "digest": "sha256:ae3b4954e4d3ccfce933d44a9fd23409ef9626e5916a280ed304780437088e34",
+      "digest": "sha256:a00d0411539cf9f1f7514a54331c1a746f47a0d8ca1c4c88a5123f8f74f0d682",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_provider_registry_pack.pack.v4.json"
     },
@@ -134,13 +134,13 @@
     },
     {
       "contract_id": "tobkiri.service.ai.failover.decide.v1",
-      "digest": "sha256:39508895d8bb9105029c246dcefaf063aba8c62f6e498f626d55f03b1d1d063d",
+      "digest": "sha256:49367974156c5735b8e38708a71d87c406f800d9f24d1c291cf4050e1629abe5",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_pipeline_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.service.ai.generate.v1",
-      "digest": "sha256:39eddd13b6cfae773c5f2e31705f8f073b42e54d0160f49918f87b8eeb63d768",
+      "digest": "sha256:f8da906e6e8102db7859ab0c1d77f7c9f0caab87adca8ac180238c80975f2f86",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_gateway_pack.pack.v4.json"
     },
@@ -170,13 +170,13 @@
     },
     {
       "contract_id": "tobkiri.service.ai.request.prepare.v1",
-      "digest": "sha256:96fc8b32cf8543c448b07b66c3b47e03e3db113de522debd0f619d0f247b78bc",
+      "digest": "sha256:1ca3405981b27fae8ee2fb10510695855a6317c41c93d22e3fd2aafd6c9c96c7",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_pipeline_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.service.ai.route.v1",
-      "digest": "sha256:4d1d08cfdfacb74c67488e417daf2a56cfa51a981e216d3f1a49c734dd6ced4c",
+      "digest": "sha256:dd2ace27064ee3b156703c9544a50731f664c11c77b563c23be1c784ddc28bfe",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_routing_pack.pack.v4.json"
     },
@@ -188,7 +188,7 @@
     },
     {
       "contract_id": "tobkiri.service.ai.stream.v1",
-      "digest": "sha256:487608b15370de52d2d22aef5b42ee1947a37476b3588c3ee8ce60bf35ee5597",
+      "digest": "sha256:41264d473da5882853f59fedcf3a03210cac7ab36c9c733ac543522faaad9a52",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_gateway_pack.pack.v4.json"
     },
@@ -200,19 +200,19 @@
     },
     {
       "contract_id": "tobkiri.service.ai.tool_intent.normalize.v1",
-      "digest": "sha256:d61573162f6e5bca7acadfb039dc367001fc1422ad1fc27a184586c77b0b6c75",
+      "digest": "sha256:4adb25329c33d3d3f2b560d1196d39c5225745a5ac227d021afea58039d6b27c",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_tool_bridge_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.service.ai.usage.cost.v1",
-      "digest": "sha256:04a8f126370dafe88c38fe8b465b97e666097e515823d55921d98f0c588d68fc",
+      "digest": "sha256:3bdab3d4923051aaf458ed3a023c31afc5730e4da977140ad0263a77369117c5",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_usage_pack.pack.v4.json"
     },
     {
       "contract_id": "tobkiri.service.file.inspect.v1",
-      "digest": "sha256:120000de7f447efd8b7973c23cf293a22ec144fe49d8a1eb08c9aea73d30345b",
+      "digest": "sha256:020a5171ab05ff6459c6d5d506281b620ff54418e9482d5e049e9a7bf23280cb",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json"
     },
@@ -223,7 +223,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:daa56478ec45f5c03f5fad5c7684577b10832b6ab022db212051a61502f779cc",
+  "default_profile_digest": "sha256:8fc364ba77d13cee06eb529be04a5f80791cc6aedc3e4b331f60177db5727ad2",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -255,7 +255,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.app",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:049fbb419f5b8ae391daf0b91c88ce8a164bd850947140cb505be6c1fdda29d5",
+          "descriptor_digest": "sha256:bdb66c08a29d849540d5fb9050fe9f44b2e4ca4cb1951f8b565f17d97d891695",
           "development_command": null,
           "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
           "path": null,
@@ -274,7 +274,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.app",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:049fbb419f5b8ae391daf0b91c88ce8a164bd850947140cb505be6c1fdda29d5",
+          "descriptor_digest": "sha256:bdb66c08a29d849540d5fb9050fe9f44b2e4ca4cb1951f8b565f17d97d891695",
           "development_command": null,
           "entrypoint": "Tobkiri.app/Contents/MacOS/tobkiri-shell",
           "path": null,
@@ -293,7 +293,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "tobkiri-shell.exe",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:049fbb419f5b8ae391daf0b91c88ce8a164bd850947140cb505be6c1fdda29d5",
+          "descriptor_digest": "sha256:bdb66c08a29d849540d5fb9050fe9f44b2e4ca4cb1951f8b565f17d97d891695",
           "development_command": null,
           "entrypoint": "tobkiri-shell.exe",
           "path": null,
@@ -312,7 +312,7 @@
           "artifact_kind": "signed_prebuilt_binary",
           "artifact_ref": "Tobkiri.AppImage",
           "bundle_identifier": "io.tobkiri.shell.tauri",
-          "descriptor_digest": "sha256:049fbb419f5b8ae391daf0b91c88ce8a164bd850947140cb505be6c1fdda29d5",
+          "descriptor_digest": "sha256:bdb66c08a29d849540d5fb9050fe9f44b2e4ca4cb1951f8b565f17d97d891695",
           "development_command": null,
           "entrypoint": "Tobkiri.AppImage",
           "path": null,
@@ -349,23 +349,23 @@
     }
   ],
   "source_manifest_digests": {
-    "defaults-basepack": "sha256:e2e10d829f25b8dc7e421091f42d62b8ab02a12fd92abe6d9dbf874e17290f83",
-    "defaultspack": "sha256:25d94d10afbe1c03bb4fcc39374615473ab281718df35ff326c21ca7b15ced4e",
-    "rumi_ai_gateway_pack": "sha256:222fbcaa23a0eb73da43c23a8071f654d19d0b7b62afd72215929d47dafbb0dc",
-    "rumi_ai_pipeline_pack": "sha256:c5379209b066ecc38bb69913449cc7e7467c6b1f4e88b286bee9c8fe78e139e5",
-    "rumi_ai_routing_pack": "sha256:3dbbe4b88366c06a04b9b7250defd00dae11848c5f174afadd7fe902e5b00c4c",
-    "rumi_ai_stream_pack": "sha256:1ef0bdb9b50d1b8f86b4c54c0917e28e15b80112ccf62cdbcc8050c8db98b0a9",
-    "rumi_ai_tool_bridge_pack": "sha256:025005f08eb0afcedd74f52429b6641d5c5e788a778ba2b04de8d2f8a7fa4257",
-    "rumi_ai_usage_pack": "sha256:44a2d2326460f36b24c4541f045d49f8291ad099bc43e33a7c66e6fff95b06b4",
-    "rumi_file_inspect_pack": "sha256:54e4fa06b9331698b6c1b14d80fcfff7d23144382a8f45a9eb241441b1c1231d",
+    "defaults-basepack": "sha256:bc56a486dc6dfad6635c07b34f4f1e5d21bda8f4dba854d190a9fea7184c996e",
+    "defaultspack": "sha256:a69b79f6c2e819f004dac695b838467c72fcbca504483a3384b48d272bac9748",
+    "rumi_ai_gateway_pack": "sha256:87e2353115d6492ff7bed35bb44e5519dd01fa2c7b5b0dd6c7141b3fca89515e",
+    "rumi_ai_pipeline_pack": "sha256:e0314507d23687d396dd1580f1e2726237e62423d2b096abf779080ea11c58b3",
+    "rumi_ai_routing_pack": "sha256:c84282f596644d38c80118fce189cff217c9ed91f29b46e8e15ac2c31ec739db",
+    "rumi_ai_stream_pack": "sha256:88373722101ad95be29439205de147b7cd332a75bd12d6dd0365667b1b34411c",
+    "rumi_ai_tool_bridge_pack": "sha256:b5fd3c530d9f4a4672ee7a678a1f2a8a795d44f2ebe92e997101b18efbddf096",
+    "rumi_ai_usage_pack": "sha256:d52c45c822d3e98cc8fbc15b47276106af0f5b60a5ae3ae3e6185c9c3bcdfa8f",
+    "rumi_file_inspect_pack": "sha256:9842c21f6708084efa9609e9d729299cf103f59e0e98d87d85263999e2e2a1e1",
     "rumi_host_authority_bridge_pack": "sha256:6f57ee958afd1a8c393c3ec83c725520c2cd0eb8b5c55976f0abd4f6c8f4f2ff",
-    "rumi_model_catalog_pack": "sha256:b06e0cb38447a28ee65af0359255856304abb83f6231679e06634eb9fd2c6c4d",
-    "rumi_model_registry_pack": "sha256:2ef961613365aaa0fdd9369f8af58061375c9408493e99f3513030ea3ce496fd",
-    "rumi_provider_adapters_pack": "sha256:18f4ce1eb4b7131c231d561ed626258cedc38ac12ed01f6e4cc056fadbe1007f",
-    "rumi_provider_registry_pack": "sha256:63cc0464ec68b612fa723d690a587cd5e7c7032da787cfbcf2ba192c12caf8ff",
-    "rumi_workspace_mount_pack": "sha256:c8aa387c53b1b8203dc6b50f9476b73d37da8c6a70d83de5f5f8dcb02830024c",
-    "runtime.tauri.application.default": "sha256:0360b3f058c634dd3cc98af35dfc1fa1f642bbd5a4468791b066ef0263eec4fd",
-    "shell.tauri.default": "sha256:f3484508a06ea3e122bd70304f0c9fd0846fd2bfaf265c4cc28162648b4ce64f",
-    "tobkiri_host_pack_control": "sha256:bb598b3ab2837e494aaa2fa7b2922efb9ac03720cdc0ea327dc532ae310cb085"
+    "rumi_model_catalog_pack": "sha256:6f4364c12026ce75e0d1c7f4553826feb7c48537f9356fbcef8fc9755624da91",
+    "rumi_model_registry_pack": "sha256:f68edb1b83477892083c0405ecc12e1a7c0838313e8d5e91d8434c33e41224bd",
+    "rumi_provider_adapters_pack": "sha256:d46d5591c68c76d9780afe7abcc02303625b12d1b785221995befbb56e049317",
+    "rumi_provider_registry_pack": "sha256:95d7862c16a81cd891cd692fbc728d2a2e7c6e7555deb8945234e26e3249b7ef",
+    "rumi_workspace_mount_pack": "sha256:b0dd8d65305f5f8422aae15fe7b628fec412fd5a83023afeb86e9edf25fc663d",
+    "runtime.tauri.application.default": "sha256:2d2e257f8a4a3ec317859d7a0d65bd4e30a315d88cae52d74bd65d6b33555e40",
+    "shell.tauri.default": "sha256:b9bafc36b11572a097f6d1d7fbe77dfd9b2b16a096ab15ad171b249d03193abb",
+    "tobkiri_host_pack_control": "sha256:b9efec09dba9a5ed3e5d3375447a41d56eb1edecd68fbee310ff973550d8a3c0"
   }
 }
