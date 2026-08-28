@@ -6,7 +6,7 @@ import test from 'node:test';
 import {MemoryRouter} from 'react-router';
 import {renderToStaticMarkup} from 'react-dom/server';
 
-import {SetupVerificationGate} from './App';
+import {SetupVerificationBanner, SetupVerificationGate} from './App';
 
 function gateProps(overrides: Partial<ComponentProps<typeof SetupVerificationGate>> = {}) {
   return {
@@ -63,6 +63,34 @@ test('verification gate exposes an accessible blocked state after runtime failur
   assert.match(html, /role="alert"/);
   assert.match(html, /Setup verification is unavailable/);
   assert.doesNotMatch(html, /unsafe runtime page/);
+});
+
+test('verification banner keeps the recovery link visible without exposing runtime children', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationBanner {...gateProps({isSetupDone: false, runtimeStatus: 'starting'})} />
+    </MemoryRouter>,
+  );
+
+  assert.match(html, /data-testid="setup-verification-banner"/);
+  assert.match(html, /Complete setup to continue/);
+  assert.match(html, /Open Setup/);
+  assert.match(html, /href="\/setup"/);
+});
+
+test('embedded verification gate blocks runtime route content inside the Home layout', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationGate {...gateProps({runtimeStatus: 'error'})} embedded>
+        <p>unsafe runtime route</p>
+      </SetupVerificationGate>
+    </MemoryRouter>,
+  );
+
+  assert.match(html, /data-testid="runtime-route-verification-gate"/);
+  assert.match(html, /Open Setup/);
+  assert.doesNotMatch(html, /unsafe runtime route/);
+  assert.doesNotMatch(html, /<main/);
 });
 
 test('verified health renders the selected route and retry action is interactive', async () => {

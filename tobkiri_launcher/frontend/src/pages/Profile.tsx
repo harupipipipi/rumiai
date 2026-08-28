@@ -13,6 +13,7 @@ import {Input} from '@/src/components/ui/Input';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import type {RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
+import {resolveSetupVerificationState} from '@/src/lib/setupVerification';
 import {AVATAR_OPTIONS, useAppStore} from '@/src/store';
 
 export function Profile() {
@@ -25,6 +26,16 @@ export function Profile() {
   const loadPacks = useAppStore((state) => state.loadPacks);
   const loadFrontendCatalog = useAppStore((state) => state.loadFrontendCatalog);
   const packVmDoctorReady = useAppStore((state) => state.packVmDoctor?.ready === true);
+  const isSetupDone = useAppStore((state) => state.isSetupDone);
+  const runtimeReady = useAppStore((state) => state.runtimeReady);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
+  const runtimeVerified = resolveSetupVerificationState({
+    isSetupDone,
+    runtimeReady,
+    runtimeStatus,
+    runtimeDisconnected,
+  }) === 'verified';
   const surface = useRuntimeSurface<unknown>('profile');
   const catalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.profile;
@@ -148,6 +159,7 @@ export function Profile() {
             return next;
           }, {replace: true});
         }}
+        runtimeVerified={runtimeVerified}
         onActivated={async () => {
           await Promise.all([
             catalogSurface.refresh(true),

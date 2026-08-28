@@ -1,4 +1,5 @@
-import { Outlet, Navigate, useLocation } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
+import type {ReactNode} from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ViewerVersionLabel } from './ViewerVersionLabel';
@@ -7,21 +8,13 @@ import { describeRuntimeBanner } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteBoundary } from './RouteBoundary';
 
-export function Layout() {
+export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
   const location = useLocation();
-  const isSetupDone = useAppStore(state => state.isSetupDone);
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const runtimeError = useAppStore(state => state.runtimeError);
   const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
   const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
-
-  if (!isSetupDone) {
-    return <Navigate to={panelRoutes.setup} replace />;
-  }
-  if (runtimeStatus === 'profile_reconfirmation_required') {
-    return <Navigate to={panelRoutes.setup} replace />;
-  }
 
   const runtimeBanner = describeRuntimeBanner({
     runtimeReady,
@@ -37,7 +30,8 @@ export function Layout() {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main id="panel-main" tabIndex={-1} className="flex-1 flex flex-col relative overflow-hidden">
-          {!runtimeReady && (
+          {verificationBanner}
+          {!runtimeReady && !verificationBanner && (
             <div
               role="alert"
               className={`flex items-center gap-3 border-b px-6 py-3 text-sm ${

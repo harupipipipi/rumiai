@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {Link} from 'react-router';
 import {AlertTriangle, CheckCircle2, Database, FileKey2, MessageSquare, PackageCheck, RefreshCw, ShieldCheck} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';
@@ -16,6 +17,7 @@ import {
   resolveConversationCapabilityForProfile,
   verifiedCapabilityLabel,
 } from '@/src/lib/presentation';
+import {panelRoutes} from '@/src/lib/routes';
 import type {ProfileActivateResult, ProfileCeremonyClient} from '@/src/lib/profileCeremony';
 import {useAppStore, type Pack} from '@/src/store';
 
@@ -242,6 +244,7 @@ export function ProfileCatalogSelector({
   onActivated,
   initialSelectedProfileId,
   onSelectedProfileId,
+  runtimeVerified = true,
 }: {
   profileSurface: RuntimeSurfaceState<unknown>;
   catalogSurface: RuntimeSurfaceState<RuntimeProfileCatalogProjection>;
@@ -252,6 +255,8 @@ export function ProfileCatalogSelector({
   onActivated?: (result: ProfileActivateResult) => Promise<void>;
   initialSelectedProfileId?: string | null;
   onSelectedProfileId?: (profileId: string) => void;
+  /** Runtime/effect ceremony access, independent from catalog browsing. */
+  runtimeVerified?: boolean;
 }) {
   const frontendCatalog = useAppStore((state) => state.frontendCatalog);
   const frontendCatalogLoading = useAppStore((state) => state.frontendCatalogLoading);
@@ -430,7 +435,7 @@ export function ProfileCatalogSelector({
           </Card>
         </>
       ) : null}
-      {selectedEntry && catalogProjection ? (
+      {selectedEntry && catalogProjection && runtimeVerified ? (
           <ProfileCeremonyPanel
             surface={profileSurface}
             packs={packs}
@@ -445,6 +450,24 @@ export function ProfileCatalogSelector({
           }}
           catalogSurface={catalogSurface}
         />
+      ) : selectedEntry && catalogProjection ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Profile activation is unavailable</CardTitle>
+            <CardDescription>The catalog remains available for browsing, but runtime verification is required before resolve, approval, or activation can change the active execution Profile.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-4 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/20 dark:text-amber-200" data-testid="profile-ceremony-gate" role="alert">
+              <span className="min-w-0 flex-1">Complete Setup verification, then return here to continue the v4 ceremony.</span>
+              <Link
+                className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-main px-4 py-2 text-sm font-medium text-text-main transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                to={panelRoutes.setup}
+              >
+                Open Setup
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
         <Card>
           <CardContent>

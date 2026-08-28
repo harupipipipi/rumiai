@@ -3,6 +3,7 @@ import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import test, {afterEach, beforeEach} from 'node:test';
+import {MemoryRouter} from 'react-router';
 
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
 import type {ApiDynamicFrontendCatalog} from '@/src/lib/apiTypes';
@@ -826,6 +827,42 @@ test('Pack catalog metadata changes refresh authoritative candidates without add
     await act(async () => undefined);
     assert.equal(catalogRefreshes, 1);
     assert.equal(container.querySelectorAll('button[aria-label^="Select Profile"]').length, 2);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('Profile catalog remains browseable while runtime ceremony actions are gated', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <ProfileCatalogSelector
+            profileSurface={surfaceState()}
+            catalogSurface={catalogState(catalogEnvelope())}
+            packs={[pack('provider-pack')]}
+            packsLoading={false}
+            loadPacks={async () => undefined}
+            runtimeVerified={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+    await act(async () => undefined);
+
+    assert.match(container.textContent ?? '', /Defaults Profile/);
+    assert.match(container.textContent ?? '', /Alternate Profile/);
+    assert.match(container.textContent ?? '', /Profile activation is unavailable/);
+    assert.match(container.textContent ?? '', /Complete Setup verification/);
+    assert.ok(container.querySelector('a[href="/setup"]'));
+    assert.equal([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Resolve candidate')), false);
+    assert.ok(container.querySelector('[data-testid="profile-ceremony-gate"]'));
   } finally {
     act(() => root.unmount());
     dom.window.close();

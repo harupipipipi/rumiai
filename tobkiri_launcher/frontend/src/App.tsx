@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router';
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router';
 import {
   cancelPackMutationReconciliation,
   useAppStore,
@@ -129,6 +129,16 @@ export interface SetupVerificationGateProps {
   runtimeStatus: RuntimeStatus;
   runtimeDisconnected: boolean;
   onRetry?: () => void | Promise<void>;
+  /** Render a compact blocker inside the already-mounted panel layout. */
+  embedded?: boolean;
+}
+
+export interface SetupVerificationBannerProps {
+  isSetupDone: boolean;
+  runtimeReady: boolean;
+  runtimeStatus: RuntimeStatus;
+  runtimeDisconnected: boolean;
+  onRetry?: () => void | Promise<void>;
 }
 
 type SetupVerificationCopy = {
@@ -165,6 +175,135 @@ const setupVerificationCopy: Record<SetupVerificationState, SetupVerificationCop
   },
 };
 
+function VerificationActions({
+  onRetry,
+  retrying,
+  linkClassName,
+}: {
+  onRetry?: () => void | Promise<void>;
+  retrying: boolean;
+  linkClassName: string;
+}) {
+  const retry = () => {
+    if (!onRetry || retrying) return;
+    void onRetry();
+  };
+
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-3">
+      {onRetry ? (
+        <button
+          type="button"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+          disabled={retrying}
+          aria-busy={retrying}
+          onClick={retry}
+        >
+          {retrying ? 'Checking…' : 'Retry verification'}
+        </button>
+      ) : null}
+      <Link
+        className={linkClassName}
+        to={panelRoutes.setup}
+      >
+        Open Setup
+      </Link>
+    </div>
+  );
+}
+
+function VerificationMessage({
+  state,
+  onRetry,
+  retrying,
+  compact = false,
+  testId,
+  titleId,
+}: {
+  state: SetupVerificationState;
+  onRetry?: () => void | Promise<void>;
+  retrying: boolean;
+  compact?: boolean;
+  testId?: string;
+  titleId?: string;
+}) {
+  const copy = setupVerificationCopy[state];
+  const resolvedTitleId = titleId ?? (compact ? 'runtime-route-verification-title' : 'setup-verification-title');
+  const linkClassName = 'inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-main px-4 py-2 text-sm font-medium transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2';
+
+  return (
+    <section
+      aria-busy={state === 'checking'}
+      aria-labelledby={resolvedTitleId}
+      aria-live={copy.role === 'status' ? 'polite' : 'assertive'}
+      className={compact
+        ? 'rounded-xl border border-border bg-bg-card p-5'
+        : 'w-full max-w-xl rounded-2xl border border-border bg-bg-card p-7 shadow-lg'}
+      data-testid={testId}
+      role={copy.role}
+    >
+      <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">
+        Runtime access
+      </p>
+      {compact ? (
+        <h2 id={resolvedTitleId} className="mt-2 text-lg font-semibold tracking-tight">
+          {copy.title}
+        </h2>
+      ) : (
+        <h1 id={resolvedTitleId} className="mt-3 text-2xl font-semibold tracking-tight">
+          {copy.title}
+        </h1>
+      )}
+      <p className="mt-3 text-sm leading-6 text-text-muted">{copy.detail}</p>
+      <VerificationActions
+        linkClassName={linkClassName}
+        onRetry={onRetry}
+        retrying={retrying}
+      />
+    </section>
+  );
+}
+
+/** Keep Home visible while directing unresolved runtime state to Setup. */
+export function SetupVerificationBanner({
+  isSetupDone,
+  runtimeReady,
+  runtimeStatus,
+  runtimeDisconnected,
+  onRetry,
+}: SetupVerificationBannerProps) {
+  const state = resolveSetupVerificationState({
+    isSetupDone,
+    runtimeReady,
+    runtimeStatus,
+    runtimeDisconnected,
+  });
+  const [retrying, setRetrying] = useState(false);
+
+  if (state === 'verified') return null;
+
+  const retry = () => {
+    if (!onRetry || retrying) return;
+    setRetrying(true);
+    void Promise.resolve()
+      .then(onRetry)
+      .finally(() => setRetrying(false));
+  };
+
+  return (
+    <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" data-testid="setup-verification-banner">
+      <VerificationMessage
+        state={state}
+        onRetry={onRetry ? retry : undefined}
+        retrying={retrying}
+        compact
+        testId="setup-verification-banner-content"
+        titleId="setup-verification-banner-title"
+      />
+    </div>
+  );
+}
+
 /**
  * Keep every runtime route behind the same health and authority decision.
  * Setup remains reachable because it is the recovery surface for unresolved
@@ -177,6 +316,7 @@ export function SetupVerificationGate({
   runtimeStatus,
   runtimeDisconnected,
   onRetry,
+  embedded = false,
 }: SetupVerificationGateProps) {
   const state = resolveSetupVerificationState({
     isSetupDone,
@@ -188,7 +328,6 @@ export function SetupVerificationGate({
 
   if (state === 'verified') return <>{children}</>;
 
-  const copy = setupVerificationCopy[state];
   const retry = () => {
     if (!onRetry || retrying) return;
     setRetrying(true);
@@ -197,43 +336,27 @@ export function SetupVerificationGate({
       .finally(() => setRetrying(false));
   };
 
+  if (embedded) {
+    return (
+      <VerificationMessage
+        state={state}
+        onRetry={onRetry ? retry : undefined}
+        retrying={retrying}
+        compact
+        testId="runtime-route-verification-gate"
+        titleId="runtime-route-verification-title"
+      />
+    );
+  }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg-main px-6 py-10 text-text-main">
-      <section
-        aria-busy={state === 'checking'}
-        aria-labelledby="setup-verification-title"
-        aria-live={copy.role === 'status' ? 'polite' : 'assertive'}
-        className="w-full max-w-xl rounded-2xl border border-border bg-bg-card p-7 shadow-lg"
-        data-testid="setup-verification-gate"
-        role={copy.role}
-      >
-        <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">
-          Runtime access
-        </p>
-        <h1 id="setup-verification-title" className="mt-3 text-2xl font-semibold tracking-tight">
-          {copy.title}
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-text-muted">{copy.detail}</p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          {onRetry ? (
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
-              disabled={retrying}
-              aria-busy={retrying}
-              onClick={retry}
-            >
-              {retrying ? 'Checking…' : 'Retry verification'}
-            </button>
-          ) : null}
-          <Link
-            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-main px-4 py-2 text-sm font-medium transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
-            to={panelRoutes.setup}
-          >
-            Open Setup
-          </Link>
-        </div>
-      </section>
+      <VerificationMessage
+        state={state}
+        onRetry={retry}
+        retrying={retrying}
+        testId="setup-verification-gate"
+      />
     </main>
   );
 }
@@ -258,6 +381,28 @@ function DeferredRouteTree({
     deferredLocation.search !== location.search ||
     deferredLocation.hash !== location.hash;
 
+  const verificationBanner = (
+    <SetupVerificationBanner
+      isSetupDone={isSetupDone}
+      runtimeReady={runtimeReady}
+      runtimeStatus={runtimeStatus}
+      runtimeDisconnected={runtimeDisconnected}
+      onRetry={onRetryRuntimeHealth}
+    />
+  );
+  const gateRuntimeRoute = (element: ReactNode) => (
+    <SetupVerificationGate
+      isSetupDone={isSetupDone}
+      runtimeReady={runtimeReady}
+      runtimeStatus={runtimeStatus}
+      runtimeDisconnected={runtimeDisconnected}
+      onRetry={onRetryRuntimeHealth}
+      embedded
+    >
+      {element}
+    </SetupVerificationGate>
+  );
+
   return (
     <>
       <RouteAnnouncer pathname={deferredLocation.pathname} />
@@ -266,32 +411,20 @@ function DeferredRouteTree({
 
         <Route
           path={panelRoutes.home}
-          element={isSetupDone
-            ? (
-              <SetupVerificationGate
-                isSetupDone={isSetupDone}
-                runtimeReady={runtimeReady}
-                runtimeStatus={runtimeStatus}
-                runtimeDisconnected={runtimeDisconnected}
-                onRetry={onRetryRuntimeHealth}
-              >
-                <Layout />
-              </SetupVerificationGate>
-            )
-            : <Navigate to={panelRoutes.setup} replace />}
+          element={<Layout verificationBanner={verificationBanner} />}
         >
           <Route index element={<Dashboard />} />
-          <Route path={panelRoutes.packs.slice(1)} element={<LazyPacks />} />
-          <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={<LazyPackDetail />} />
+          <Route path={panelRoutes.packs.slice(1)} element={gateRuntimeRoute(<LazyPacks />)} />
+          <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={gateRuntimeRoute(<LazyPackDetail />)} />
           <Route path={panelRoutes.profile.slice(1)} element={<LazyProfile />} />
           <Route path={panelRoutes.settings.slice(1)} element={<LazySettings />} />
-          <Route path={panelRoutes.profileWiring.slice(1)} element={<LazyProfileWiring />} />
-          <Route path={panelRoutes.profileFiles.slice(1)} element={<LazyProfileFiles />} />
-          <Route path={panelRoutes.flow.slice(1)} element={<LazyFlow />} />
-          <Route path={panelRoutes.graph.slice(1)} element={<LazyGraph />} />
-          <Route path={panelRoutes.aiInput.slice(1)} element={<LazyAiInput />} />
-          <Route path={panelRoutes.apiMap.slice(1)} element={<LazyApiMap />} />
-          <Route path={panelRoutes.nodeManager.slice(1)} element={<LazyNodeManager />} />
+          <Route path={panelRoutes.profileWiring.slice(1)} element={gateRuntimeRoute(<LazyProfileWiring />)} />
+          <Route path={panelRoutes.profileFiles.slice(1)} element={gateRuntimeRoute(<LazyProfileFiles />)} />
+          <Route path={panelRoutes.flow.slice(1)} element={gateRuntimeRoute(<LazyFlow />)} />
+          <Route path={panelRoutes.graph.slice(1)} element={gateRuntimeRoute(<LazyGraph />)} />
+          <Route path={panelRoutes.aiInput.slice(1)} element={gateRuntimeRoute(<LazyAiInput />)} />
+          <Route path={panelRoutes.apiMap.slice(1)} element={gateRuntimeRoute(<LazyApiMap />)} />
+          <Route path={panelRoutes.nodeManager.slice(1)} element={gateRuntimeRoute(<LazyNodeManager />)} />
         </Route>
       </Routes>
       {routePending && (

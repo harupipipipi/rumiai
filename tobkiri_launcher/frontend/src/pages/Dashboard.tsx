@@ -32,6 +32,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { transformDashboard } from '@/src/lib/transforms';
 import type { DashboardData } from '@/src/store';
 import { panelRoutes } from '@/src/lib/routes';
+import { resolveSetupVerificationState } from '@/src/lib/setupVerification';
 import { ShellLaunchCard } from '@/src/components/presentation/ShellLaunchCard';
 
 const defaultDashboard: DashboardData = {
@@ -97,9 +98,17 @@ function profileHref(profileId: string, hash?: string): string {
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
+  const isSetupDone = useAppStore((state) => state.isSetupDone);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
+  const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
+  const runtimeVerified = resolveSetupVerificationState({
+    isSetupDone,
+    runtimeReady,
+    runtimeStatus,
+    runtimeDisconnected,
+  }) === 'verified';
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -514,10 +523,18 @@ export function Dashboard() {
                       {!active && (
                         <Link
                           aria-label={`Activate ${displayName}`}
-                          className="inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-3 text-xs font-medium text-accent-fg hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+                          aria-disabled={!runtimeVerified}
+                          className={runtimeVerified
+                            ? 'inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-3 text-xs font-medium text-accent-fg hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2'
+                            : 'inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-md bg-accent/50 px-3 text-xs font-medium text-accent-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2'}
+                          onClick={(event) => {
+                            if (!runtimeVerified) event.preventDefault();
+                          }}
                           to={activationHref}
+                          tabIndex={runtimeVerified ? undefined : -1}
+                          title={runtimeVerified ? undefined : 'Complete Setup verification before activating a Profile'}
                         >
-                          Activate
+                          {runtimeVerified ? 'Activate' : 'Activate (Setup required)'}
                         </Link>
                       )}
                       <Button
@@ -573,7 +590,7 @@ export function Dashboard() {
                       active={active}
                       profileDisplayName={displayName}
                       profileId={entry.profile_id}
-                      runtimeReady={runtimeReady}
+                      runtimeReady={runtimeVerified}
                     />
                   </div>
                 </article>
