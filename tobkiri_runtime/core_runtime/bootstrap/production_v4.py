@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import threading
@@ -271,7 +272,7 @@ class _PlanAdmission(RequestAdmissionPort):
                 {},
             )
         )
-        measured = len(canonical_json(payload).encode("utf-8"))
+        measured = _measure_payload_bytes(payload)
         upper_bound = _positive_int(
             policy.get("declared_upper_bound_bytes"),
             default=max(measured, 4096),
@@ -324,6 +325,32 @@ def _admission_mapping(value: object) -> dict[str, Any]:
     """Return bounded declarative admission metadata or an empty mapping."""
 
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _measure_payload_bytes(payload: Mapping[str, Any]) -> int:
+    """Measure a validated operation payload using the Broker's JSON profile.
+
+    Provider contracts may carry finite floating-point deadline values, while
+    ``canonical_json`` intentionally accepts only strict I-JSON values.  The
+    Broker request digest uses this JSON profile as well, so admission sizing
+    must measure the same serialized request without widening the accepted
+    value set to non-finite numbers or unsupported objects.
+    """
+
+    try:
+        return len(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8", errors="strict")
+        )
+    except (TypeError, ValueError, UnicodeError) as error:
+        raise AuthorityDenied(
+            "request payload cannot be canonically measured"
+        ) from error
 
 
 def _positive_int(value: object, *, default: int) -> int:
