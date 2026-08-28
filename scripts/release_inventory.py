@@ -24,6 +24,10 @@ TARGETS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "x86_64-pc-windows-msvc": ("windows", "x86_64", (".exe",)),
     "x86_64-unknown-linux-gnu": ("linux", "x86_64", (".deb", ".AppImage")),
 }
+# Keep the production publication policy in one machine-readable authority.
+# TARGETS retains the known bundle contracts for tooling and compatibility, but
+# only this tuple is allowed into the immutable production inventory.
+ACTIVE_RELEASE_TARGETS: tuple[str, ...] = ("aarch64-apple-darwin",)
 
 
 class InventoryError(RuntimeError):
@@ -73,6 +77,15 @@ def _target_contract(
     if architecture is not None and architecture != expected_architecture:
         raise InventoryError(f"target/architecture mismatch for {target}")
     return expected_platform, expected_architecture, suffixes
+
+
+def _active_target_contract(
+    target: str, platform: str | None = None, architecture: str | None = None
+) -> tuple[str, str, tuple[str, ...]]:
+    """Return a contract only for targets currently published in production."""
+    if target not in ACTIVE_RELEASE_TARGETS:
+        raise InventoryError(f"release target is not active: {target}")
+    return _target_contract(target, platform, architecture)
 
 
 def _file_record(path: Path, relative: str) -> dict[str, Any]:
@@ -125,7 +138,7 @@ def collect_target(
     architecture: str,
 ) -> Path:
     """Copy exactly the platform assets and write their bound target manifest."""
-    expected_platform, expected_architecture, suffixes = _target_contract(
+    expected_platform, expected_architecture, suffixes = _active_target_contract(
         target, platform, architecture
     )
     _validate_revision(source_revision)
@@ -209,7 +222,7 @@ def _verify_target_manifest(
     architecture = manifest.get("architecture")
     if not all(isinstance(value, str) for value in (target, platform, architecture)):
         raise InventoryError(f"target manifest identity is incomplete: {manifest_path}")
-    expected_platform, expected_architecture, suffixes = _target_contract(
+    expected_platform, expected_architecture, suffixes = _active_target_contract(
         target, platform, architecture
     )
     raw_records = manifest.get("artifacts")
@@ -273,9 +286,9 @@ def create_inventory(
     if not tag or not tag.startswith("v"):
         raise InventoryError("release inventory requires a v-prefixed tag")
     manifests = sorted(root.rglob(TARGET_MANIFEST))
-    if len(manifests) != len(TARGETS):
+    if len(manifests) != len(ACTIVE_RELEASE_TARGETS):
         raise InventoryError(
-            f"release inventory requires exactly {len(TARGETS)} target manifests; found {len(manifests)}"
+            f"release inventory requires exactly {len(ACTIVE_RELEASE_TARGETS)} target manifests; found {len(manifests)}"
         )
     identities: dict[str, dict[str, Any]] = {}
     all_artifacts: list[dict[str, Any]] = []
@@ -295,9 +308,9 @@ def create_inventory(
                     "size": record["size"],
                 }
             )
-    if set(identities) != set(TARGETS):
-        missing = sorted(set(TARGETS) - set(identities))
-        extra = sorted(set(identities) - set(TARGETS))
+    if set(identities) != set(ACTIVE_RELEASE_TARGETS):
+        missing = sorted(set(ACTIVE_RELEASE_TARGETS) - set(identities))
+        extra = sorted(set(identities) - set(ACTIVE_RELEASE_TARGETS))
         raise InventoryError(
             f"release targets missing or unexpected: missing={missing}, extra={extra}"
         )
@@ -309,7 +322,7 @@ def create_inventory(
         "schema": INVENTORY_SCHEMA,
         "tag": tag,
         "source_revision": source_revision,
-        "targets": [identities[target] for target in sorted(identities)],
+        "targets": [identities[target] for target in ACTIVE_RELEASE_TARGETS],
         "artifacts": all_artifacts,
     }
     if assets_dir.exists() and assets_dir.is_symlink():
@@ -371,7 +384,7 @@ def verify_inventory(
             for value in (target, platform, architecture, target_source_revision)
         ):
             raise InventoryError("release inventory target identity is malformed")
-        expected_platform, expected_architecture, _ = _target_contract(
+        expected_platform, expected_architecture, _ = _active_target_contract(
             target, platform, architecture
         )
         if target_source_revision != source_revision:
@@ -384,7 +397,7 @@ def verify_inventory(
             "platform": expected_platform,
             "architecture": expected_architecture,
         }
-    if set(target_identities) != set(TARGETS):
+    if set(target_identities) != set(ACTIVE_RELEASE_TARGETS):
         raise InventoryError("release inventory targets are missing or unexpected")
 
     artifacts = inventory.get("artifacts")
@@ -394,8 +407,11 @@ def verify_inventory(
         raise InventoryError("release inventory artifacts are malformed")
     expected_names: list[str] = []
     counts: dict[str, dict[str, int]] = {
-        target: {suffix: 0 for suffix in suffixes}
-        for target, (_, _, suffixes) in TARGETS.items()
+        target: {
+            suffix: 0
+            for suffix in _target_contract(target)[2]
+        }
+        for target in ACTIVE_RELEASE_TARGETS
     }
     for record in artifacts:
         target = record.get("target")
@@ -414,7 +430,7 @@ def verify_inventory(
             raise InventoryError("release inventory artifact identity is malformed")
         if record_source_revision != source_revision:
             raise InventoryError("release inventory artifact source binding mismatch")
-        expected_platform, expected_architecture, suffixes = _target_contract(
+        expected_platform, expected_architecture, suffixes = _active_target_contract(
             target, platform, architecture
         )
         raw_path = record.get("path")

@@ -395,6 +395,23 @@ jobs:
         working-directory: tobkiri_runtime/ecosystem/defaultspack/webapp
         run: npm run check:shell-bundle
 
+      - name: Run packaging and production integration tests
+        run: |
+          PYTHONPATH=tobkiri_runtime python -m pytest -q \
+            .github/scripts/tests/test_macos_ci_artifact.py \
+            .github/scripts/tests/test_packaging_toolchain_identity.py \
+            .github/scripts/tests/test_packaged_defaultspack_generator_relocation.py \
+            scripts/quality/test_release_controls.py \
+            tobkiri_launcher/scripts/tests/test_artifact_integrity_contract.py \
+            tobkiri_launcher/scripts/tests/test_cleanup_macos_dmg_workspace.py \
+            tobkiri_launcher/scripts/tests/test_package_macos_dmg.py \
+            tobkiri_launcher/scripts/tests/test_verify_macos_dmg_launch.py \
+            tobkiri_launcher/scripts/tests/test_verify_packaged_python.py \
+            tobkiri_launcher/scripts/tests/test_verify_packaged_python_dmg.py \
+            tobkiri_launcher/scripts/tests/test_verify_macos_launcher_cold_boot.py \
+            tobkiri_launcher/scripts/tests/test_verify_presentation_release.py \
+            tobkiri_runtime/tests/test_packaged_runtime_bootstrap.py
+
       - name: Build debug Pack Shell for release Rust tests
         run: cargo build --locked --manifest-path pack-shell/Cargo.toml --target "${{ matrix.target }}"
 
@@ -575,6 +592,81 @@ jobs:
             --app-bundle "$app" \
             --artifact "$app" \
             --artifact "$dmg"
+
+      - name: Launch final macOS DMG through LaunchServices
+        if: runner.os == 'macOS'
+        working-directory: tobkiri_launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$(find "$CARGO_TARGET_DIR/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          /usr/bin/python3 -B scripts/verify_macos_dmg_launch.py \
+            --dmg "$dmg" \
+            --target '${{ matrix.target }}' \
+            --timeout-seconds 90
+
+      - name: Inspect post-build checkout cleanliness
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ steps.checked_out_source.outputs.source_revision }}
+          SOURCE_TREE: ${{ steps.checked_out_source.outputs.source_tree }}
+        run: |
+          set -euo pipefail
+          git_bin="${TOBKIRI_PACKAGING_GIT:?formal Git binding is required}"
+          test -x "$git_bin"
+          git_arguments=(
+            "$git_bin"
+            --no-optional-locks
+            --no-replace-objects
+            -C "$GITHUB_WORKSPACE"
+            -c core.fsmonitor=false
+            -c core.untrackedCache=false
+            -c core.hooksPath=/dev/null
+            -c core.attributesFile=/dev/null
+            -c diff.external=
+            -c core.excludesFile=/dev/null
+            -c core.sshCommand=false
+            -c core.pager=cat
+            -c pager.show=cat
+          )
+          git_environment=(
+            "GIT_ATTR_NOSYSTEM=1"
+            "GIT_CONFIG=/dev/null"
+            "GIT_CONFIG_GLOBAL=/dev/null"
+            "GIT_CONFIG_SYSTEM=/dev/null"
+            "GIT_CONFIG_NOSYSTEM=1"
+            "GIT_EXEC_PATH=/private/var/empty"
+            "GIT_OPTIONAL_LOCKS=0"
+            "GIT_TERMINAL_PROMPT=0"
+            "HOME=/private/var/empty"
+            "LC_ALL=C"
+            "PATH=/usr/bin:/bin"
+            "PAGER=cat"
+            "XDG_CONFIG_HOME=/private/var/empty"
+          )
+          run_git() {
+            env -i "${git_environment[@]}" "${git_arguments[@]}" "$@"
+          }
+          test "$(run_git rev-parse --verify HEAD)" = "$SOURCE_REVISION"
+          test "$(run_git rev-parse --verify HEAD^{tree})" = "$SOURCE_TREE"
+          if ! run_git diff-index --cached --quiet --no-ext-diff --no-textconv --ignore-submodules=none HEAD --; then
+            echo "post-build checkout index is dirty" >&2
+            run_git diff --cached --name-status -- || true
+            exit 1
+          fi
+          if ! run_git diff --quiet --no-ext-diff --no-textconv --ignore-submodules=none HEAD --; then
+            echo "post-build checkout has tracked changes" >&2
+            run_git diff --name-status --no-ext-diff --no-textconv --ignore-submodules=none HEAD -- || true
+            exit 1
+          fi
+          untracked="$(run_git ls-files --others --exclude-standard -z --)"
+          if [[ -n "$untracked" ]]; then
+            echo "post-build checkout has non-ignored untracked paths:" >&2
+            printf '%s' "$untracked" | /usr/bin/tr '\0' '\n' >&2
+            exit 1
+          fi
+          echo "post-build checkout is clean at $SOURCE_REVISION"
 
 
       - name: Prepare immutable target release upload

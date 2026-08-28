@@ -215,14 +215,18 @@ def test_inventory_binds_all_targets_once_and_rejects_tamper_missing_duplicate()
     revision = "a" * 40
     with TemporaryDirectory(prefix="tobkiri-release-inventory-") as temp:
         root = Path(temp)
-        for target in INVENTORY.TARGETS:
+        for target in INVENTORY.ACTIVE_RELEASE_TARGETS:
             _create_target_upload(root, target, revision)
         output = root / "release-inventory.json"
         assets = root / "release-assets"
         inventory = INVENTORY.create_inventory(
             root / "uploaded", output, assets, revision, "v1.2.3"
         )
-        assert len(inventory["artifacts"]) == 5
+        expected_artifacts = sum(
+            len(INVENTORY.TARGETS[target][2])
+            for target in INVENTORY.ACTIVE_RELEASE_TARGETS
+        )
+        assert len(inventory["artifacts"]) == expected_artifacts
         assert {item["source_revision"] for item in inventory["artifacts"]} == {
             revision
         }
@@ -275,7 +279,10 @@ def test_inventory_binds_all_targets_once_and_rejects_tamper_missing_duplicate()
 
         duplicate_target = root / "uploaded" / "duplicate-target"
         shutil.copytree(root / "uploaded" / "aarch64-apple-darwin", duplicate_target)
-        with pytest.raises(INVENTORY.InventoryError, match="exactly 4"):
+        with pytest.raises(
+            INVENTORY.InventoryError,
+            match=f"exactly {len(INVENTORY.ACTIVE_RELEASE_TARGETS)}",
+        ):
             INVENTORY.create_inventory(
                 root / "uploaded", output, assets, revision, "v1.2.3"
             )
@@ -304,7 +311,7 @@ def test_inventory_rejects_symlink_and_path_escape_fixtures() -> None:
                 "arm64",
             )
 
-        for target in INVENTORY.TARGETS:
+        for target in INVENTORY.ACTIVE_RELEASE_TARGETS:
             _create_target_upload(root, target, revision)
         manifest_path = root / "uploaded/aarch64-apple-darwin/release-target.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -318,6 +325,88 @@ def test_inventory_rejects_symlink_and_path_escape_fixtures() -> None:
                 revision,
                 "v1.2.3",
             )
+
+
+def _workflow_matrix_targets(path: Path, job: str) -> tuple[str, ...]:
+    """Return the target values declared by one workflow matrix."""
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    includes = workflow["jobs"][job]["strategy"]["matrix"]["include"]
+    return tuple(str(item["target"]) for item in includes)
+
+
+def test_active_release_target_authority_matches_workflows_and_documentation() -> (
+    None
+):
+    """Keep production publication targets synchronized across release surfaces."""
+    expected = INVENTORY.ACTIVE_RELEASE_TARGETS
+    assert expected == ("aarch64-apple-darwin",)
+    assert _workflow_matrix_targets(
+        ROOT / ".github/workflows/release.yml", "build"
+    ) == expected
+    assert _workflow_matrix_targets(
+        ROOT / ".github/workflows/desktop-installers.yml", "build-installer"
+    ) == expected
+
+    documentation = (ROOT / "scripts/RELEASE_WORKFLOW.md").read_text(
+        encoding="utf-8"
+    )
+    assert "macOS ARM" in documentation
+    assert "aarch64-apple-darwin" in documentation
+    assert "single active target" in documentation
+
+
+def test_inventory_rejects_known_but_inactive_target() -> None:
+    """Known compatibility contracts must not silently enter production output."""
+    inactive = next(
+        target
+        for target in INVENTORY.TARGETS
+        if target not in INVENTORY.ACTIVE_RELEASE_TARGETS
+    )
+    with TemporaryDirectory(prefix="tobkiri-release-inactive-target-") as temp:
+        root = Path(temp)
+        source = root / "source"
+        source.mkdir()
+        (source / "inactive.dmg").write_bytes(b"inactive")
+        platform, architecture, _suffixes = INVENTORY.TARGETS[inactive]
+        with pytest.raises(INVENTORY.InventoryError, match="not active"):
+            INVENTORY.collect_target(
+                root / "upload",
+                [source],
+                "c" * 40,
+                inactive,
+                platform,
+                architecture,
+            )
+
+
+@pytest.mark.parametrize(
+    "workflow_name",
+    ("release.yml", "desktop-installers.yml"),
+)
+def test_packaging_workflows_check_post_build_checkout_cleanliness(
+    workflow_name: str,
+) -> None:
+    """Packaging jobs must prove that builds did not mutate the checkout."""
+    workflow = (ROOT / ".github/workflows" / workflow_name).read_text(
+        encoding="utf-8"
+    )
+    assert "Inspect post-build checkout cleanliness" in workflow
+    assert "diff-index --cached --quiet" in workflow
+    assert "diff --quiet --no-ext-diff --no-textconv" in workflow
+    assert "ls-files --others --exclude-standard -z" in workflow
+    assert "SOURCE_TREE" in workflow
+
+
+def test_ci_runs_defaultspack_playwright_ui_e2e() -> None:
+    """The standard CI workflow must execute the mocked browser UI contract."""
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["defaultspack-playwright-ui-e2e"]
+    steps = job["steps"]
+    step_runs = [step.get("run", "") for step in steps if isinstance(step, dict)]
+    assert any("playwright install --with-deps chromium" in run for run in step_runs)
+    assert any("npm run test:e2e:ui-contract" in run for run in step_runs)
 
 
 def test_release_workflow_has_one_gather_attestation_and_no_matrix_draft_upload() -> (
