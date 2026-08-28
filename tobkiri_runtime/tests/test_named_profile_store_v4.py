@@ -25,6 +25,7 @@ from core_runtime.profile_definition_store_v4 import (
     ProfileDefinitionStore,
     ProfileDefinitionStoreError,
 )
+from core_runtime.runtime_surface_v4 import RuntimeSurfaceService
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 
 
@@ -388,6 +389,45 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
 
     restarted = ActiveProfileStore(user_data).require(verify_snapshot=True)
     assert restarted.profile_id == "profile-b"
+    assert_active("profile-b")
+
+    browsing_surface = RuntimeSurfaceService(
+        snapshot_loader=capture_active_profile,
+        catalog_loader=host_profile_catalog,
+    )
+    browsing_profile = browsing_surface.read_profile(
+        selected_profile_id="profile-a"
+    )
+    assert browsing_profile["selection_state"] == "browsing"
+    assert browsing_profile["execution_profile_id"] == "profile-b"
+    assert browsing_profile["data"]["selection"] == {
+        "state": "browsing",
+        "selected_profile_id": "profile-a",
+        "execution_profile_id": "profile-b",
+        "execution_profile_revision": active_b.resolved.plan["profile_revision"],
+        "execution_activation_id": active_b.activation["activation_id"],
+        "execution_plan_digest": active_b.resolved.plan["plan_digest"],
+    }
+    assert browsing_profile["data"]["resolved_plan"] is None
+    assert browsing_profile["data"]["activation_record"] is None
+    browsing_operations = browsing_surface.read_advanced(
+        "operations",
+        selected_profile_id="profile-a",
+    )["data"]["operations"]
+    assert browsing_operations
+    assert all(
+        item["invokable"] is False
+        and item["invocation_reason"] == "browsing_only"
+        for item in browsing_operations
+    )
+    browsing_settings = browsing_surface.read_settings(
+        selected_profile_id="profile-a"
+    )
+    assert (
+        browsing_settings["data"]["runtime_profile_settings"]["state"]
+        == "browsing_only"
+    )
+    browsing_surface.close()
     assert_active("profile-b")
 
     active_a_again = capture_profile(
