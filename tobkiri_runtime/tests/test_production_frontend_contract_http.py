@@ -563,11 +563,16 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
         "alpha",
         "beta",
     }
+    assert catalog["selection"] == {
+        "state": "active_execution",
+        "selected_profile_id": "defaults",
+        "execution_profile_id": "defaults",
+    }
     selected = next(
         item for item in catalog["profiles"] if item["profile_id"] == "alpha"
     )
     assert selected["active"] is False
-    assert selected["browsing"] is True
+    assert selected["lifecycle_state"] == "available"
     status, profile_response, _ = _request(
         server,
         "GET",

@@ -1195,6 +1195,20 @@ class RuntimeSurfaceService:
         profile = active.resolved.profile
         lock = active.resolved.lock
         plan = active.resolved.plan
+        data_payload = dict(data)
+        if selected_profile_id is not None:
+            data_payload.setdefault(
+                "selection",
+                {
+                    "state": (
+                        "active_execution"
+                        if selected_profile_id == str(profile["profile_id"])
+                        else "browsing"
+                    ),
+                    "selected_profile_id": selected_profile_id,
+                    "execution_profile_id": str(profile["profile_id"]),
+                },
+            )
         envelope: dict[str, object] = {
             "runtime_surface_api_version": RUNTIME_SURFACE_API_VERSION,
             "surface": surface,
@@ -1231,20 +1245,8 @@ class RuntimeSurfaceService:
                     ),
                 },
             },
-            "data": dict(data),
+            "data": data_payload,
         }
-        if selected_profile_id is not None:
-            envelope.update(
-                {
-                    "selected_profile_id": selected_profile_id,
-                    "execution_profile_id": str(profile["profile_id"]),
-                    "selection_state": (
-                        "active_execution"
-                        if selected_profile_id == str(profile["profile_id"])
-                        else "browsing"
-                    ),
-                }
-            )
         return envelope
 
     def _snapshot(self, deadline: _ReadDeadline) -> RuntimeSurfaceSnapshot:

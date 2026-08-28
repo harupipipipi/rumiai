@@ -76,7 +76,6 @@ def project_profile_catalog(
             profile_id,
             definition,
             active_profile_id=active_profile_id,
-            selected_profile_id=selected_id,
             active_revision=active_revision,
             active_plan_digest=active_plan_digest,
             active_lock_digest=active_lock_digest,
@@ -95,8 +94,15 @@ def project_profile_catalog(
         "bundle_lock_digest": lock_digest,
         "catalog_ref": f"profile-catalog-v4://bundle/{catalog_digest}",
         "active_profile_id": active_profile_id,
-        "execution_profile_id": active_profile_id,
-        "selected_profile_id": selected_id,
+        "selection": {
+            "state": (
+                "active_execution"
+                if selected_id == active_profile_id
+                else "browsing"
+            ),
+            "selected_profile_id": selected_id,
+            "execution_profile_id": active_profile_id,
+        },
         "count": len(definitions),
         "profiles": definitions,
     }
@@ -133,7 +139,6 @@ def _project_definition(
     definition: Mapping[str, Any],
     *,
     active_profile_id: str,
-    selected_profile_id: str,
     active_revision: str,
     active_plan_digest: str,
     active_lock_digest: str,
@@ -201,7 +206,6 @@ def _project_definition(
             diagnostics.append({"code": "APPLICATION_KIND_INVALID", "subject": pack_id})
 
     is_active = profile_id == active_profile_id
-    is_selected = profile_id == selected_profile_id
     candidate_review = candidate.get("review") if isinstance(candidate, Mapping) else None
     candidate_profile = (
         candidate_review.get("profile") if isinstance(candidate_review, Mapping) else None
@@ -232,9 +236,6 @@ def _project_definition(
         "profile_id": profile_id,
         "display_name": str(definition.get("display_name") or profile_id),
         "active": is_active,
-        "active_execution": is_active,
-        "selected": is_selected,
-        "browsing": is_selected and not is_active,
         "lifecycle_state": "active" if is_active else "available",
         "available": not diagnostics,
         "diagnostics": diagnostics,

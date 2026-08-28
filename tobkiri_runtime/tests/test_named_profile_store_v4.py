@@ -398,8 +398,6 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     browsing_profile = browsing_surface.read_profile(
         selected_profile_id="profile-a"
     )
-    assert browsing_profile["selection_state"] == "browsing"
-    assert browsing_profile["execution_profile_id"] == "profile-b"
     assert browsing_profile["data"]["selection"] == {
         "state": "browsing",
         "selected_profile_id": "profile-a",
