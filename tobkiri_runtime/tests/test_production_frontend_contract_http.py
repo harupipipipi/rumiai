@@ -652,10 +652,13 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
         },
     )
     assert status == 200, approved
+    approval = approved["data"]["authority_approval"]
+    assert approval["decision"] == "approved"
+    assert authority.get_approval(approval["approval_id"]) is not None
     status, activated, _ = post(
         "/api/runtime-surface/profile-change/activate",
         {
-            "approval_id": approved["data"]["approval_id"],
+            "approval_id": approval["approval_id"],
             "approval_digest": approved["data"]["approval_digest"],
         },
     )
