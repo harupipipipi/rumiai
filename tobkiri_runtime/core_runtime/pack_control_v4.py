@@ -1377,6 +1377,16 @@ def activate_resolved_profile_pack_set(
         and hmac.compare_digest(predecessor.activation_id, expected_activation_id)
     )
     if not predecessor_is_expected and not pointer_is_candidate:
+        if (
+            predecessor.profile_id == profile_id
+            and hmac.compare_digest(
+                predecessor.profile_revision, candidate_profile_revision
+            )
+            and hmac.compare_digest(predecessor.plan_digest, candidate_plan_digest)
+        ):
+            from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
+
+            raise ProfileResolutionDenied("activation predecessor is stale")
         raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     catalog = (
         BundledCatalog.load(bundle_root)
