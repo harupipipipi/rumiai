@@ -15206,7 +15206,7 @@
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:4a404c7427393f7343d9bc74d19b9f0f5066f7090e93e728e65e6452441242a7",
+        "evidence_digest": "sha256:69209e7840007157e96cbbaf5131cb6867e68cbfb7064c8b7de4717b9f5defa2",
         "line": 427,
         "path": "tobkiri_runtime/ecosystem/defaultspack/runtime/conversation.py",
         "rule_id": "legacy_permissive_mode"
@@ -18412,7 +18412,7 @@
     ]
   },
   "repository": {
-    "commit": "47e03cc329990aa5fa510fbf53fc2a2a581b3e5f",
+    "commit": "b754edd9450316db1f3855d70a59fc5ff70e6160",
     "tree_digest": "a609e1220c89e7750249567dc7eadcd7d1495e6903fbecd20f77db41a16a9358"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
