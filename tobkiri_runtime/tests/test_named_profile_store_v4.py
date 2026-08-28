@@ -10,6 +10,17 @@ from core_runtime.active_profile_store_v4 import (
     ActiveProfileStoreConflict,
     ActiveProfileStoreIntegrityError,
 )
+from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.bootstrap.profile_capture import (
+    activation_audit_receipt,
+    capture_active_profile,
+    capture_default_profile,
+    capture_profile,
+    host_profile_catalog,
+    prepare_default_profile_confirmation,
+    prepare_profile_confirmation,
+    runtime_user_data_root,
+)
 from core_runtime.profile_definition_store_v4 import (
     ProfileDefinitionStore,
     ProfileDefinitionStoreError,
@@ -294,3 +305,118 @@ def test_legacy_workspace_failure_rolls_back_registry(tmp_path: Path) -> None:
         )
     assert store.list_profiles() == ()
     assert not store.exists()
+
+
+def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise Defaults -> A -> B -> restart -> A on real v4 persistence."""
+
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    user_data = runtime_user_data_root()
+    host_profile_catalog()
+    definitions = ProfileDefinitionStore(user_data)
+    defaults = definitions.get_profile("defaults")
+    assert defaults is not None
+    profile_a = definitions.duplicate_profile(
+        "defaults",
+        new_profile_id="profile-a",
+        display_name="Profile A",
+        expected_profile_revision=defaults.profile_revision,
+    )
+    profile_b = definitions.duplicate_profile(
+        "defaults",
+        new_profile_id="profile-b",
+        display_name="Profile B",
+        expected_profile_revision=defaults.profile_revision,
+    )
+
+    def assert_active(expected_profile_id: str):
+        active = capture_active_profile()
+        pointer = ActiveProfileStore(user_data).require(verify_snapshot=True)
+        assert active.resolved.profile["profile_id"] == expected_profile_id
+        assert pointer.profile_id == expected_profile_id
+        assert pointer.profile_revision == active.resolved.plan["profile_revision"]
+        assert pointer.plan_digest == active.resolved.plan["plan_digest"]
+        assert pointer.lock_digest == active.resolved.lock["lock_digest"]
+        assert pointer.activation_id == active.activation["activation_id"]
+        receipt = activation_audit_receipt(active)
+        assert receipt["state"] == "committed"
+        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+            reservation = authority.active_activation_reservation(
+                active.activation["activation_id"]
+            )
+        assert reservation is not None
+        assert reservation["state"] == "active"
+        assert reservation["plan_digest"] == active.activation["plan_digest"]
+        assert reservation["fencing_token"] == active.activation["fencing_token"]
+        return active
+
+    def write_profile_state(profile_id: str) -> None:
+        workspace = user_data / "workspaces" / profile_id
+        state = {
+            "packs/closure.json": f"pack-state:{profile_id}",
+            "conversation/history.json": f"conversation:{profile_id}",
+            "credentials/provider.ref": f"credential-ref:{profile_id}",
+            "handoff/shell.json": f"shell-handoff:{profile_id}",
+        }
+        for relative, value in state.items():
+            path = workspace / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value, encoding="utf-8")
+
+    defaults_active = capture_default_profile(
+        confirmation=prepare_default_profile_confirmation()
+    )
+    assert_active("defaults")
+    write_profile_state("defaults")
+
+    active_a = capture_profile(
+        "profile-a",
+        confirmation=prepare_profile_confirmation("profile-a"),
+    )
+    assert_active("profile-a")
+    write_profile_state("profile-a")
+
+    active_b = capture_profile(
+        "profile-b",
+        confirmation=prepare_profile_confirmation("profile-b"),
+    )
+    assert_active("profile-b")
+    write_profile_state("profile-b")
+
+    restarted = ActiveProfileStore(user_data).require(verify_snapshot=True)
+    assert restarted.profile_id == "profile-b"
+    assert_active("profile-b")
+
+    active_a_again = capture_profile(
+        "profile-a",
+        confirmation=prepare_profile_confirmation("profile-a"),
+    )
+    assert active_a_again.resolved.profile["profile_id"] == "profile-a"
+    assert_active("profile-a")
+
+    assert len(
+        {
+            defaults_active.resolved.plan["plan_digest"],
+            active_a.resolved.plan["plan_digest"],
+            active_b.resolved.plan["plan_digest"],
+        }
+    ) == 3
+    assert ActiveProfileStore(user_data).path == user_data / "profiles" / "active.json"
+    assert ActiveProfileStore(user_data).path.parent not in {
+        user_data / "workspaces" / profile_id
+        for profile_id in ("defaults", "profile-a", "profile-b")
+    }
+    for profile_id in ("defaults", "profile-a", "profile-b"):
+        workspace = user_data / "workspaces" / profile_id
+        for relative in (
+            "packs/closure.json",
+            "conversation/history.json",
+            "credentials/provider.ref",
+            "handoff/shell.json",
+        ):
+            assert (workspace / relative).read_text(encoding="utf-8").endswith(
+                profile_id
+            )
