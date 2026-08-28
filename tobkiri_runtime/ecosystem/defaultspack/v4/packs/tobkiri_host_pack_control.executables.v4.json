@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:499a38fee28ed5f2ca6a189877c91ec0fa097750e4ad3a6ce7982675d82e9cf4",
+  "catalog_digest": "sha256:b04e6ad6f24a4113c4378938cdce4d86a0fd92f833510544acad5b82d229fec3",
   "pack_id": "tobkiri_host_pack_control",
-  "source_identity": "sha256:2d568d178c7f9f6b790fc6224e3311f21e88c94cb3d44b7a06cb5b132f1a76fa",
+  "source_identity": "sha256:5ee35a6dbe038a7f45bbfb8ebdab7c4efe1d9b75857d9f12a1c0b089648fccf0",
   "variants": [
     {
       "architecture": "any",
@@ -289,7 +289,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -568,7 +568,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -847,7 +847,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -1126,7 +1126,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -1405,7 +1405,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -1684,7 +1684,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -1963,7 +1963,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -2242,7 +2242,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -2521,7 +2521,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -2800,7 +2800,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3079,7 +3079,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3358,7 +3358,7 @@
               }
             ]
           },
-          "revision_digest": "sha256:83cbce7734a5026885e1c4012d4cf3e37ac7882d8dc8cb03bcb903257ddc8b02",
+          "revision_digest": "sha256:0cf13ef77440c8f186c790084b7b2b417a266fd7c816ec28d4c9d4d81fc77c76",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }
@@ -3414,7 +3414,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3455,7 +3455,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3496,7 +3496,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3537,7 +3537,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3578,7 +3578,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3619,7 +3619,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3660,7 +3660,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3701,7 +3701,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3742,7 +3742,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3783,7 +3783,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         },
@@ -3824,7 +3824,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:715f2958c6b86db70ed0c7b1bd7b0c52f51d0b1c268de41383573ec5f2e7f37e",
+          "revision_digest": "sha256:0c0e5324b9f286400d9c939a069268506f4a9b83d697d326016a73c82e8176b0",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }

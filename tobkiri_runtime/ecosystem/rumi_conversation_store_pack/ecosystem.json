@@ -11,7 +11,7 @@
   },
   "dependencies": {},
   "description": "Atomic authoritative conversation and ordered-message storage.",
-  "display_name": "Rumi Conversation Store",
+  "display_name": "Tobkiri Conversation Store",
   "host_execution": true,
   "metadata": {
     "authoritative_owner": true,

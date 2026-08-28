@@ -9,13 +9,18 @@ import { useAppStore } from '@/src/store';
 import { TobkiriLoader, TobkiriLoadingMark } from '@/src/components/ui/TobkiriLoader';
 import {
   AlertCircle,
+  CheckCircle2,
   Copy,
   Monitor,
+  Plus,
+  RefreshCw,
   Route,
   ShieldCheck,
   Terminal,
   Cloud,
   Package,
+  Settings2,
+  UserRound,
   Workflow,
 } from 'lucide-react';
 import { Button } from '@/src/components/ui/Button';
@@ -282,6 +287,74 @@ export function Dashboard() {
         />
       </div>
     </div>
+  );
+}
+
+function ActiveProfileCard({
+  activeProfile,
+  profileCount,
+  loading,
+  error,
+  onRefresh,
+}: {
+  activeProfile: RuntimeProfileCatalogEntry | null;
+  profileCount: number;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-border bg-bg-card p-5" aria-labelledby="active-profile-title">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
+            <UserRound className="size-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="active-profile-title" className="text-base font-semibold text-text-main">
+                {activeProfile?.display_name ?? 'Defaults Profile'}
+              </h2>
+              {activeProfile ? <Badge variant="success"><CheckCircle2 className="mr-1 size-3" aria-hidden="true" />Active</Badge> : null}
+              {profileCount > 0 ? <Badge variant="outline">{profileCount} published</Badge> : null}
+            </div>
+            {loading && !activeProfile ? (
+              <p className="mt-2 flex items-center gap-2 text-sm text-text-muted" role="status">
+                <RefreshCw className="size-4 animate-spin" aria-hidden="true" />
+                Loading Profiles…
+              </p>
+            ) : activeProfile ? (
+              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-xs text-text-muted">
+                <span>Base: <strong className="font-medium text-text-main">{activeProfile.bindings.base.pack_id}</strong></span>
+                <span>Shell: <strong className="font-medium text-text-main">{activeProfile.bindings.shell.provider_id}</strong></span>
+                <span>{activeProfile.pack_closure.length} Packs</span>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-text-muted">{error ?? 'No active Profile is available yet.'}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {!activeProfile && !loading ? (
+            <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
+              <RefreshCw className="size-4" aria-hidden="true" />Retry
+            </Button>
+          ) : null}
+          <Link
+            to={panelRoutes.profile}
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-md border border-border bg-bg-main px-3 text-xs font-medium text-text-main transition hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+          >
+            <Plus className="size-4" aria-hidden="true" />Add Profile
+          </Link>
+          <Link
+            to={panelRoutes.profile}
+            className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-accent px-3 text-xs font-medium text-accent-fg transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+          >
+            <Settings2 className="size-4" aria-hidden="true" />Manage Profiles
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 

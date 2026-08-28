@@ -17,8 +17,12 @@ import {
 import type {
   FrontendCapabilityClient,
   FrontendCatalog,
+  Sha256Digest,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
+
+const PLAN_HASH: Sha256Digest = `sha256:${"a".repeat(64)}`;
+const OTHER_PLAN_HASH: Sha256Digest = `sha256:${"b".repeat(64)}`;
 
 const contribution = (
   overrides: Partial<VerifiedFrontendContribution> = {},
@@ -32,7 +36,7 @@ const contribution = (
   owner_pack_hash: `sha256:${"1".repeat(64)}`,
   build_identity: "fixture",
   resolved_profile_revision: "r1",
-  resolved_plan_hash: "plan-1",
+  resolved_plan_hash: PLAN_HASH,
   descriptor_hash: `sha256:${"2".repeat(64)}`,
   route: "/feature",
   view: { title: "Dynamic feature" },
@@ -42,10 +46,10 @@ const contribution = (
 });
 
 const catalog = (items: VerifiedFrontendContribution[]): FrontendCatalog => ({
-  version: "rumi.ui.contribution.v1",
+  version: "tobkiri.ui.contribution.v1",
   profile_id: "fixture",
   profile_revision: "r1",
-  plan_hash: "plan-1",
+  plan_hash: PLAN_HASH,
   contributions: items,
   diagnostics: [],
   quarantined_pack_ids: [],
@@ -61,8 +65,8 @@ test("route visibility follows the active resolved plan", () => {
   resetFrontendHostQuarantineForTests();
   const current = catalog([contribution()]);
 
-  assert.equal(contributionsForRoute(current, "/feature", "plan-1").length, 1);
-  assert.deepEqual(contributionsForRoute(current, "/feature", "plan-2"), []);
+  assert.equal(contributionsForRoute(current, "/feature", PLAN_HASH).length, 1);
+  assert.deepEqual(contributionsForRoute(current, "/feature", OTHER_PLAN_HASH), []);
 });
 
 test("renders a declarative route without importing a product screen", () => {
@@ -71,7 +75,7 @@ test("renders a declarative route without importing a product screen", () => {
     <DynamicFrontendHost
       catalog={catalog([contribution()])}
       route="/feature"
-      activePlanHash="plan-1"
+      activePlanHash={PLAN_HASH}
       capabilities={capabilities}
     />,
   );
@@ -86,7 +90,7 @@ test("missing pack contribution has a generic isolated fallback", () => {
     <DynamicFrontendHost
       catalog={catalog([])}
       route="/feature"
-      activePlanHash="plan-1"
+      activePlanHash={PLAN_HASH}
       capabilities={capabilities}
     />,
   );
@@ -164,14 +168,14 @@ test("catalog synchronization releases obsolete contribution quarantines", () =>
   resetFrontendHostQuarantineForTests();
   const failed = contribution();
   quarantineFrontendContribution(failed);
-  assert.equal(contributionsForRoute(catalog([failed]), "/feature", "plan-1").length, 0);
+  assert.equal(contributionsForRoute(catalog([failed]), "/feature", PLAN_HASH).length, 0);
 
   const replacement = contribution({
     descriptor_hash: `sha256:${"4".repeat(64)}`,
   });
   synchronizeFrontendHostQuarantine(catalog([replacement]));
 
-  assert.equal(contributionsForRoute(catalog([failed]), "/feature", "plan-1").length, 1);
+  assert.equal(contributionsForRoute(catalog([failed]), "/feature", PLAN_HASH).length, 1);
 });
 
 test("capability action errors preserve stale-catalog recovery guidance", () => {

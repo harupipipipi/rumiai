@@ -12,7 +12,7 @@
     "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
   },
   "description": "Authoritative Kanban state with receipt-bound mutations.",
-  "display_name": "Rumi Kanban State Store",
+  "display_name": "Tobkiri Kanban State Store",
   "host_execution": false,
   "metadata": {
     "authoritative_owner": true,

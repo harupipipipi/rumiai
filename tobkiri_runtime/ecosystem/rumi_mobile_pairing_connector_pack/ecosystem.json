@@ -14,7 +14,7 @@
     "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
   },
   "description": "One-time signed device envelopes and relay handoff.",
-  "display_name": "Rumi Mobile Pairing Connector",
+  "display_name": "Tobkiri Mobile Pairing Connector",
   "host_execution": false,
   "metadata": {
     "authoritative_owner": true,

@@ -421,12 +421,87 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
     if exact_source_path.is_file():
         source_path = exact_source_path
         source = json.loads(source_path.read_text(encoding="utf-8"))
-        executable = json.loads(
-            (ECOSYSTEM / pack_id / "executables.v4.json").read_text(encoding="utf-8")
-        )["variants"][0]
-        operation = executable["operations"][0]
-        function = source["functions"][0]
-        contract = source["contracts"][0]
+        executable_path = source_path.with_name(
+            f"{source['pack']['id']}.executables.v4.json"
+        )
+        if not executable_path.is_file():
+            executable_path = ECOSYSTEM / pack_id / "executables.v4.json"
+        executable = json.loads(executable_path.read_text(encoding="utf-8"))
+        variants = {
+            str(item["function_id"]): item
+            for item in executable.get("variants", [])
+            if isinstance(item, Mapping) and item.get("function_id")
+        }
+        requirements = source.get("requirements") or {}
+        provided: list[dict[str, Any]] = []
+        for contract in source.get("contracts", []):
+            revision = str(contract.get("revision_digest") or "")
+            functions = [
+                item
+                for item in source.get("functions", [])
+                if item.get("contract_revision_digest") == revision
+            ]
+            if len(functions) != 1:
+                raise PackV4MigrationError(
+                    f"bundled Contract must resolve one Function: {pack_id}/{revision}"
+                )
+            function = functions[0]
+            variant = variants.get(str(function["id"]))
+            if not isinstance(variant, Mapping):
+                raise PackV4MigrationError(
+                    f"bundled Function executable is missing: {pack_id}/{function['id']}"
+                )
+            operation_catalog = {
+                str(item["operation_id"]): item
+                for item in variant.get("operations", [])
+                if isinstance(item, Mapping) and item.get("operation_id")
+            }
+            operations: list[dict[str, Any]] = []
+            for operation_id in function.get("operations", []):
+                operation = operation_catalog.get(str(operation_id))
+                if operation is None:
+                    raise PackV4MigrationError(
+                        f"bundled Operation executable is missing: "
+                        f"{pack_id}/{operation_id}"
+                    )
+                operations.append(
+                    {
+                        "id": str(operation_id),
+                        "entrypoint_id": str(operation_id),
+                        "implementation_digest": function["implementation_digest"],
+                    }
+                )
+            if not operations:
+                raise PackV4MigrationError(
+                    f"bundled Function has no Operations: {pack_id}/{function['id']}"
+                )
+            first_operation = operation_catalog[operations[0]["id"]]
+            provided.append(
+                {
+                    "contract_id": contract["contract_id"],
+                    "version": "1.0.0",
+                    "provider_id": function["id"],
+                    "operations": operations,
+                    "schemas": {
+                        "input": first_operation["input_schema"],
+                        "output": first_operation["output_schema"],
+                        "error": first_operation["error_schema"],
+                    },
+                    "cardinality": "one",
+                    "security": "sensitive",
+                    "failure": "fail_closed",
+                    "isolation": "in_process",
+                    "required_capabilities": sorted(
+                        str(item)
+                        for item in requirements.get("capabilities", [])
+                        if str(item).strip()
+                    ),
+                    "lifecycle": {
+                        "introduced": "1.0.0",
+                        "deprecated": False,
+                    },
+                }
+            )
         return {
             "pack_id": pack_id,
             "version": source["pack"]["version"],
@@ -444,42 +519,32 @@ def _import_bundled_record(pack_id: str) -> dict[str, Any]:
             },
             "dependencies": {},
             "required_contracts": [],
-            "capabilities": ["pack.catalog.read"],
-            "network": {"allowed_domains": [], "allowed_ports": []},
-            "secrets": [],
-            "execution_boundary": "host_brokered",
-            "approval_policy": "capability_gated",
-            "workspace_boundary": "host_brokered",
-            "provided_contracts": [
-                {
-                    "contract_id": contract["contract_id"],
-                    "version": "1.0.0",
-                    "provider_id": function["id"],
-                    "operations": [
-                        {
-                            "id": operation["operation_id"],
-                            "entrypoint_id": operation["operation_id"],
-                            "implementation_digest": function["implementation_digest"],
-                        }
-                    ],
-                    "schemas": {
-                        "input": operation["input_schema"],
-                        "output": operation["output_schema"],
-                        "error": operation["error_schema"],
-                    },
-                    "cardinality": "one",
-                    "security": "sensitive",
-                    "failure": "fail_closed",
-                    "isolation": "in_process",
-                    "required_capabilities": ["pack.catalog.read"],
-                    "lifecycle": {
-                        "introduced": "1.0.0",
-                        "deprecated": False,
-                    },
-                }
-            ],
+            "capabilities": sorted(
+                str(item)
+                for item in requirements.get("capabilities", [])
+                if str(item).strip()
+            ),
+            "network": requirements.get(
+                "network", {"allowed_domains": [], "allowed_ports": []}
+            ),
+            "secrets": list(requirements.get("secrets", [])),
+            "execution_boundary": requirements.get("execution_boundary", "host_brokered"),
+            "approval_policy": requirements.get("approval_policy", "capability_gated"),
+            "workspace_boundary": requirements.get("workspace_boundary", "host_brokered"),
+            "provided_contracts": sorted(
+                provided,
+                key=lambda item: str(item["contract_id"]),
+            ),
             "legacy_operations": [],
-            "runtime_artifacts": list(source["artifacts"]),
+            # The executable sidecar is derived from this record below.  Do
+            # not feed its own digest into ``source_identity`` or each
+            # regeneration would chase an impossible cryptographic
+            # fixed-point.
+            "runtime_artifacts": [
+                item
+                for item in source["artifacts"]
+                if item.get("path") != "executables.v4.json"
+            ],
             "legacy_ids": [],
             "migration": {
                 "compatibility": "none",
@@ -738,6 +803,7 @@ def _manifest_document(
     artifact_set = [
         {key: value for key, value in item.items() if key != "index_role"}
         for item in record["runtime_artifacts"]
+        if item["path"] != "executables.v4.json"
     ]
     if executable_catalog_artifact_digest is not None:
         artifact_set.append(
@@ -899,6 +965,7 @@ def _render_record(record: Mapping[str, Any]) -> dict[str, str]:
                     "role": item.get("index_role", "runtime"),
                 }
                 for item in record["runtime_artifacts"]
+                if item["path"] != "executables.v4.json"
             ],
         ],
         "artifact_set_digest": provisional_manifest["integrity"]["artifact_set_digest"],

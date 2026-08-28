@@ -23,7 +23,7 @@
       "provenance": {
         "evidence": [
           {
-            "digest": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32",
+            "digest": "sha256:375a2e06866a52f89762f17d3eb6391d122765777adf0d0bf61491aeba698aa8",
             "path": "schemas/pack_v4_catalog.v1.json",
             "rule_id": "canonical-pack-v4-source-record"
           }
@@ -34,7 +34,7 @@
         "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
         "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
         "schema": "io.tobkiri.provenance.v1",
-        "source_digest": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32",
+        "source_digest": "sha256:375a2e06866a52f89762f17d3eb6391d122765777adf0d0bf61491aeba698aa8",
         "source_kind": "migration",
         "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_kanban_conversation_adapter_pack"
       },
@@ -64,5 +64,5 @@
     }
   ],
   "pack_id": "rumi_kanban_conversation_adapter_pack",
-  "source_identity": "sha256:436cd3064556cb4d77fd7328e24bce4e4e6f6d4a8057b0c23d0603a0a7dd1d32"
+  "source_identity": "sha256:375a2e06866a52f89762f17d3eb6391d122765777adf0d0bf61491aeba698aa8"
 }

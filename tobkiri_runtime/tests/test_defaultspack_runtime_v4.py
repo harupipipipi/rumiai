@@ -30,6 +30,22 @@ from tests.conformance_support.packaged_profile import (
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ROOT = ROOT / "ecosystem" / "defaultspack" / "v4"
+SEALED_OPTIONAL_PACK_IDS = frozenset(
+    {
+        "rumi_prompt_studio_pack",
+        "rumi_conversation_store_pack",
+        "rumi_kanban_surface_pack",
+        "rumi_kanban_state_store_pack",
+        "rumi_kanban_conversation_adapter_pack",
+        "rumi_company_surface_pack",
+        "rumi_company_state_store_pack",
+        "rumi_company_coordinator_pack",
+        "rumi_company_agent_adapter_pack",
+        "rumi_mobile_pairing_connector_pack",
+        "rumi_voice_mobile_pack",
+        "rumi_pack_suite_pack",
+    }
+)
 SNAPSHOT_DIGEST = "sha256:" + "9" * 64
 AUTHORITY_BINDINGS = {
     "shell.tauri.default|defaultspack.conversation|conversation.turn.v1|complete": (
@@ -193,24 +209,83 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     assert set(catalog.packs) == {
         "defaults-basepack",
         "defaultspack",
+        "dev.tauri.toolchain.default",
         "rumi_ai_gateway_pack",
+        "rumi_ai_modality_pack",
         "rumi_ai_pipeline_pack",
         "rumi_ai_routing_pack",
         "rumi_ai_stream_pack",
         "rumi_ai_tool_bridge_pack",
         "rumi_ai_usage_pack",
+        "rumi_browser_host_service_pack",
+        "rumi_clipboard_host_service_pack",
+        "rumi_coding_sandbox_service_pack",
+        "rumi_company_agent_adapter_pack",
+        "rumi_company_coordinator_pack",
+        "rumi_company_state_store_pack",
+        "rumi_company_surface_pack",
+        "rumi_context_runtime_pack",
+        "rumi_conversation_store_pack",
+        "rumi_credential_broker_pack",
+        "rumi_default_tool_projection_pack",
+        "rumi_discord_connector_pack",
+        "rumi_email_connector_pack",
         "rumi_file_inspect_pack",
+        "rumi_file_mutation_pack",
+        "rumi_file_patch_pack",
+        "rumi_generic_webhook_connector_pack",
+        "rumi_git_publish_pack",
+        "rumi_git_read_pack",
+        "rumi_git_write_pack",
         "rumi_host_authority_bridge_pack",
+        "rumi_http_api_connector_pack",
+        "rumi_human_operator_provider_pack",
+        "rumi_job_action_broker_pack",
+        "rumi_kanban_conversation_adapter_pack",
+        "rumi_kanban_state_store_pack",
+        "rumi_kanban_surface_pack",
+        "rumi_knowledge_store_pack",
+        "rumi_line_connector_pack",
+        "rumi_mcp_server_pack",
+        "rumi_memory_store_pack",
+        "rumi_mobile_pairing_connector_pack",
         "rumi_model_catalog_pack",
+        "rumi_model_evals_pack",
         "rumi_model_registry_pack",
+        "rumi_p2p_connector_pack",
+        "rumi_pack_suite_pack",
+        "rumi_prompt_studio_pack",
         "rumi_provider_adapters_pack",
         "rumi_provider_registry_pack",
+        "rumi_repository_context_pack",
+        "rumi_shell_execute_pack",
+        "rumi_shell_policy_pack",
+        "rumi_slack_connector_pack",
+        "rumi_subagent_placement_pack",
+        "rumi_terminal_session_pack",
+        "rumi_tool_approval_bridge_pack",
+        "rumi_tool_audit_pack",
+        "rumi_tool_authoring_pack",
+        "rumi_tool_broker_pack",
+        "rumi_tool_capability_executor_pack",
+        "rumi_tool_executor_selector_pack",
+        "rumi_tool_guard_pack",
+        "rumi_tool_local_executor_pack",
+        "rumi_tool_mcp_executor_pack",
+        "rumi_tool_policy_pack",
+        "rumi_tool_registry_pack",
+        "rumi_tool_remote_executor_pack",
+        "rumi_tool_result_pack",
+        "rumi_tool_sandbox_executor_pack",
+        "rumi_tool_validation_pack",
+        "rumi_turn_runtime_pack",
+        "rumi_voice_mobile_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
-        "dev.tauri.toolchain.default",
         "shell.cli.default",
         "shell.tauri.default",
         "tobkiri_host_pack_control",
+        "tobkiri_workflow_pack",
     }
     assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v5"
     assert resolved.profile["state"] == "resolved"
@@ -291,6 +366,29 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_file_inspect_pack.file-inspect.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
+
+
+def test_migrated_optional_packs_are_sealed_with_complete_dependency_closure() -> None:
+    """Keep selectable migrated Packs and every signed dependency in the bundle."""
+
+    catalog = _catalog()
+    profile_pack_ids = {
+        str(item["pack_id"]) for item in catalog.profiles["defaults"]["packs"]
+    }
+    assert not SEALED_OPTIONAL_PACK_IDS & profile_pack_ids
+
+    for pack_id in SEALED_OPTIONAL_PACK_IDS:
+        assert catalog.packs[pack_id]["pack"]["display_name"].startswith("Tobkiri")
+        pending = [pack_id]
+        visited: set[str] = set()
+        while pending:
+            current_id = pending.pop()
+            if current_id in visited:
+                continue
+            visited.add(current_id)
+            manifest = catalog.packs.get(current_id)
+            assert manifest is not None, current_id
+            pending.extend(manifest["requirements"]["pack_dependencies"])
 
 
 def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
@@ -483,7 +581,7 @@ def test_unreferenced_caller_cannot_piggyback_on_shared_provider_operation() -> 
     shared_edge = next(
         edge
         for edge in profile["requested_edges"]
-        if edge["operation_id"] == "rumi_model_catalog_pack.bundled-model-catalog.generate"
+        if edge["operation_id"] == "rumi_model_catalog_pack.bundled-model-catalog"
     )
     unreferenced_edge = {
         **shared_edge,

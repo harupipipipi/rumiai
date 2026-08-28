@@ -11,7 +11,7 @@
     "rumi_company_state_store_pack": ">=1.0.0,<2.0.0"
   },
   "description": "Removable Company content and isolated read-only UI projection.",
-  "display_name": "Rumi Company Surface",
+  "display_name": "Tobkiri Company Surface",
   "host_execution": false,
   "metadata": {
     "authoritative_owner": false,

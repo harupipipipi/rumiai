@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:f91b42fee840324efe6a8742274910812ae5adc00071e57b4510e808690110cd",
+      "digest": "sha256:19f088ade90c1b8f91d3b19834f88e56a1625d3c6f7d3576b3bed6ccd850985c",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -33,9 +33,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:945779951b78e8a0efacc486a28383a46d40afb575b915f7298014bb31587450",
-    "contract_catalog_digest": "sha256:f458ddd09a7e9d0fec327e867932808dd24b0b5837779428549b0a42642d633d",
-    "source_identity": "sha256:d62965b30ed62a68329fb611d1a2889700f81dd36852d31b7342dd64833e8d91"
+    "artifact_set_digest": "sha256:582e26f9658a436099f8c56c4354507a46d4b2c1cbc032343e63a5fae8b7764f",
+    "contract_catalog_digest": "sha256:14c6f47158583deda3193a3fa99ab1933410fdd04a104c239b08d06cc0b25262",
+    "source_identity": "sha256:a78a75939a3f8d80a3d090be9054f748302cd92b83068cd35297955983787666"
   },
   "migration": {
     "compatibility": "read_only",
@@ -60,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:945779951b78e8a0efacc486a28383a46d40afb575b915f7298014bb31587450",
+    "artifact_digest": "sha256:582e26f9658a436099f8c56c4354507a46d4b2c1cbc032343e63a5fae8b7764f",
     "display_name": "Rumi Media Inspect Service",
     "id": "rumi_media_inspect_service_pack",
     "kind": "normal_sandbox",
@@ -70,7 +70,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:d62965b30ed62a68329fb611d1a2889700f81dd36852d31b7342dd64833e8d91",
+        "digest": "sha256:a78a75939a3f8d80a3d090be9054f748302cd92b83068cd35297955983787666",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -81,7 +81,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:d62965b30ed62a68329fb611d1a2889700f81dd36852d31b7342dd64833e8d91",
+    "source_digest": "sha256:a78a75939a3f8d80a3d090be9054f748302cd92b83068cd35297955983787666",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_media_inspect_service_pack"
   },

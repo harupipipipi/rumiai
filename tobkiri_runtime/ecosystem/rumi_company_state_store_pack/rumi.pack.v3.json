@@ -109,7 +109,7 @@
           "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
         },
         "description": "Authoritative Company organization and operations state.",
-        "display_name": "Rumi Company State Store",
+        "display_name": "Tobkiri Company State Store",
         "host_execution": false,
         "metadata": {
           "authoritative_owner": true,
@@ -184,7 +184,7 @@
   },
   "pack": {
     "description": "Authoritative Company organization and operations state.",
-    "display_name": "Rumi Company State Store",
+    "display_name": "Tobkiri Company State Store",
     "id": "rumi.company_state_store",
     "kind": "service",
     "version": "1.0.0"

@@ -42,6 +42,20 @@ from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E40
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 PACKS = BUNDLE / "packs"
 PACK_SOURCE_CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
+SEALED_OPTIONAL_PACK_IDS = (
+    "rumi_prompt_studio_pack",
+    "rumi_conversation_store_pack",
+    "rumi_kanban_surface_pack",
+    "rumi_kanban_state_store_pack",
+    "rumi_kanban_conversation_adapter_pack",
+    "rumi_company_surface_pack",
+    "rumi_company_state_store_pack",
+    "rumi_company_coordinator_pack",
+    "rumi_company_agent_adapter_pack",
+    "rumi_mobile_pairing_connector_pack",
+    "rumi_voice_mobile_pack",
+    "rumi_pack_suite_pack",
+)
 CANONICAL_PACK_FILES = {
     "defaultspack.pack.v4.json": ROOT / "ecosystem" / "defaultspack" / "pack.v4.json",
     "rumi-file-inspect.pack.v4.json": (
@@ -85,6 +99,16 @@ CANONICAL_PACK_FILES = {
         ROOT / "ecosystem" / "rumi_provider_registry_pack" / "pack.v4.json"
     ),
 }
+# These migrated Packs are shipped in the sealed inventory so an approved
+# Profile selection can resolve their complete dependency closure without
+# rediscovering the mutable ecosystem directory at runtime.
+CANONICAL_PACK_FILES.update({
+    f"{pack_id}.pack.v4.json": ROOT / "ecosystem" / pack_id / "pack.v4.json"
+    for pack_id in (
+        *SEALED_OPTIONAL_PACK_IDS,
+        "tobkiri_workflow_pack",
+    )
+})
 TAURI_ROLE_PACKS = {
     "runtime.tauri.application.default.pack.v4.json": {
         "pack_id": "runtime.tauri.application.default",
@@ -130,6 +154,7 @@ def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
         for pack_id, record in by_id.items()
         if record.get("kind") == "host_extension"
     }
+    selected.update(SEALED_OPTIONAL_PACK_IDS)
     pending = sorted(selected)
     while pending:
         pack_id = pending.pop(0)
@@ -652,6 +677,32 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                         "operation_id": "rumi_file_inspect_pack.file-inspect",
                     }
                 )
+            provider_operations = [
+                (str(contract["revision_digest"]), str(operation_id))
+                for raw in rendered.values()
+                for pack in [json.loads(raw)]
+                if isinstance(pack, dict)
+                for function in pack.get("functions", [])
+                if function.get("id") == edge["target_provider_id"]
+                for contract in pack.get("contracts", [])
+                if contract.get("contract_id") == edge["contract_id"]
+                for operation_id in function.get("operations", [])
+                if operation_id in contract.get("operations", [])
+            ]
+            exact_provider_operations = [
+                item
+                for item in provider_operations
+                if item[1] == edge["operation_id"]
+            ]
+            candidates = exact_provider_operations or provider_operations
+            if len(candidates) != 1:
+                raise ValueError(
+                    "Profile edge must resolve to exactly one canonical Provider: "
+                    f"{edge['caller_function_id']} -> {edge['target_provider_id']} / "
+                    f"{edge['contract_id']} / {edge['operation_id']}"
+                )
+            contract_digest, canonical_operation_id = candidates[0]
+            edge["operation_id"] = canonical_operation_id
             template = edge["requested_scope_template"]
             if template and "dimensions" not in template:
                 template = {
@@ -661,28 +712,18 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                 template = {
                     key: value for key, value in template.items() if key != "semantics_digest"
                 }
-            contract_digests = [
-                str(contract["revision_digest"])
-                for raw in rendered.values()
-                for pack in [json.loads(raw)]
-                if isinstance(pack, dict)
-                for function in pack.get("functions", [])
-                if function.get("id") == edge["target_provider_id"]
-                for contract in pack.get("contracts", [])
-                if contract.get("contract_id") == edge["contract_id"]
-                and edge["operation_id"] in contract.get("operations", [])
-            ]
-            if len(contract_digests) != 1:
-                raise ValueError(
-                    "Profile edge must resolve to exactly one canonical Provider: "
-                    f"{edge['caller_function_id']} -> {edge['target_provider_id']} / "
-                    f"{edge['contract_id']} / {edge['operation_id']}"
-                )
+            if isinstance(template, dict):
+                dimensions = template.get("dimensions")
+                if isinstance(dimensions, dict):
+                    dimensions = dict(dimensions)
+                    dimensions["contract"] = [edge["contract_id"]]
+                    dimensions["operation"] = [edge["operation_id"]]
+                    template["dimensions"] = dimensions
             edge["requested_scope_template"] = normalize_requested_scope_template(
                 template,
                 contract_id=edge["contract_id"],
                 operation_id=edge["operation_id"],
-                semantics_digest=contract_digests[0],
+                semantics_digest=contract_digest,
             )
         rendered[profile_path] = _pretty(validate_document(profile, "profile"))
     rendered[base_path] = _pretty(base)

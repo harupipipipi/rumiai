@@ -1578,7 +1578,7 @@ class PackAPIHandler(
         return {
             **dict(result),
             "dynamic_host": {
-                "version": "rumi.ui.contribution.v1",
+                "version": "tobkiri.ui.contribution.v1",
                 "profile_id": session.profile_id if session is not None else "",
                 "profile_revision": session.plan_digest if session is not None else "",
                 "plan_hash": session.plan_digest if session is not None else "",
@@ -1606,7 +1606,7 @@ class PackAPIHandler(
             "kind": "route" if is_conversation else "action",
             "mode": "declarative" if is_conversation else "same_origin_builtin",
             "label": (
-                "Tobkiri Conversation" if is_conversation else target.operation_id
+                "Defaults Profile Conversation" if is_conversation else target.operation_id
             ),
             "priority": priority,
             "owner_pack_id": target.owner_pack_id,
@@ -1621,7 +1621,7 @@ class PackAPIHandler(
                     "operation_id": target.operation_id,
                 }
             ),
-            "route": "/chat" if is_conversation else "/packs",
+            "route": "/pack-v4/conversation" if is_conversation else "/packs",
             "action_contract": target.contract_id,
             "operation_id": target.operation_id,
             "provider_id": target.provider_id,
@@ -1629,7 +1629,7 @@ class PackAPIHandler(
             "localization": {},
             "accessibility": {
                 "name": (
-                    "Tobkiri Conversation" if is_conversation else target.operation_id
+                    "Defaults Profile Conversation" if is_conversation else target.operation_id
                 ),
                 "keyboard": True,
             },
@@ -1637,8 +1637,8 @@ class PackAPIHandler(
         if is_conversation:
             contribution["view"] = {
                 "type": "conversation_v4",
-                "title": "Tobkiri Conversation",
-                "body": "Start a conversation with your active Tobkiri Profile.",
+                "title": "Defaults Profile Conversation",
+                "body": "Start a conversation with your active Defaults Profile.",
             }
         return contribution
 
@@ -1861,7 +1861,11 @@ headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
     def _serve_mount_bootstrap_page(self, target: str) -> None:
         """Exchange a one-time desktop code before serving an authenticated mount."""
 
-        safe_target = target if target in {"/chat", "/panel/"} else "/panel/"
+        safe_target = (
+            target
+            if target in {"/chat", "/pack-v4/conversation", "/panel/"}
+            else "/panel/"
+        )
         document = f"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
 <script>
 const code=new URL(location.href).searchParams.get('code');
@@ -1943,8 +1947,11 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         mount = self._match_web_mount(path)
         if mount is not None:
             if mount["auth_required"] and not self._check_auth("GET", path):
-                if mount["path_prefix"] == "/chat" and path in {"/chat", "/chat/"}:
-                    self._serve_mount_bootstrap_page("/chat")
+                if mount["path_prefix"] in {"/chat", "/pack-v4/conversation"} and path in {
+                    mount["path_prefix"],
+                    mount["path_prefix"] + "/",
+                }:
+                    self._serve_mount_bootstrap_page(mount["path_prefix"])
                 elif mount["path_prefix"] == "/panel" and path in {
                     "/panel",
                     "/panel/",

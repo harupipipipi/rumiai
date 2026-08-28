@@ -175,7 +175,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:eeb549d2a384b85ad805148da20ee1e37480b80751670ea9050202cd219b21a0",
+          "digest": "sha256:bc56a486dc6dfad6635c07b34f4f1e5d21bda8f4dba854d190a9fea7184c996e",
           "path": "ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
           "rule_id": "canonical-bundled-v4-source"
         }
@@ -194,7 +194,7 @@
       "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
-      "description": "Canonical Defaults v4 composition artifact.",
+      "description": "Finite read-only Pack catalog provider for the selected control-panel UI.",
       "display_name": "Tobkiri Defaults Providers",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
@@ -215,10 +215,10 @@
           "cardinality": "one",
           "contract_id": "conversation.turn.v1",
           "failure": "fail_closed",
-          "isolation": "sandbox",
+          "isolation": "in_process",
           "lifecycle": {
             "deprecated": false,
-            "introduced": "4.0.0"
+            "introduced": "1.0.0"
           },
           "operations": [
             {
@@ -288,24 +288,11 @@
               "type": "object"
             }
           },
-          "security": "restricted",
+          "security": "sensitive",
           "version": "1.0.0"
         }
       ],
-      "required_contracts": [
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.service.ai.generate.v1",
-          "optional": false,
-          "version_range": ">=1.0.0 <2.0.0"
-        },
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.service.ai.stream.v1",
-          "optional": false,
-          "version_range": ">=1.0.0 <2.0.0"
-        }
-      ],
+      "required_contracts": [],
       "runtime_artifacts": [
         {
           "digest": "sha256:4a404c7427393f7343d9bc74d19b9f0f5066f7090e93e728e65e6452441242a7",
@@ -314,13 +301,7 @@
         }
       ],
       "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:2fbbb1401c55af066aa4cbff858b0c647ac5ac06afe0abc1cc242e464d1c0231",
-          "path": "schemas/executable_sources.v1.json",
-          "rule_id": "canonical-bundled-v4-source"
-        }
-      ],
+      "source_evidence": [],
       "source_provenance": {
         "historical_classification": "modern-only",
         "mode": "canonical-v4",
@@ -1003,7 +984,7 @@
           "operations": [
             {
               "entrypoint_id": "ai-gateway-generate",
-              "id": "rumi_ai_gateway_pack.ai-gateway.generate",
+              "id": "rumi_ai_gateway_pack.ai-gateway-generate",
               "implementation_digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
             }
           ],
@@ -1036,7 +1017,7 @@
           "operations": [
             {
               "entrypoint_id": "ai-gateway-stream",
-              "id": "rumi_ai_gateway_pack.ai-gateway.stream",
+              "id": "rumi_ai_gateway_pack.ai-gateway-stream",
               "implementation_digest": "sha256:1c62e117deedea3af073bf7f244ce5f6e404a7b53b90696cf9a1ea54acafb02d"
             }
           ],
@@ -1145,7 +1126,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:2f4cefb6bee613233be46f66ad937e6cbdcb915b06568d76f931d68a4aebc5cb",
+          "digest": "sha256:63b8edf52eb44cc495f33d4dfec5024623ece81f8521f0d51ede348eb24c9e00",
           "path": "ecosystem/rumi_ai_gateway_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1429,16 +1410,6 @@
               "entrypoint_id": "ai-failover-decide",
               "id": "rumi_ai_pipeline_pack.ai-failover-decide",
               "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
-            },
-            {
-              "entrypoint_id": "ai-failover-decide.generate",
-              "id": "rumi_ai_pipeline_pack.ai-failover-decide.generate",
-              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
-            },
-            {
-              "entrypoint_id": "ai-failover-decide.stream",
-              "id": "rumi_ai_pipeline_pack.ai-failover-decide.stream",
-              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             }
           ],
           "owner": "rumi_ai_pipeline_pack",
@@ -1471,16 +1442,6 @@
             {
               "entrypoint_id": "ai-request-prepare",
               "id": "rumi_ai_pipeline_pack.ai-request-prepare",
-              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
-            },
-            {
-              "entrypoint_id": "ai-request-prepare.generate",
-              "id": "rumi_ai_pipeline_pack.ai-request-prepare.generate",
-              "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
-            },
-            {
-              "entrypoint_id": "ai-request-prepare.stream",
-              "id": "rumi_ai_pipeline_pack.ai-request-prepare.stream",
               "implementation_digest": "sha256:b1a3104fa7af317958dff3e18a39e4a5f443311ca94d58ae97301d6516303ed4"
             }
           ],
@@ -1522,7 +1483,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:a4096dd1904f2fbe0e78cae8b5e0609f6d74936fb5fb07d13a83ee9dd88c6446",
+          "digest": "sha256:7c9043e75b926fd1f6208735a53a6c62f02cb45d2da67b7d26c3170a4b409a4e",
           "path": "ecosystem/rumi_ai_pipeline_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1578,16 +1539,6 @@
               "entrypoint_id": "ai-route",
               "id": "rumi_ai_routing_pack.ai-route",
               "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
-            },
-            {
-              "entrypoint_id": "ai-route.generate",
-              "id": "rumi_ai_routing_pack.ai-route.generate",
-              "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
-            },
-            {
-              "entrypoint_id": "ai-route.stream",
-              "id": "rumi_ai_routing_pack.ai-route.stream",
-              "implementation_digest": "sha256:99fe1e1a126b8c0df54edb044461ecaf5efe33c55948e722c5216639cc230148"
             }
           ],
           "owner": "rumi_ai_routing_pack",
@@ -1628,7 +1579,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:aad0c650042cc05713bbdf32fdc354f2d17b255fad94fa0fc0a2ad3b85733be4",
+          "digest": "sha256:eb31ca7e9eabea95572feef822a5150b7e65d33aa7f67e5346aa470441ae5f5c",
           "path": "ecosystem/rumi_ai_routing_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1724,7 +1675,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:5323b52db280fae10b1ec641afc927479e39d8a5c8cd324e71aeb5c97ef2fc69",
+          "digest": "sha256:3be578dc3e1a6eecb4bfdb561203506f08431450f2e008df2b2ec02e22c28c7d",
           "path": "ecosystem/rumi_ai_stream_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1780,16 +1731,6 @@
               "entrypoint_id": "ai-tool-intent-normalize",
               "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize",
               "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
-            },
-            {
-              "entrypoint_id": "ai-tool-intent-normalize.generate",
-              "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.generate",
-              "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
-            },
-            {
-              "entrypoint_id": "ai-tool-intent-normalize.stream",
-              "id": "rumi_ai_tool_bridge_pack.ai-tool-intent-normalize.stream",
-              "implementation_digest": "sha256:27c6d726d1c1db4bb7a67565e4d56c9bddaab875d30824f330e15ec5c3e7e6b0"
             }
           ],
           "owner": "rumi_ai_tool_bridge_pack",
@@ -1830,7 +1771,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:d26178c90d03cad953fd220f9e848838989b8b39240c49dba3e9a8fcd73fce40",
+          "digest": "sha256:4a369320e3fb5ea28563907c8ca65d42d174aee87f6efca6261e3e4ced9e4a89",
           "path": "ecosystem/rumi_ai_tool_bridge_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -1921,16 +1862,6 @@
               "entrypoint_id": "ai-usage-cost",
               "id": "rumi_ai_usage_pack.ai-usage-cost",
               "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
-            },
-            {
-              "entrypoint_id": "ai-usage-cost.generate",
-              "id": "rumi_ai_usage_pack.ai-usage-cost.generate",
-              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
-            },
-            {
-              "entrypoint_id": "ai-usage-cost.stream",
-              "id": "rumi_ai_usage_pack.ai-usage-cost.stream",
-              "implementation_digest": "sha256:16b80027e2859cff8515525ee87e16e4c33a6c222d54168d1f5fa9a145195316"
             }
           ],
           "owner": "rumi_ai_usage_pack",
@@ -1971,7 +1902,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:13d04073da8624b3c6b144746f4d62c3b9f43745ff8f638a0dc8aeb63216f797",
+          "digest": "sha256:363f8bb55c54e469fa2bd9251c2bfa32d3162a50ce0e54ce057079221847817c",
           "path": "ecosystem/rumi_ai_usage_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -2900,7 +2831,7 @@
         "rumi_job_action_broker_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Company task projection into conversation and agent job contracts.",
-      "display_name": "Rumi Company Agent Adapter",
+      "display_name": "Tobkiri Company Agent Adapter",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -2990,12 +2921,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:ce275836c5033d953d0206a93134bd45a9411ff22ab037be0ec4059be9420fe8",
+          "digest": "sha256:c02b33684c0062354d200d2f473cd7de88543af4c1085c7b84ed2f4e8372d1a8",
           "path": "ecosystem/rumi_company_agent_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:da8961566d098dd091d90ad899b5aa34037a1fa56dc5a2e3fb6ed05789e6619f",
+          "digest": "sha256:011f4b68cb9364ac0a4c835f032f0bfa1cc0358476dae28d490edc6c10d11b6c",
           "path": "ecosystem/rumi_company_agent_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3026,7 +2957,7 @@
         "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Contract-only Company routing, work dispatch, and supervision.",
-      "display_name": "Rumi Company Coordinator",
+      "display_name": "Tobkiri Company Coordinator",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -3184,12 +3115,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:e23f64cb668d439ab6dc76a98e68dc1ae20b8328591a23bf1f3d4aafbe6743d9",
+          "digest": "sha256:89183a398935c512cb66948fd498a43b3332aa3783119aa6ea7cc6ab9467da75",
           "path": "ecosystem/rumi_company_coordinator_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:916441349d288d45c8e339fd86dd885fc54b82a00a6c12305600a2dd9803d8ea",
+          "digest": "sha256:7064af7ac3c281401d25fe8d52451262d3439e4fa9f9ff22df9e7b3fdd82b55f",
           "path": "ecosystem/rumi_company_coordinator_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3215,7 +3146,7 @@
         "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Authoritative Company organization and operations state.",
-      "display_name": "Rumi Company State Store",
+      "display_name": "Tobkiri Company State Store",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -3320,12 +3251,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2328367239d9fbe5133778baade41e7bf3c4e1d6caefea671767ca047c02f48a",
+          "digest": "sha256:2ee1cc4298164fb34c0096d1bd566091f9ad44b5162702b9291e1089f3337858",
           "path": "ecosystem/rumi_company_state_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:0bc989a6cc2986feec272b6abaa0ebc8aa23cea170dca344dfd64824f4b66e1b",
+          "digest": "sha256:b1600e73e02a7f65451a38d5e966052f98edc6fa509ac969fec9f8aa8f030a8d",
           "path": "ecosystem/rumi_company_state_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -3351,7 +3282,7 @@
         "rumi_company_state_store_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Removable Company content and isolated read-only UI projection.",
-      "display_name": "Rumi Company Surface",
+      "display_name": "Tobkiri Company Surface",
       "execution_boundary": "sandbox",
       "kind": "application",
       "legacy_ids": [
@@ -3385,7 +3316,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:0c501ba874d90285ae699aa8bd3b2d2ae390309d944997bd21efcdb610d0fef7",
+          "digest": "sha256:f7d571b533d2ff0bddff858f25163f86ab41c4ee94f05ac35c38aae8ce2ba3c2",
           "kind": "sidecar",
           "path": "frontend/contributions/companies.json"
         },
@@ -3408,12 +3339,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:0b286ae018c2a7773f75f7e215e2068650399195c10f5a59cb77580783bfd8ac",
+          "digest": "sha256:15b555baab4e0a3f049aaddaa207832bb26586cb7f5a052a64d87b2bd42bc339",
           "path": "ecosystem/rumi_company_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:69a1b3b94d185a6795666f3d7ecb430b22222dda56dfa4ff85b8f4a0f3e29777",
+          "digest": "sha256:7d66d8576085af81b23d5c289236dc8db2dd0111a11605557446c7ee38966ae7",
           "path": "ecosystem/rumi_company_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -4775,7 +4706,7 @@
       ],
       "dependencies": {},
       "description": "Atomic authoritative conversation and ordered-message storage.",
-      "display_name": "Rumi Conversation Store",
+      "display_name": "Tobkiri Conversation Store",
       "execution_boundary": "host_brokered",
       "kind": "host_extension",
       "legacy_ids": [
@@ -4985,12 +4916,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a5ca91a3019d121134e061a8e5373ccb1948eead4b976c2fa2a74da4f0a88824",
+          "digest": "sha256:2b3b6ef4d95e595420a7be3dc472679ea7ecf0c55a10f3715b59161df9cd0315",
           "path": "ecosystem/rumi_conversation_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:0dddfb30274b6567979b10646962af1cddaa3ef364cde7c0494c67f109139c8f",
+          "digest": "sha256:af60d7571fd7d9d16886bbaee6f3d0a924430a08cca0a21b4ad6a20bd5f8782c",
           "path": "ecosystem/rumi_conversation_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6087,11 +6018,6 @@
             {
               "entrypoint_id": "file-inspect",
               "id": "rumi_file_inspect_pack.file-inspect",
-              "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd"
-            },
-            {
-              "entrypoint_id": "file-inspect-for-media",
-              "id": "rumi_file_inspect_pack.file-inspect.for-media",
               "implementation_digest": "sha256:9267d5985023bcbdd20c318d07d01dcb8239d7628a2621005a37e89eed7a75bd"
             }
           ],
@@ -7569,7 +7495,7 @@
         "rumi_kanban_state_store_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Conversation task extraction through global contracts.",
-      "display_name": "Rumi Kanban Conversation Adapter",
+      "display_name": "Tobkiri Kanban Conversation Adapter",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -7658,12 +7584,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:0d3a6ee31d22bedffbcefad724b340b550aae0cbebc30ba280296b0c4f64de47",
+          "digest": "sha256:3b0e616da8d125dd4ed5516d81c6b760eafea92c6bfdd76ce24e1677df20d593",
           "path": "ecosystem/rumi_kanban_conversation_adapter_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b36ea9f8b8d9c9e25ca50f45df496f6cf7e47496f3cfc63b46261c870adf914d",
+          "digest": "sha256:cc1aa52d0125d39e4fd3c22a473d69a09884e78417a6f5aeb2ba116662b288ad",
           "path": "ecosystem/rumi_kanban_conversation_adapter_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7689,7 +7615,7 @@
         "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Authoritative Kanban state with receipt-bound mutations.",
-      "display_name": "Rumi Kanban State Store",
+      "display_name": "Tobkiri Kanban State Store",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -7794,12 +7720,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:8b5671d990bbfdd3d1f8ea8933a04bf2db67b250143c488917f5874e6ef0e54c",
+          "digest": "sha256:02a962b9e5f77e3e0f8d33dfe4f8b80fbeb56cf584ad14b39b53d513f6bc096c",
           "path": "ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:6dcab5ed123fa4c38ab953bfd1a2bff426a12e2544714b3de8e9b223f699d0bc",
+          "digest": "sha256:2ab6ff0e808a639eb84a7a6eec18448ae39077e72d52af9c09c5595b2a6d352f",
           "path": "ecosystem/rumi_kanban_state_store_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -7823,7 +7749,7 @@
         "rumi_kanban_state_store_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Removable read-only Kanban content projection.",
-      "display_name": "Rumi Kanban Surface",
+      "display_name": "Tobkiri Kanban Surface",
       "execution_boundary": "sandbox",
       "kind": "application",
       "legacy_ids": [
@@ -7851,7 +7777,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:5e2f74830566e7205145902e53cd755a53dbece1a9fe3539297c5f2eed4beb80",
+          "digest": "sha256:88e4001ab5715da62ae79176887b0e8391a436083d67f018a1b809e0d5c943ef",
           "kind": "sidecar",
           "path": "frontend/contributions/kanban.json"
         },
@@ -7874,12 +7800,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:a65da1321f77016406e82117333a8bbdba381188418d79cf0e76e1d3e410ba1b",
+          "digest": "sha256:77a93e795705498a341919f1cd510eef3cdd19de5973948c5eb2c347dcddc502",
           "path": "ecosystem/rumi_kanban_surface_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:fec678a9931e8305bc4bd31a3b957b7ac339daa024cdec5784fdb796acfe6076",
+          "digest": "sha256:a84e3c168b458defe203c341c4a09fe2b94cf902879c407e9697f72dceaf3565",
           "path": "ecosystem/rumi_kanban_surface_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8900,7 +8826,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:fe980195aff332ea529979a846d5aa742a0fb25a2dd05644df3037503ef4acc2",
+          "digest": "sha256:41044b4a8e155503a5cc17ea408778af135171706e5c341e169f91876aebcd65",
           "path": "ecosystem/rumi_media_inspect_service_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9228,7 +9154,7 @@
         "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
       },
       "description": "One-time signed device envelopes and relay handoff.",
-      "display_name": "Rumi Mobile Pairing Connector",
+      "display_name": "Tobkiri Mobile Pairing Connector",
       "execution_boundary": "sandbox",
       "kind": "normal_sandbox",
       "legacy_ids": [
@@ -9313,12 +9239,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:317d78d0e571e80be1ab54e38298c1462d73e059595a6588f8901a62cee3222c",
+          "digest": "sha256:bb434fa8958ff42a7f990aa873e1a34db299faeee6f11f5b3c16d03c8730a96c",
           "path": "ecosystem/rumi_mobile_pairing_connector_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:4c56b2d854ea465c8d9bf3db562c65db6329769af27269872c768b1dbd8f7622",
+          "digest": "sha256:ef68594543a225f8b9374eb8ab57c971abcd58fb5ae60c0948c7de06bd37c77b",
           "path": "ecosystem/rumi_mobile_pairing_connector_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9376,16 +9302,6 @@
               "entrypoint_id": "bundled-model-catalog",
               "id": "rumi_model_catalog_pack.bundled-model-catalog",
               "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
-            },
-            {
-              "entrypoint_id": "bundled-model-catalog.generate",
-              "id": "rumi_model_catalog_pack.bundled-model-catalog.generate",
-              "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
-            },
-            {
-              "entrypoint_id": "bundled-model-catalog.stream",
-              "id": "rumi_model_catalog_pack.bundled-model-catalog.stream",
-              "implementation_digest": "sha256:cf339a1e99524d37d5bec3b3ab721aef8063f532b7873c0bafc253f4cabc780f"
             }
           ],
           "owner": "rumi_model_catalog_pack",
@@ -9426,7 +9342,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:391742283903d0a1f7731c2602028ba58840c3a74aa440e6e05afd9bd1a38a08",
+          "digest": "sha256:2ee9b26df803e20698561b33ebba440e9cffb4aff32a756c3f614c184cd3c0a6",
           "path": "ecosystem/rumi_model_catalog_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -9724,16 +9640,6 @@
               "entrypoint_id": "model-profile-resource",
               "id": "rumi_model_registry_pack.model-profile-resource",
               "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
-            },
-            {
-              "entrypoint_id": "model-profile-resource.generate",
-              "id": "rumi_model_registry_pack.model-profile-resource.generate",
-              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
-            },
-            {
-              "entrypoint_id": "model-profile-resource.stream",
-              "id": "rumi_model_registry_pack.model-profile-resource.stream",
-              "implementation_digest": "sha256:c6186fd17b9a4a2ae6eba0bdc90687795bfd2aaba869c1131f353085d85bf78f"
             }
           ],
           "owner": "rumi_model_registry_pack",
@@ -9784,7 +9690,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:d8de8bed125303d43c5aabfab0d27673ce0d158714f32deba152a616306a8525",
+          "digest": "sha256:179e7d456171751df49542ea67934710d643d969aa9a0fb070b6dca5d17937a8",
           "path": "ecosystem/rumi_model_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10185,7 +10091,7 @@
       "capabilities": [],
       "dependencies": {},
       "description": "",
-      "display_name": "Rumi Pack Suite Pack",
+      "display_name": "Tobkiri Pack Suite Pack",
       "execution_boundary": "declarative_only",
       "kind": "application",
       "legacy_ids": [
@@ -10208,7 +10114,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:7ede30e875c651e5ce8874526f1f74654a489fc0fcfccb28f51f37995c0e449e",
+          "digest": "sha256:47ca02a85bef69d8ab2b8ff1c27ff65b358a96864e89bb1e6098233337ae40a3",
           "path": "ecosystem/rumi_pack_suite_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10232,7 +10138,7 @@
       ],
       "dependencies": {},
       "description": "Authoritative local prompt authoring, versioning, migration, and isolated UI.",
-      "display_name": "Rumi Prompt Studio",
+      "display_name": "Tobkiri Prompt Studio",
       "execution_boundary": "host_brokered",
       "kind": "host_extension",
       "legacy_ids": [
@@ -10449,7 +10355,7 @@
           "path": "catalog/prompt_studio_prompt_library.yaml"
         },
         {
-          "digest": "sha256:7a21d786ce90d54f615b7e85a7317ff7556d82a49a79070407ac65a50b3c6484",
+          "digest": "sha256:9212d1c9fed5143d5407b037415c261accd7d6112fd16c5256af5ab5304590b5",
           "kind": "executable",
           "path": "frontend/contributions/prompt-studio.json"
         },
@@ -10492,12 +10398,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:c8e7f9725de3b7282c3cadeaf0b4f1121a4bc53268b9aec8badc3d9288f536f6",
+          "digest": "sha256:66c3ce3f2280c92f27a8265781a7a78354505feeba97e83fcbb4352b4fc85afd",
           "path": "ecosystem/rumi_prompt_studio_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:166a52df1a3639d75739a74f3617646257dd0ff31d0517a8dc6e8579222d003b",
+          "digest": "sha256:5e05a9755b8d3c47aff6a5a3fbb68a61516ed9e7f74c8cc7440a640c25fcd98a",
           "path": "ecosystem/rumi_prompt_studio_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10717,7 +10623,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:b1ac91a1e6a2d129b7334d69cddece76bdd32f701cdf5084d8c7749ffb5bee51",
+          "digest": "sha256:bf19eedbddeb69c07bf493e47c028dbe59d799c29d771ace792c0680f707ba60",
           "path": "ecosystem/rumi_provider_adapters_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -10812,16 +10718,6 @@
               "entrypoint_id": "provider-registry-health",
               "id": "rumi_provider_registry_pack.provider-registry-health",
               "implementation_digest": "sha256:2f646d43d764cb5e7f410af2d1b5246f17412c98758583e285006c1063c81455"
-            },
-            {
-              "entrypoint_id": "provider-registry-health.generate",
-              "id": "rumi_provider_registry_pack.provider-registry-health.generate",
-              "implementation_digest": "sha256:2f646d43d764cb5e7f410af2d1b5246f17412c98758583e285006c1063c81455"
-            },
-            {
-              "entrypoint_id": "provider-registry-health.stream",
-              "id": "rumi_provider_registry_pack.provider-registry-health.stream",
-              "implementation_digest": "sha256:2f646d43d764cb5e7f410af2d1b5246f17412c98758583e285006c1063c81455"
             }
           ],
           "owner": "rumi_provider_registry_pack",
@@ -10856,16 +10752,6 @@
             {
               "entrypoint_id": "provider-registry-resource",
               "id": "rumi_provider_registry_pack.provider-registry-resource",
-              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
-            },
-            {
-              "entrypoint_id": "provider-registry-resource.generate",
-              "id": "rumi_provider_registry_pack.provider-registry-resource.generate",
-              "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
-            },
-            {
-              "entrypoint_id": "provider-registry-resource.stream",
-              "id": "rumi_provider_registry_pack.provider-registry-resource.stream",
               "implementation_digest": "sha256:740c36b4d83fd920b1dccf6f3848f942838db624add1fae4e136e122c8fff286"
             }
           ],
@@ -10922,7 +10808,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:9da5b4c30ee0c6ae49dc4b12bc4833df5ad4806350919593b54caed63ec3103c",
+          "digest": "sha256:7c18f2de23aee2f7e842b38f37381cacae5abc55618fc02afc6f3a0b68b4b420",
           "path": "ecosystem/rumi_provider_registry_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -14842,8 +14728,8 @@
       "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
-      "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
-      "display_name": "Rumi Voice Mobile Pack",
+      "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt Pack for on-the-go Tobkiri interactions.",
+      "display_name": "Tobkiri Voice Mobile Pack",
       "execution_boundary": "declarative_only",
       "kind": "application",
       "legacy_ids": [
@@ -14866,7 +14752,7 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:62cfe78e46e275f98b13668b5eba4e04b94378c5ec36c462beb27c9326384484",
+          "digest": "sha256:3b4c58159deb76ae5bd89bc3113c9ee2a3f661eda585dbe5f6330b55b92c3303",
           "path": "ecosystem/rumi_voice_mobile_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -15045,7 +14931,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:1092668cd17b8bad18461c4ae8dae0e06b859a1c641d04a625b48bc7ea1679e7",
+          "digest": "sha256:d35a08e7e791254bffbbd1825efc5242aadeee465f5c55219cfe54395a801790",
           "path": "ecosystem/rumi_workspace_mount_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -15180,6 +15066,7 @@
       "approval_policy": "capability_gated",
       "authority": "v4-authoritative",
       "capabilities": [
+        "control.presentation",
         "dashboard.read",
         "pack.approval.commit",
         "pack.approval.prepare",
@@ -15189,7 +15076,6 @@
         "pack.enable",
         "pack.install",
         "pack.status.read",
-        "control.presentation",
         "profile.reload",
         "runtime.restart"
       ],
@@ -15211,123 +15097,6 @@
       },
       "pack_id": "tobkiri_host_pack_control",
       "provided_contracts": [
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.host.pack-control.v4",
-          "failure": "fail_closed",
-          "isolation": "in_process",
-          "lifecycle": {
-            "deprecated": false,
-            "introduced": "1.0.0"
-          },
-          "operations": [
-            {
-              "entrypoint_id": "approval.approve",
-              "id": "approval.approve",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "approval.candidate",
-              "id": "approval.candidate",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "approval.revoke",
-              "id": "approval.revoke",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "catalog.read",
-              "id": "catalog.read",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "dashboard.read",
-              "id": "dashboard.read",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "pack.disable",
-              "id": "pack.disable",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "pack.enable",
-              "id": "pack.enable",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "pack.install",
-              "id": "pack.install",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "pack.status",
-              "id": "pack.status",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "profile.reload",
-              "id": "profile.reload",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            },
-            {
-              "entrypoint_id": "runtime.restart",
-              "id": "runtime.restart",
-              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
-            }
-          ],
-          "owner": "tobkiri_host_pack_control",
-          "provider_id": "tobkiri.host.pack-control",
-          "required_capabilities": [
-            "dashboard.read",
-            "pack.approval.commit",
-            "pack.approval.prepare",
-            "pack.approval.revoke",
-            "pack.catalog.read",
-            "pack.disable",
-            "pack.enable",
-            "pack.install",
-            "pack.status.read",
-            "profile.reload",
-            "runtime.restart"
-          ],
-          "schemas": {
-            "error": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "code",
-                "message"
-              ],
-              "type": "object"
-            },
-            "input": {
-              "additionalProperties": false,
-              "properties": {
-                "candidate_id": {
-                  "type": "string"
-                },
-                "pack_id": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "output": {
-              "type": "object"
-            }
-          },
-          "security": "sensitive",
-          "version": "1.0.0"
-        },
         {
           "cardinality": "one",
           "contract_id": "tobkiri.host.control-presentation.v4",
@@ -15402,7 +15171,18 @@
           "owner": "tobkiri_host_pack_control",
           "provider_id": "tobkiri.host.control-presentation",
           "required_capabilities": [
-            "control.presentation"
+            "control.presentation",
+            "dashboard.read",
+            "pack.approval.commit",
+            "pack.approval.prepare",
+            "pack.approval.revoke",
+            "pack.catalog.read",
+            "pack.disable",
+            "pack.enable",
+            "pack.install",
+            "pack.status.read",
+            "profile.reload",
+            "runtime.restart"
           ],
           "schemas": {
             "error": {
@@ -15677,6 +15457,124 @@
           },
           "security": "sensitive",
           "version": "1.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.host.pack-control.v4",
+          "failure": "fail_closed",
+          "isolation": "in_process",
+          "lifecycle": {
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "entrypoint_id": "approval.approve",
+              "id": "approval.approve",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "approval.candidate",
+              "id": "approval.candidate",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "approval.revoke",
+              "id": "approval.revoke",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "catalog.read",
+              "id": "catalog.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "dashboard.read",
+              "id": "dashboard.read",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.disable",
+              "id": "pack.disable",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.enable",
+              "id": "pack.enable",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.install",
+              "id": "pack.install",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "pack.status",
+              "id": "pack.status",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "profile.reload",
+              "id": "profile.reload",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            },
+            {
+              "entrypoint_id": "runtime.restart",
+              "id": "runtime.restart",
+              "implementation_digest": "sha256:0d65cfd041a191408c1cabc98191647d950e0dd24c369c0a2bccdaa07049f0c7"
+            }
+          ],
+          "owner": "tobkiri_host_pack_control",
+          "provider_id": "tobkiri.host.pack-control",
+          "required_capabilities": [
+            "control.presentation",
+            "dashboard.read",
+            "pack.approval.commit",
+            "pack.approval.prepare",
+            "pack.approval.revoke",
+            "pack.catalog.read",
+            "pack.disable",
+            "pack.enable",
+            "pack.install",
+            "pack.status.read",
+            "profile.reload",
+            "runtime.restart"
+          ],
+          "schemas": {
+            "error": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "message"
+              ],
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "candidate_id": {
+                  "type": "string"
+                },
+                "pack_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "sensitive",
+          "version": "1.0.0"
         }
       ],
       "required_contracts": [],
@@ -15699,7 +15597,7 @@
       "workspace_boundary": "host_brokered"
     },
     {
-      "approval_policy": "capability_gated",
+      "approval_policy": "none",
       "authority": "v4-authoritative",
       "capabilities": [
         "workflow.definition.write",
@@ -15710,313 +15608,37 @@
       "description": "Authority-aware local-first Workflow v4 provider.",
       "display_name": "Tobkiri Workflow Pack",
       "execution_boundary": "host_brokered",
-      "kind": "host_extension",
-      "legacy_ids": [],
+      "kind": "application",
+      "legacy_ids": [
+        "tobkiri:ecosystem/tobkiri_workflow_pack",
+        "tobkiri_workflow_pack"
+      ],
       "legacy_operations": [],
       "migration": {
-        "compatibility": "none",
-        "removal_wave": 13,
-        "sunset_at": "2026-08-10"
+        "removal_wave": 10,
+        "sunset_at": "2099-01-01"
       },
       "network": {
         "allowed_domains": [],
         "allowed_ports": []
       },
       "pack_id": "tobkiri_workflow_pack",
-      "provided_contracts": [
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.workflow.v4",
-          "failure": "fail_closed",
-          "isolation": "in_process",
-          "lifecycle": {
-            "authority_per_attempt": true,
-            "deprecated": false,
-            "introduced": "4.0.0",
-            "local_first": true
-          },
-          "operations": [
-            {
-              "entrypoint_id": "definition.archive",
-              "id": "definition.archive",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.create",
-              "id": "definition.create",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.delete",
-              "id": "definition.delete",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.get",
-              "id": "definition.get",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.list",
-              "id": "definition.list",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.publish",
-              "id": "definition.publish",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.update",
-              "id": "definition.update",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.validate",
-              "id": "definition.validate",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "definition.compile-preview",
-              "id": "definition.compile-preview",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "operation.palette",
-              "id": "operation.palette",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.cancel",
-              "id": "run.cancel",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.advance",
-              "id": "run.advance",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.create",
-              "id": "run.create",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.get",
-              "id": "run.get",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.pause",
-              "id": "run.pause",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.reconcile-recovery",
-              "id": "run.reconcile-recovery",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.resume",
-              "id": "run.resume",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.step.execute",
-              "id": "run.step.execute",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.step.resume",
-              "id": "run.step.resume",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            },
-            {
-              "entrypoint_id": "run.step.retry",
-              "id": "run.step.retry",
-              "implementation_digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3"
-            }
-          ],
-          "owner": "tobkiri_workflow_pack",
-          "provider_id": "tobkiri.workflow.provider",
-          "required_capabilities": [
-            "workflow.definition.write",
-            "workflow.run.control",
-            "workflow.step.authority.reserve"
-          ],
-          "schemas": {
-            "error": {
-              "$id": "https://schemas.tobkiri.local/io.tobkiri/workflow-error.v4.schema.json",
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "diagnostic_id": {
-                  "minLength": 1,
-                  "type": "string"
-                }
-              },
-              "required": [
-                "code"
-              ],
-              "type": "object"
-            },
-            "input": {
-              "$id": "https://schemas.tobkiri.local/io.tobkiri/workflow-operation.v4.schema.json",
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": true,
-              "maxProperties": 64,
-              "type": "object"
-            },
-            "output": {
-              "$id": "https://schemas.tobkiri.local/io.tobkiri/workflow-result.v4.schema.json",
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "additionalProperties": true,
-              "maxProperties": 128,
-              "type": "object"
-            }
-          },
-          "security": "restricted",
-          "version": "4.0.0"
-        }
-      ],
+      "provided_contracts": [],
       "required_contracts": [],
-      "runtime_artifacts": [
-        {
-          "digest": "sha256:792b96b8f9912b8edce4b85bf9218c9afad9d654a4ff1e038cf2f024a2dda0e3",
-          "index_role": "runtime",
-          "kind": "executable",
-          "path": "runtime/provider.py"
-        },
-        {
-          "digest": "sha256:6ce340ccfa37ae1f4bb14106d80e202d98b618b92a646eb8e1cbbedcc44f8fcd",
-          "index_role": "schema",
-          "kind": "schema",
-          "path": "schemas/workflow-definition.v4.schema.json"
-        },
-        {
-          "digest": "sha256:e4e9d62afc0f41dd9ac026010f588e9e6829933ba87e71b31e9cf3b67c5cad4e",
-          "index_role": "schema",
-          "kind": "schema",
-          "path": "schemas/workflow-operation.v4.schema.json"
-        },
-        {
-          "digest": "sha256:59ae8ec6c690bc6f11025fdd8a31d4d7d23d8e1138d87f77da49a6e02a277580",
-          "index_role": "schema",
-          "kind": "schema",
-          "path": "schemas/workflow-result.v4.schema.json"
-        },
-        {
-          "digest": "sha256:f53591d6733669515655f01feae9d3dc249dc72666bf62c9a494b4b1d915a63e",
-          "index_role": "schema",
-          "kind": "schema",
-          "path": "schemas/workflow-error.v4.schema.json"
-        },
-        {
-          "digest": "sha256:6f8979544b0979978815aecc6c59f1372f036e6d128318687a0e4e71ba6f8b9e",
-          "index_role": "schema",
-          "kind": "schema",
-          "path": "schemas/frontend-contract-map.v4.schema.json"
-        },
-        {
-          "digest": "sha256:26cef1a25d1184d03285cf1a261372e73cf47d9a4ff0b65cee1acf55366fdb86",
-          "index_role": "asset",
-          "kind": "asset",
-          "path": "frontend_contract_map.v4.json"
-        },
-        {
-          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
-          "index_role": "asset",
-          "kind": "asset",
-          "path": "backend-integrity.v4.json"
-        }
-      ],
+      "runtime_artifacts": [],
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:5753b4a86708cfb85f6b1365ea56f918b61acb85c6be194e975386a1cad274d8",
-          "path": "ecosystem/tobkiri_workflow_pack/generate_v4.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:da40d71dce8a893305036c767481cd60fad1675fe2ca91e603ec899d8e77d16e",
-          "path": "core_runtime/workflow_v4/__init__.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:4fda245ac2e586d999b1e7698cf516b4960803297473a2b76500e0a0dbbee12b",
-          "path": "core_runtime/workflow_v4/engine.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:19f1da94324333fa4291aa738b30e2651df361a07638a82ce49393e88469dffc",
-          "path": "core_runtime/workflow_v4/integration.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:b10c9fda239788a3333e58b1ba0245375a592541dd3459f95d2e3caaa3e79684",
-          "path": "core_runtime/workflow_v4/models.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:1c775cd87cbe80f5090204d639a7ece2c2a557d6cad2c975b91d7947fe254219",
-          "path": "core_runtime/workflow_v4/protocols.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:569c73c554d42405da5cf5f5c224b0ead282590fb4d870064b63b2d4b7286a58",
-          "path": "core_runtime/workflow_v4/provider.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:fc6592c70f0e25a1f06a5a0de5834504affea40b70326e042fd88cfb1c0311ea",
-          "path": "core_runtime/workflow_v4/store.py",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:6ce340ccfa37ae1f4bb14106d80e202d98b618b92a646eb8e1cbbedcc44f8fcd",
-          "path": "ecosystem/tobkiri_workflow_pack/schemas/workflow-definition.v4.schema.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:e4e9d62afc0f41dd9ac026010f588e9e6829933ba87e71b31e9cf3b67c5cad4e",
-          "path": "ecosystem/tobkiri_workflow_pack/schemas/workflow-operation.v4.schema.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:59ae8ec6c690bc6f11025fdd8a31d4d7d23d8e1138d87f77da49a6e02a277580",
-          "path": "ecosystem/tobkiri_workflow_pack/schemas/workflow-result.v4.schema.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:f53591d6733669515655f01feae9d3dc249dc72666bf62c9a494b4b1d915a63e",
-          "path": "ecosystem/tobkiri_workflow_pack/schemas/workflow-error.v4.schema.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:6f8979544b0979978815aecc6c59f1372f036e6d128318687a0e4e71ba6f8b9e",
-          "path": "ecosystem/tobkiri_workflow_pack/schemas/frontend-contract-map.v4.schema.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:26cef1a25d1184d03285cf1a261372e73cf47d9a4ff0b65cee1acf55366fdb86",
-          "path": "ecosystem/tobkiri_workflow_pack/frontend_contract_map.v4.json",
-          "rule_id": "workflow-v4-canonical-source"
-        },
-        {
-          "digest": "sha256:975fc9cc3122ec8e08abc08dc873dc97309dae6a02c0e39a3d6f25f99a9f127b",
-          "path": "ecosystem/tobkiri_workflow_pack/backend-integrity.v4.json",
-          "rule_id": "workflow-v4-canonical-source"
+          "digest": "sha256:20c1d30f9e5b94697ed8d88ad86376d720702df141c5a080484615a02db27322",
+          "path": "ecosystem/tobkiri_workflow_pack/ecosystem.json",
+          "rule_id": "pack-v4-one-way-migration-input"
         }
       ],
       "source_provenance": {
-        "historical_classification": "modern-only",
-        "mode": "canonical-v4",
+        "historical_classification": "legacy-authoritative",
+        "mode": "offline-one-way-import",
         "owner": "tobkiri_workflow_pack",
-        "source_format": "pack.v4.json"
+        "source_format": "ecosystem.json"
       },
       "version": "4.0.0",
       "workspace_boundary": "host_brokered"

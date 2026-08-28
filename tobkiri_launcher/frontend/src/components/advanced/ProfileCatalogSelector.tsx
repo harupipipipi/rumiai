@@ -311,7 +311,7 @@ export function ProfileCatalogSelector({
               <p className="text-sm font-semibold text-text-main">Add a verified Profile</p>
               <p className="mt-1 text-sm leading-6 text-text-muted">New Profiles come from a signed Profile bundle published to the runtime catalog. This runtime does not currently expose a Profile-authoring operation, so Launcher will not create an unverified local substitute. Install or publish the bundle, then refresh this list.</p>
               <Button type="button" className="mt-3" size="sm" variant="outline" onClick={() => void catalogSurface.refresh(true)} loading={catalogSurface.status === 'loading'}>
-               <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Refresh Profiles
               </Button>
             </div>

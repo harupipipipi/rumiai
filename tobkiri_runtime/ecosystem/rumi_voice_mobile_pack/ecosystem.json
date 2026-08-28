@@ -1,8 +1,8 @@
 {
   "components": {},
   "dependencies": {},
-  "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt pack for on-the-go Rumi interactions.",
-  "display_name": "Rumi Voice Mobile Pack",
+  "description": "Declarative voice, mobile, intent, consent, notification, and handoff receipt Pack for on-the-go Tobkiri interactions.",
+  "display_name": "Tobkiri Voice Mobile Pack",
   "host_execution": false,
   "load_order": [],
   "metadata": {

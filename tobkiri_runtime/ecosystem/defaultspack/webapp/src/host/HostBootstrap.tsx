@@ -8,6 +8,7 @@ import {
 
 import { TobkiriLoadingScreen } from "../components/TobkiriLoadingScreen";
 import { defaultspackApiFetch, defaultspackContractRoute } from "../lib/api";
+import { isPackV4ConversationRoute } from "../lib/frontendRoute";
 import { ConversationV4Unavailable } from "./ConversationV4View";
 import {
   DynamicFrontendHost,
@@ -18,6 +19,7 @@ import type {
   FrontendCapabilityClient,
   FrontendCatalog,
 } from "./frontendContracts";
+import { isFrontendCatalog } from "./frontendContracts";
 
 type ApiEnvelope<T> = {
   success: boolean;
@@ -26,7 +28,7 @@ type ApiEnvelope<T> = {
 };
 
 type UiCatalogEnvelope = {
-  dynamic_host?: FrontendCatalog | null;
+  dynamic_host?: unknown;
 };
 
 export class FrontendCapabilityError extends Error {
@@ -45,7 +47,11 @@ export async function fetchDynamicCatalog(): Promise<FrontendCatalog> {
   });
   const envelope = await response.json() as ApiEnvelope<UiCatalogEnvelope>;
   const catalog = envelope.data?.dynamic_host;
-  if (!response.ok || envelope.success !== true || !catalog) {
+  if (
+    !response.ok
+    || envelope.success !== true
+    || !isFrontendCatalog(catalog)
+  ) {
     throw new Error("dynamic_frontend_catalog_unavailable");
   }
   return catalog;
@@ -193,7 +199,7 @@ export function HostBootstrapFallback({
   onRetry: () => void;
   fallback: ReactNode;
 }) {
-  if (route === "/chat" || route === "/chat/") {
+  if (isPackV4ConversationRoute(route)) {
     return <ConversationV4Unavailable reason={reason} onRetry={onRetry} />;
   }
   return <>{fallback}</>;

@@ -17,7 +17,7 @@
     "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
   },
   "description": "Contract-only Company routing, work dispatch, and supervision.",
-  "display_name": "Rumi Company Coordinator",
+  "display_name": "Tobkiri Company Coordinator",
   "host_execution": false,
   "metadata": {
     "authoritative_owner": false,

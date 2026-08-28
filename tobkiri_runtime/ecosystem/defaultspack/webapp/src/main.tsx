@@ -8,6 +8,10 @@ import {
 } from "./lib/authorityApprovalBrowserToken";
 import { installGlobalClientDiagnostics } from "./lib/clientDiagnostics";
 import { installKeyboardOnlyFocusRings } from "./lib/focusModality";
+import {
+  isPackV4ConversationRoute,
+  normalizeFrontendRoute,
+} from "./lib/frontendRoute";
 import "./index.css";
 
 cleanupLegacyApprovalCredentialsEarly();
@@ -23,13 +27,21 @@ installGlobalClientDiagnostics();
 // mistakes a capitalized lazy binding for an exported component, an invalidated
 // entry can import itself and call createRoot twice.
 const compatibilitySurface = lazy(() => import("./App"));
-const route = window.location.pathname;
+const route = normalizeFrontendRoute(window.location.pathname);
+const usePackV4ConversationHost = isPackV4ConversationRoute(route);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppErrorBoundary>
       <Suspense fallback={<TobkiriLoadingScreen />}>
-        <HostBootstrap route={route} fallback={React.createElement(compatibilitySurface)} />
+        {usePackV4ConversationHost ? (
+          <HostBootstrap
+            route={route}
+            fallback={React.createElement(compatibilitySurface)}
+          />
+        ) : (
+          React.createElement(compatibilitySurface)
+        )}
       </Suspense>
     </AppErrorBoundary>
   </React.StrictMode>,

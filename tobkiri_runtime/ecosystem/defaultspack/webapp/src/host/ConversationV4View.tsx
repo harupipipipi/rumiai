@@ -2,8 +2,13 @@ import { useRef, useState, type FormEvent } from "react";
 
 import type {
   FrontendCapabilityClient,
+  Sha256Digest,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
+import {
+  normalizeFrontendRoute,
+  PACK_V4_CONVERSATION_ROUTE,
+} from "../lib/frontendRoute";
 
 export type ConversationV4Message = {
   id: string;
@@ -16,6 +21,7 @@ type ContractMessage = Pick<ConversationV4Message, "role" | "content">;
 const CONVERSATION_V4_CONTRACT = "conversation.turn.v1";
 const CONVERSATION_V4_CONTRIBUTION = "defaults.conversation.complete";
 const CONVERSATION_V4_BUILD_IDENTITY = "defaultspack.conversation";
+const CONVERSATION_V4_LABEL = "Defaults Profile Conversation";
 
 /** Return whether a verified contribution selects the host-owned v4 chat. */
 export function isConversationV4Contribution(
@@ -23,7 +29,7 @@ export function isConversationV4Contribution(
 ): boolean {
   return item.kind === "route"
     && item.mode === "declarative"
-    && item.route === "/chat"
+    && normalizeFrontendRoute(item.route ?? "") === PACK_V4_CONVERSATION_ROUTE
     && item.contribution_id === CONVERSATION_V4_CONTRIBUTION
     && item.owner_pack_id === "defaultspack"
     && item.build_identity === CONVERSATION_V4_BUILD_IDENTITY
@@ -78,7 +84,7 @@ export function ConversationV4View({
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
-  catalogHash: string;
+  catalogHash: Sha256Digest;
   capabilities: FrontendCapabilityClient;
 }) {
   const [messages, setMessages] = useState<ConversationV4Message[]>([]);
@@ -157,7 +163,7 @@ export function ConversationV4View({
           className="mt-1 text-xl font-semibold tracking-tight text-zinc-50"
           id="conversation-v4-title"
         >
-          Tobkiri Conversation
+          {CONVERSATION_V4_LABEL}
         </h1>
       </header>
 
@@ -267,7 +273,7 @@ export function ConversationV4Unavailable({
           Pack v4
         </p>
         <h1 className="mt-2 text-xl font-semibold" id="conversation-v4-unavailable-title">
-          Tobkiri Conversation is unavailable
+          {CONVERSATION_V4_LABEL} is unavailable
         </h1>
         <p className="mt-3 text-sm leading-6 text-zinc-300" role="status">
           {reason}

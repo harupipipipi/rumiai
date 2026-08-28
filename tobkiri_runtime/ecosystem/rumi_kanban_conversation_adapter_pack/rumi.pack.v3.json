@@ -99,7 +99,7 @@
           "rumi_kanban_state_store_pack": ">=1.0.0,<2.0.0"
         },
         "description": "Conversation task extraction through global contracts.",
-        "display_name": "Rumi Kanban Conversation Adapter",
+        "display_name": "Tobkiri Kanban Conversation Adapter",
         "host_execution": false,
         "metadata": {
           "authoritative_owner": false,
@@ -168,7 +168,7 @@
   },
   "pack": {
     "description": "Conversation task extraction through global contracts.",
-    "display_name": "Rumi Kanban Conversation Adapter",
+    "display_name": "Tobkiri Kanban Conversation Adapter",
     "id": "rumi.kanban_conversation_adapter",
     "kind": "adapter",
     "version": "1.0.0"

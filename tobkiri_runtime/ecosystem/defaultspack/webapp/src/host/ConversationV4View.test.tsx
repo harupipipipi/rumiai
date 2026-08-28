@@ -12,26 +12,29 @@ import {
 } from "./ConversationV4View";
 import type {
   FrontendCapabilityClient,
+  Sha256Digest,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
+
+const PLAN_HASH: Sha256Digest = `sha256:${"a".repeat(64)}`;
 
 const contribution: VerifiedFrontendContribution = {
   contribution_id: "defaults.conversation.complete",
   kind: "route",
   mode: "declarative",
-  label: "Tobkiri Conversation",
+  label: "Defaults Profile Conversation",
   priority: 100,
   owner_pack_id: "defaultspack",
   owner_pack_hash: `sha256:${"1".repeat(64)}`,
   build_identity: "defaultspack.conversation",
   resolved_profile_revision: "profile-1",
-  resolved_plan_hash: "plan-1",
+  resolved_plan_hash: PLAN_HASH,
   descriptor_hash: `sha256:${"2".repeat(64)}`,
-  route: "/chat",
+  route: "/pack-v4/conversation",
   action_contract: "conversation.turn.v1",
   view: { type: "conversation_v4" },
   localization: {},
-  accessibility: { name: "Tobkiri Conversation", keyboard: true },
+  accessibility: { name: "Defaults Profile Conversation", keyboard: true },
 };
 
 const capabilities: FrontendCapabilityClient = {
@@ -66,9 +69,10 @@ test("ConversationV4View accepts the projected non-streaming completion", () => 
   assert.equal(conversationV4AssistantText({ content: [] }), null);
 });
 
-test("ConversationV4View is selected only by the exact defaultspack chat contribution", () => {
+test("ConversationV4View is selected only by the exact defaultspack conversation contribution", () => {
   assert.equal(isConversationV4Contribution(contribution), true);
   assert.equal(isConversationV4Contribution({ ...contribution, route: "/packs" }), false);
+  assert.equal(isConversationV4Contribution({ ...contribution, route: "/pack-v4/conversation/" }), true);
   assert.equal(isConversationV4Contribution({ ...contribution, contribution_id: "other" }), false);
   assert.equal(isConversationV4Contribution({ ...contribution, owner_pack_id: "other" }), false);
   assert.equal(isConversationV4Contribution({ ...contribution, build_identity: "other" }), false);
@@ -87,6 +91,7 @@ test("ConversationV4View provides an accessible transcript and composer without 
 
   assert.match(markup, /data-conversation-surface="v4"/);
   assert.match(markup, /aria-label="Conversation transcript"/);
+  assert.match(markup, /Defaults Profile Conversation/);
   assert.match(markup, /Message Tobkiri/);
   assert.match(markup, /<textarea/);
   assert.match(markup, />Send</);
