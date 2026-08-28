@@ -60,6 +60,7 @@ pub(crate) struct DefaultspackDesktopMetadata {
     artifact_digest: String,
     function_id: String,
     provider_id: String,
+    application_id: String,
 }
 
 impl DefaultspackDesktopMetadata {
@@ -73,6 +74,22 @@ impl DefaultspackDesktopMetadata {
 
     pub(crate) fn execution_identity(&self) -> &crate::host_contract::ExecutionProfileIdentity {
         &self.execution_identity
+    }
+
+    pub(crate) fn application_id(&self) -> &str {
+        &self.application_id
+    }
+
+    pub(crate) fn artifact_digest(&self) -> &str {
+        &self.artifact_digest
+    }
+
+    pub(crate) fn function_id(&self) -> &str {
+        &self.function_id
+    }
+
+    pub(crate) fn provider_id(&self) -> &str {
+        &self.provider_id
     }
 }
 
@@ -843,6 +860,7 @@ fn read_defaultspack_desktop_metadata(
         artifact_digest: authority.launch.artifact_digest,
         function_id: authority.launch.function_id,
         provider_id: authority.launch.provider_id,
+        application_id: authority.application_id,
     })
 }
 
@@ -1316,6 +1334,7 @@ mod tests {
             artifact_digest: "sha256:test".into(),
             function_id: "runtime.tauri.application.default".into(),
             provider_id: "runtime.tauri.application.default".into(),
+            application_id: "runtime.tauri.application.default".into(),
         };
         let owned = PortListener {
             pid: 101,
@@ -1369,6 +1388,7 @@ mod tests {
             artifact_digest: "sha256:test".into(),
             function_id: "runtime.tauri.application.default".into(),
             provider_id: "runtime.tauri.application.default".into(),
+            application_id: "runtime.tauri.application.default".into(),
         };
         let prior_bundle = PortListener {
             pid: 303,
@@ -1571,6 +1591,7 @@ mod tests {
             artifact_digest: format!("sha256:{}", "3".repeat(64)),
             function_id: "runtime.tauri.application.default".into(),
             provider_id: "runtime.tauri.application.default".into(),
+            application_id: "runtime.tauri.application.default".into(),
         };
 
         write_guardian_ready_audit(&config, &metadata).unwrap();

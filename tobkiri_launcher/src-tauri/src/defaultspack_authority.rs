@@ -222,13 +222,7 @@ impl SignedApplicationResolver {
         let root_pack = read_json(&app_root.join("pack.v4.json"), "materialized Pack")?;
         let root_pack_id = value_str(&root_pack, "/pack/id")
             .context("materialized Pack is missing its Pack identity")?;
-        if !selected
-            .pack_ids
-            .iter()
-            .any(|pack_id| pack_id == root_pack_id)
-        {
-            bail!("materialized Pack is outside the selected Profile closure");
-        }
+        ensure_materialized_application_pack(root_pack_id, &selected.application_pack_id)?;
         verify_pack_artifact_index(&app_root, &bundle_root, root_pack_id)?;
 
         let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
@@ -246,6 +240,16 @@ impl SignedApplicationResolver {
             application_id: selected.application_pack_id,
         })
     }
+}
+
+fn ensure_materialized_application_pack(
+    root_pack_id: &str,
+    selected_application_pack_id: &str,
+) -> Result<()> {
+    if root_pack_id != selected_application_pack_id {
+        bail!("materialized Pack is not the selected Application Pack");
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1098,7 +1102,7 @@ fn validate_application_pack(
     Ok(ApplicationLaunch {
         entrypoint: canonical,
         argv: Vec::new(),
-        artifact_digest: entrypoint_digest.to_string(),
+        artifact_digest: artifact_digest.to_string(),
         function_id: value_str(&functions[0], "/id")
             .expect("application function identity was checked")
             .to_owned(),
@@ -3039,18 +3043,29 @@ mod tests {
         });
         let plan_digest = canonical_value_digest(&plan).unwrap();
         plan["plan_digest"] = Value::String(plan_digest.clone());
+        plan["unexpected_extension"] = Value::String("stale".into());
         assert!(selected_profile_from_documents(
             profile,
             None,
             Some(plan),
             "profile.digest".into(),
-            profile_revision,
-            Some(format!("sha256:{}", "2".repeat(64))),
+            profile_revision.clone(),
+            Some(profile_revision),
             Some("activation:digest-test".into()),
             Some(plan_digest),
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn materialized_root_pack_must_be_the_selected_application() {
+        assert!(
+            ensure_materialized_application_pack("application.alpha", "application.alpha").is_ok()
+        );
+        assert!(
+            ensure_materialized_application_pack("defaults-basepack", "application.alpha").is_err()
+        );
     }
 
     #[test]
@@ -3083,7 +3098,8 @@ mod tests {
             );
             assert_eq!(
                 first.launch.artifact_digest,
-                sha256(&fs::read(&first.launch.entrypoint).unwrap())
+                artifact_tree_digest(&first.pack_root.join("platform-artifacts/Tobkiri.app"))
+                    .unwrap()
             );
             assert_eq!(
                 first.pack_root,

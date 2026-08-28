@@ -2390,7 +2390,21 @@ impl StagedRuntimeResetGuard {
         }
         let identity = (metadata.dev(), metadata.ino());
         let inventory = core_transaction_inventory(&root)?;
-        validate_staged_runtime_manifest(&root, &inventory)?;
+        if inventory.keys().any(|relative| !relative.is_empty()) {
+            match core_openat(
+                &root,
+                std::ffi::OsStr::new(RUNTIME_RESOURCE_MANIFEST),
+                false,
+            ) {
+                Ok(_) => validate_staged_runtime_manifest(&root, &inventory)?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Err(invalid_release(
+                        "staged runtime seal manifest is missing; residue retained",
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+        }
         Ok(Self {
             parent,
             root,
@@ -7295,6 +7309,45 @@ mod tests {
                 & 0o777,
             0o755
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_reaps_an_empty_partial_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-empty-partial");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+
+        reset_staged_runtime(&staged).expect("empty partial staging should reset");
+
+        assert!(staged.is_dir());
+        assert!(!staged.join(RUNTIME_RESOURCE_MANIFEST).exists());
+        assert_eq!(
+            fs::metadata(&staged)
+                .expect("new staged root should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_retains_nonempty_unsealed_residue() {
+        let tree = TestTree::new("staged-runtime-unsealed-residue");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        fs::write(staged.join("partial-entry"), b"partial build")
+            .expect("partial residue should be writable");
+
+        let error = reset_staged_runtime(&staged)
+            .expect_err("nonempty unsealed staging must remain fail-closed");
+
+        assert!(error.to_string().contains("seal manifest is missing"));
+        assert!(staged.join("partial-entry").is_file());
     }
 
     #[cfg(target_os = "macos")]

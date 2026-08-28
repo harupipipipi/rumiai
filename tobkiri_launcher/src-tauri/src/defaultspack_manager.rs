@@ -36,19 +36,15 @@ fn execution_identity_matches(
     current: &crate::host_contract::ExecutionProfileIdentity,
     requested: &crate::host_contract::ExecutionProfileIdentity,
 ) -> bool {
-    application_instance_matches(
-        &ApplicationInstanceKey::from_execution_identity(current),
-        &ApplicationInstanceKey::from_execution_identity(requested),
-    )
+    current.matches(requested)
 }
 
 /// Identity of one materialized Application instance.
 ///
-/// The current dock adapter can only expose the execution tuple to this
-/// module, so its optional application fields are populated by generic
-/// callers that have the signed Application descriptor. Keeping the fields in
-/// the key prevents a future adapter from reusing a process for a different
-/// Application or artifact merely because its Profile ID was unchanged.
+/// The optional application fields retain compatibility with generic callers;
+/// the dock metadata path populates all of them. Keeping the fields in the key
+/// prevents a process from being reused for a different Application or
+/// artifact merely because its Profile ID was unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplicationInstanceKey {
     pub(crate) application_id: Option<String>,
@@ -59,21 +55,29 @@ pub(crate) struct ApplicationInstanceKey {
 }
 
 impl ApplicationInstanceKey {
-    pub(crate) fn from_execution_identity(
-        identity: &crate::host_contract::ExecutionProfileIdentity,
-    ) -> Self {
-        Self {
-            application_id: None,
-            provider_id: None,
-            function_id: None,
-            artifact_digest: None,
-            execution_identity: identity.clone(),
-        }
-    }
-
     pub(crate) fn matches(&self, other: &Self) -> bool {
         self == other
     }
+}
+
+fn application_instance_key(metadata: &DefaultspackDesktopMetadata) -> ApplicationInstanceKey {
+    ApplicationInstanceKey {
+        application_id: Some(metadata.application_id().to_owned()),
+        provider_id: Some(metadata.provider_id().to_owned()),
+        function_id: Some(metadata.function_id().to_owned()),
+        artifact_digest: Some(metadata.artifact_digest().to_owned()),
+        execution_identity: metadata.execution_identity().clone(),
+    }
+}
+
+fn application_metadata_matches(
+    current: &DefaultspackDesktopMetadata,
+    requested: &DefaultspackDesktopMetadata,
+) -> bool {
+    application_instance_matches(
+        &application_instance_key(current),
+        &application_instance_key(requested),
+    )
 }
 
 fn application_instance_matches(
@@ -155,10 +159,7 @@ impl ApplicationProcessManager {
                     None => {
                         let identity_matches =
                             state.launch_metadata.as_ref().is_some_and(|current| {
-                                execution_identity_matches(
-                                    current.execution_identity(),
-                                    metadata.execution_identity(),
-                                )
+                                application_metadata_matches(current, &metadata)
                             });
                         if identity_matches {
                             info!(
@@ -199,12 +200,11 @@ impl ApplicationProcessManager {
             }
 
             if state.restart_in_progress {
-                if state.launch_metadata.as_ref().is_some_and(|current| {
-                    !execution_identity_matches(
-                        current.execution_identity(),
-                        metadata.execution_identity(),
-                    )
-                }) {
+                if state
+                    .launch_metadata
+                    .as_ref()
+                    .is_some_and(|current| !application_metadata_matches(current, &metadata))
+                {
                     return Err(anyhow!(
                         "Defaultspack restart is in progress for a different execution Profile"
                     ));
@@ -471,12 +471,10 @@ impl ApplicationProcessManager {
         let (run_id, old_run_id) = {
             let mut state = self.lock_state()?;
             if state.active_guardian_pid == Some(process_id)
-                && state.launch_metadata.as_ref().is_some_and(|current| {
-                    execution_identity_matches(
-                        current.execution_identity(),
-                        metadata.execution_identity(),
-                    )
-                })
+                && state
+                    .launch_metadata
+                    .as_ref()
+                    .is_some_and(|current| application_metadata_matches(current, metadata))
             {
                 return Ok(());
             }
