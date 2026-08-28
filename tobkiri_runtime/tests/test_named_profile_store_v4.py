@@ -228,6 +228,7 @@ def test_legacy_collection_preserves_order_selection_timestamps_and_workspaces(
     assert receipt.last_launched_profile_id == "work-a"
     assert (tmp_path / "workspaces" / "work-a" / "state.db").read_text() == "Work A"
     assert (tmp_path / "workspaces" / "work-b" / "state.db").read_text() == "work-b"
+    assert store.legacy_state()["source_document"] == legacy
 
 
 def test_legacy_defaults_id_does_not_replace_bootstrap_template(
@@ -250,6 +251,32 @@ def test_legacy_defaults_id_does_not_replace_bootstrap_template(
     assert receipt.active_profile_id == "defaults-2"
     assert store.get_profile("defaults") is None
     assert store.get_profile("defaults-2") is not None
+
+
+def test_legacy_profile_map_key_and_extra_fields_are_lossless(tmp_path: Path) -> None:
+    """Preserve map-key identity and unknown legacy fields during migration."""
+
+    store = ProfileDefinitionStore(tmp_path)
+    legacy = {
+        "version": 4,
+        "active_profile_id": "map-key-a",
+        "profiles": {
+            "map-key-a": {
+                "name": "Mapped A",
+                "created_at": 7,
+                "unknown_runtime_field": {"nested": [1, 2, 3]},
+            }
+        },
+        "legacy_selection": {"last_view": "conversation"},
+    }
+
+    receipt = store.import_legacy_collection(legacy, copy_workspaces=False)
+
+    assert receipt.legacy_id_map == {"map-key-a": "map-key-a"}
+    imported = store.get_profile("map-key-a")
+    assert imported is not None
+    assert imported.profile["unknown_runtime_field"] == {"nested": [1, 2, 3]}
+    assert store.legacy_state()["source_document"] == legacy
 
 
 def test_legacy_workspace_failure_rolls_back_registry(tmp_path: Path) -> None:

@@ -454,7 +454,16 @@ class ProfileDefinitionStore:
             raise ProfileDefinitionStoreIntegrityError("legacy Profile collection is invalid")
         profiles_value = legacy.get("profiles")
         if isinstance(profiles_value, Mapping):
-            profiles = [dict(value) for value in profiles_value.values()]
+            profiles = []
+            for legacy_key, value in profiles_value.items():
+                if not isinstance(value, Mapping):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy Profile collection contains a non-object entry"
+                    )
+                profile = dict(value)
+                if not profile.get("profile_id") and not profile.get("id"):
+                    profile["profile_id"] = str(legacy_key)
+                profiles.append(profile)
         elif isinstance(profiles_value, list):
             profiles = [dict(value) for value in profiles_value if isinstance(value, Mapping)]
             if len(profiles) != len(profiles_value):
@@ -483,7 +492,6 @@ class ProfileDefinitionStore:
             used.add(candidate_id)
             id_map[legacy_id] = candidate_id
             document = copy.deepcopy(item)
-            document.pop("id", None)
             document["profile_id"] = candidate_id
             if "display_name" not in document and document.get("name"):
                 document["display_name"] = str(document["name"])
@@ -559,6 +567,7 @@ class ProfileDefinitionStore:
                     "last_launched_profile_id": legacy_last,
                     "legacy_id_map": dict(id_map),
                     "tombstones": state["legacy"].get("tombstones", []),
+                    "source_document": copy.deepcopy(dict(legacy)),
                 }
             )
             published: list[tuple[Path, str]] = []
@@ -957,6 +966,7 @@ def _empty_state() -> dict[str, Any]:
             "last_launched_profile_id": None,
             "legacy_id_map": {},
             "tombstones": [],
+            "source_document": None,
         },
         "store_digest": canonical_digest(
             {
@@ -971,6 +981,7 @@ def _empty_state() -> dict[str, Any]:
                     "last_launched_profile_id": None,
                     "legacy_id_map": {},
                     "tombstones": [],
+                    "source_document": None,
                 },
             }
         ),
