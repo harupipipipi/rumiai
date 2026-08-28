@@ -53,6 +53,15 @@ DIAGNOSTIC_FILENAME = "launcher-cold-boot.v1.json"
 class ColdBootError(RuntimeError):
     """Raised when the packaged Launcher cannot prove a safe cold boot."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        observations: Optional[Mapping[str, object]] = None,
+    ) -> None:
+        super().__init__(message)
+        self.observations = dict(observations or {})
+
 
 @dataclass(frozen=True)
 class HttpResponse:
@@ -569,6 +578,7 @@ def _write_failure_diagnostic(
         "launcher_pid": launcher_pid,
         "error": _sanitize_diagnostic_text(str(error)),
         "kernel_log_tail": _kernel_log_tail(config.app_data_dir),
+        "readiness_observations": getattr(error, "observations", {}),
         "process_output_tail": _sanitize_diagnostic_text(output),
     }
     destination = config.diagnostics_dir / DIAGNOSTIC_FILENAME
@@ -619,6 +629,16 @@ def _wait_for_readiness(
     broker_ready = False
     kernel_ownership_error = False
     panel_reachable = False
+    observations: dict[str, object] = {
+        "broker_ready": False,
+        "kernel_http_status": None,
+        "kernel_success": None,
+        "kernel_panel_ready": None,
+        "kernel_listener_present": False,
+        "kernel_listener_owned": None,
+        "panel_http_status": None,
+        "panel_reachable": False,
+    }
     connection_path = config.app_data_dir / BROKER_CONNECTION_RELATIVE
 
     while probes.monotonic() < deadline:
@@ -636,19 +656,38 @@ def _wait_for_readiness(
                 int(process.pid),
             ):
                 broker_ready = True
+                observations["broker_ready"] = True
 
         if broker_ready:
             kernel_response = probes.http_get(config.kernel_port, KERNEL_HEALTH_PATH)
+            if kernel_response is not None:
+                observations["kernel_http_status"] = kernel_response.status
+                document = kernel_response.json_object()
+                observations["kernel_success"] = (
+                    document.get("success") if isinstance(document, dict) else None
+                )
+                payload = document.get("data") if isinstance(document, dict) else None
+                observations["kernel_panel_ready"] = (
+                    payload.get("panel_ready") if isinstance(payload, dict) else None
+                )
             if _kernel_is_healthy(kernel_response):
                 kernel_pid = probes.listener_pid(config.kernel_port)
+                observations["kernel_listener_present"] = kernel_pid is not None
                 if kernel_pid is not None and _is_descendant(
                     kernel_pid,
                     int(process.pid),
                     probes.parent_pid,
                 ):
-                    panel_reachable = _panel_bootstrap_is_reachable(
-                        probes.http_get(config.kernel_port, PANEL_BOOTSTRAP_PATH)
+                    observations["kernel_listener_owned"] = True
+                    panel_response = probes.http_get(
+                        config.kernel_port,
+                        PANEL_BOOTSTRAP_PATH,
                     )
+                    observations["panel_http_status"] = (
+                        None if panel_response is None else panel_response.status
+                    )
+                    panel_reachable = _panel_bootstrap_is_reachable(panel_response)
+                    observations["panel_reachable"] = panel_reachable
                     if panel_reachable:
                         return ColdBootResult(
                             broker_port=broker_port,
@@ -658,18 +697,24 @@ def _wait_for_readiness(
                             panel_reachable=True,
                         )
                 else:
+                    observations["kernel_listener_owned"] = False
                     kernel_ownership_error = True
 
         probes.sleep(POLL_INTERVAL_SECONDS)
 
     if kernel_ownership_error:
         raise ColdBootError(
-            "Kernel health listener is not owned by the launched CI/E2E app"
+            "Kernel health listener is not owned by the launched CI/E2E app",
+            observations=observations,
         )
     if not broker_ready:
-        raise ColdBootError("embedded host broker did not become ready before timeout")
+        raise ColdBootError(
+            "embedded host broker did not become ready before timeout",
+            observations=observations,
+        )
     raise ColdBootError(
-        "owned Kernel health and panel bootstrap did not become ready before timeout"
+        "owned Kernel health and panel bootstrap did not become ready before timeout",
+        observations=observations,
     )
 
 
