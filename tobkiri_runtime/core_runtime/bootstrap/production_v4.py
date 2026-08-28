@@ -1936,7 +1936,7 @@ def capture_production_dispatch(
     )
     activation_digest = canonical_digest(active.activation)
     target_by_operation = {
-        key: _binding_principal(binding)
+        key: FunctionPrincipal.from_dict(binding["function_principal"])
         for key, binding in binding_by_key.items()
     }
 
