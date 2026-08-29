@@ -2824,6 +2824,57 @@ mod tests {
     }
 
     #[test]
+    fn legacy_profile_marker_never_becomes_execution_authority() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-legacy-profile-pointer-{}-{unique}",
+            std::process::id()
+        ));
+        let user_data_dir = root.join("user_data");
+        let profiles = user_data_dir.join("profiles");
+        fs::create_dir_all(&profiles).unwrap();
+        let config = AppConfig {
+            app_dir: root.join("app"),
+            rumi_home: root.join("app"),
+            python_dir: root.join("python"),
+            uv_path: root.join("uv"),
+            venv_dir: root.join("venv"),
+            user_data_dir,
+            log_dir: root.join("logs"),
+            kernel_port: 8765,
+            dev_workspace_root: None,
+        };
+        let legacy = serde_json::json!({
+            "version": 1,
+            "active_profile_id": "default-profile"
+        });
+        fs::write(
+            profiles.join("active_profile.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+
+        assert!(read_active_profile_snapshot(&config).unwrap().is_none());
+
+        fs::write(
+            profiles.join("active.json"),
+            serde_json::to_vec(&legacy).unwrap(),
+        )
+        .unwrap();
+        let error = read_active_profile_snapshot(&config)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("unknown or missing fields"),
+            "legacy bytes at the execution pointer path must fail closed: {error}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn executable_catalog_is_verified_as_non_authority_sidecar() {
         let root = minimal_sidecar_bundle("valid");
         let verified = verify_bundle_lock(&root).unwrap();

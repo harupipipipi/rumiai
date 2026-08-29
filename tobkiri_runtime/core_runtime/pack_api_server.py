@@ -1961,10 +1961,14 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         """Project all Named Profiles and the separate active execution pointer."""
 
         from .active_profile_store_v4 import ActiveProfileStore
-        from .bootstrap.profile_capture import runtime_user_data_root
+        from .bootstrap.profile_capture import (
+            repair_legacy_active_profile_pointer,
+            runtime_user_data_root,
+        )
 
         store = self._profile_registry_store()
         state = store.snapshot()
+        repair_legacy_active_profile_pointer()
         active = ActiveProfileStore(runtime_user_data_root()).load(
             verify_snapshot=True
         )

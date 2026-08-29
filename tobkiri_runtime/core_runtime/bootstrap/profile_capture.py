@@ -21,6 +21,10 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 )
 from tobkiri_protocol.canonical import canonical_digest, strict_loads
 from tobkiri_protocol.ids import validate_canonical_id
+from tobkiri_protocol.secure_persistence import (
+    SecureDirectory,
+    SecurePersistenceError,
+)
 
 from ..authority.v4 import AuthorityStore
 from ..authority.v4_models import authority_digest
@@ -161,6 +165,7 @@ def host_profile_catalog(
         and legacy_collection.is_file()
     ):
         definitions.import_legacy_collection(legacy_collection)
+    definitions.repair_legacy_display_names()
     try:
         definitions.bootstrap_defaults(bundled.profiles["defaults"])
     except ProfileDefinitionStoreConflict:
@@ -648,6 +653,73 @@ def active_profile_exists(*, base_dir: Path | None = None) -> bool:
     return ActiveProfileStore(user_data).path.is_file()
 
 
+def repair_legacy_active_profile_pointer(
+    *, base_dir: Path | None = None
+) -> ActiveDefaultProfile | None:
+    """Validate legacy selection without manufacturing execution authority.
+
+    The v1 ``profiles/active_profile.json`` marker contains only a legacy ID;
+    it cannot authorize execution or supply a Profile revision, ProfileLock,
+    ResolvedPlan, approval, activation, fence, or SecurityEpoch.  A matching
+    imported Named Profile is kept visible, but no Host-global execution
+    pointer is published until that same Profile identity completes the normal
+    activation ceremony.  In particular, a legacy Profile is never silently
+    replaced with the ``defaults`` Profile identity.
+    """
+
+    user_data = _user_data_root(base_dir)
+    pointers = ActiveProfileStore(user_data)
+    if pointers.path.is_file():
+        pointers.require(verify_snapshot=True)
+        return None
+
+    try:
+        profiles_directory = SecureDirectory(user_data / "profiles", create=True)
+        if not profiles_directory.exists("active_profile.json"):
+            return None
+        legacy_pointer = strict_loads(
+            profiles_directory.read_bytes_bounded(
+                "active_profile.json",
+                max_bytes=16 * 1024,
+            )
+        )
+    except (OSError, SecurePersistenceError, ValueError) as error:
+        raise ProfileResolutionDenied(
+            "legacy active Profile marker is unsafe or unreadable"
+        ) from error
+    if (
+        not isinstance(legacy_pointer, Mapping)
+        or set(legacy_pointer) != {"version", "active_profile_id"}
+        or legacy_pointer.get("version") != 1
+    ):
+        raise ProfileResolutionDenied("legacy active Profile marker is invalid")
+    try:
+        legacy_id = validate_canonical_id(
+            legacy_pointer.get("active_profile_id"),
+            field="active_profile_id",
+        )
+    except Exception as error:
+        raise ProfileResolutionDenied(
+            "legacy active Profile marker identity is invalid"
+        ) from error
+
+    definitions = ProfileDefinitionStore(user_data)
+    legacy_state = definitions.legacy_state()
+    source_document = legacy_state.get("source_document")
+    if (
+        legacy_state.get("active_profile_id") != legacy_id
+        or not isinstance(source_document, Mapping)
+        or source_document.get("active_profile_id") != legacy_id
+    ):
+        raise ProfileResolutionDenied(
+            "legacy active Profile marker does not match the imported registry"
+        )
+    selected = definitions.get_profile(legacy_id)
+    if selected is None:
+        raise ProfileResolutionDenied("legacy active Profile is unavailable")
+    return None
+
+
 def activation_audit_receipt(
     active: ActiveDefaultProfile, *, base_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -906,5 +978,6 @@ __all__ = [
     "prepare_default_profile_confirmation",
     "prepare_profile_confirmation",
     "profile_capture_scope",
+    "repair_legacy_active_profile_pointer",
     "runtime_user_data_root",
 ]

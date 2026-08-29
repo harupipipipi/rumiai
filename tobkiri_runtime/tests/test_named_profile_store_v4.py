@@ -12,6 +12,7 @@ from core_runtime.active_profile_store_v4 import (
 )
 from core_runtime.authority.v4 import AuthorityStore
 from core_runtime.bootstrap.profile_capture import (
+    active_default_profile_exists,
     activation_audit_receipt,
     capture_active_profile,
     capture_default_profile,
@@ -19,11 +20,13 @@ from core_runtime.bootstrap.profile_capture import (
     host_profile_catalog,
     prepare_default_profile_confirmation,
     prepare_profile_confirmation,
+    repair_legacy_active_profile_pointer,
     runtime_user_data_root,
 )
 from core_runtime.profile_definition_store_v4 import (
     ProfileDefinitionStore,
     ProfileDefinitionStoreError,
+    ProfileDefinitionStoreIntegrityError,
 )
 from core_runtime.runtime_surface_v4 import (
     RuntimeSurfaceError,
@@ -40,6 +43,45 @@ def _definition(profile_id: str, name: str) -> dict[str, object]:
         "display_name": name,
         "mode": "interactive",
         "packs": [{"pack_id": "example-pack", "artifact_digest": None}],
+    }
+
+
+def _legacy_runtime_collection() -> dict[str, object]:
+    """Return the localized v3 shape observed on a macOS CI E2E disk."""
+
+    profiles = []
+    for index, (profile_id, name) in enumerate(
+        (
+            ("default-profile", "Default Profile"),
+            ("new-custom-profile", "New custom profile"),
+            ("new-custom-profile-2", "New custom profile"),
+        )
+    ):
+        profiles.append(
+            {
+                "profile_id": profile_id,
+                "name": name,
+                "display_name": {"en": name, "ja": name},
+                "locale": "ja",
+                "kind": "runtime_profile",
+                "base_pack": "defaultspack",
+                "packs": ["defaultspack"],
+                "last_runtime_profile_key": (
+                    "runtime_profile.defaultspack.startup.defaultspack.startup"
+                    if index == 0
+                    else None
+                ),
+                "created_at": 1700000000 + index,
+                "updated_at": 1700000100 + index,
+                "metadata": {"fixture": "macos-ci-e2e"},
+            }
+        )
+    return {
+        "version": 3,
+        "schema_version": None,
+        "active_profile_id": "default-profile",
+        "last_launched_profile_id": "default-profile",
+        "profiles": profiles,
     }
 
 
@@ -336,6 +378,192 @@ def test_legacy_collection_preserves_order_selection_timestamps_and_workspaces(
     assert store.legacy_state()["source_document"] == legacy
 
 
+def test_localized_legacy_names_are_lossless_deterministic_and_restart_safe(
+    tmp_path: Path,
+) -> None:
+    legacy = _legacy_runtime_collection()
+    first = ProfileDefinitionStore(tmp_path / "first", clock=lambda: 1700000200)
+    second = ProfileDefinitionStore(tmp_path / "second", clock=lambda: 1700000200)
+
+    first_receipt = first.import_legacy_collection(legacy, copy_workspaces=False)
+    second_receipt = second.import_legacy_collection(legacy, copy_workspaces=False)
+
+    assert first_receipt.source_digest == second_receipt.source_digest
+    assert first_receipt.profile_ids == (
+        "default-profile",
+        "new-custom-profile",
+        "new-custom-profile-2",
+    )
+    assert first.snapshot() == second.snapshot()
+    assert first.repair_legacy_display_names() == 0
+    committed = first.snapshot()
+    assert ProfileDefinitionStore(tmp_path / "first").snapshot() == committed
+    assert first.legacy_state()["source_document"] == legacy
+    profiles = first.list_profiles()
+    assert [profile.display_name for profile in profiles] == [
+        "Default Profile",
+        "New custom profile",
+        "New custom profile",
+    ]
+    for profile, source in zip(profiles, legacy["profiles"], strict=True):
+        assert profile.profile["legacy_display_name"] == source["display_name"]
+        assert profile.profile["display_name"] == source["display_name"]["ja"]
+
+
+def test_missing_optional_display_name_is_a_restart_safe_noop(
+    tmp_path: Path,
+) -> None:
+    normal = _definition("profile-a", "Profile A")
+    del normal["display_name"]
+    normal_store = ProfileDefinitionStore(tmp_path / "normal", clock=lambda: 10)
+    created = normal_store.create_profile(normal)
+    normal_snapshot = normal_store.snapshot()
+
+    assert created.display_name == "profile-a"
+    assert "display_name" not in created.profile
+    assert normal_store.repair_legacy_display_names() == 0
+    assert normal_store.snapshot() == normal_snapshot
+    assert ProfileDefinitionStore(tmp_path / "normal").snapshot() == normal_snapshot
+
+    legacy_store = ProfileDefinitionStore(tmp_path / "legacy", clock=lambda: 20)
+    legacy_store.import_legacy_collection(
+        {
+            "version": 4,
+            "profiles": [{"profile_id": "profile-b", "locale": "ja"}],
+        },
+        copy_workspaces=False,
+    )
+    legacy_snapshot = legacy_store.snapshot()
+    imported = legacy_store.get_profile("profile-b")
+
+    assert imported is not None
+    assert imported.display_name == "profile-b"
+    assert "display_name" not in imported.profile
+    assert legacy_store.repair_legacy_display_names() == 0
+    assert legacy_store.snapshot() == legacy_snapshot
+    assert ProfileDefinitionStore(tmp_path / "legacy").snapshot() == legacy_snapshot
+
+
+def test_existing_localized_revisions_are_repaired_transactionally_and_idempotently(
+    tmp_path: Path,
+) -> None:
+    store = ProfileDefinitionStore(tmp_path, clock=lambda: 1700000300)
+    store.create_profile(_definition("profile-a", "Profile A"))
+    poisoned = store.snapshot()
+    entry = poisoned["profiles"][0]
+    legacy_profile = entry["revisions"][0]["profile"]
+    legacy_profile.update(
+        {
+            "name": "Legacy A",
+            "locale": "ja",
+            "display_name": {"en": "English A", "ja": "日本語 A"},
+        }
+    )
+    legacy_revision = canonical_digest(legacy_profile)
+    entry["current_revision"] = legacy_revision
+    entry["revisions"][0]["profile_revision"] = legacy_revision
+    poisoned["store_digest"] = canonical_digest(
+        {key: value for key, value in poisoned.items() if key != "store_digest"}
+    )
+    store.path.write_bytes(canonical_json(poisoned) + b"\n")
+
+    assert store.repair_legacy_display_names() == 1
+    repaired = store.snapshot()
+    revisions = repaired["profiles"][0]["revisions"]
+    assert len(revisions) == 2
+    assert revisions[0]["profile"]["display_name"] == {
+        "en": "English A",
+        "ja": "日本語 A",
+    }
+    assert revisions[1]["parent_revision"] == legacy_revision
+    assert revisions[1]["profile"]["display_name"] == "日本語 A"
+    assert revisions[1]["profile"]["legacy_display_name"] == {
+        "en": "English A",
+        "ja": "日本語 A",
+    }
+    assert store.repair_legacy_display_names() == 0
+    assert store.snapshot() == repaired
+    assert ProfileDefinitionStore(tmp_path).snapshot() == repaired
+
+
+@pytest.mark.parametrize(
+    "display_name",
+    (
+        None,
+        "",
+        {},
+        {"ja": ""},
+        {"ja": 7},
+        {"fr": "Nom"},
+        {"ja": "A", "JA": "B"},
+    ),
+)
+def test_invalid_or_ambiguous_localized_legacy_names_fail_closed(
+    tmp_path: Path,
+    display_name: object,
+) -> None:
+    legacy = {
+        "profiles": [
+            {
+                "profile_id": "profile-a",
+                "display_name": display_name,
+            }
+        ]
+    }
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError):
+        ProfileDefinitionStore(tmp_path).import_legacy_collection(
+            legacy,
+            copy_workspaces=False,
+        )
+    assert not ProfileDefinitionStore(tmp_path).exists()
+
+
+def test_legacy_pointer_requires_same_identity_ceremony_and_never_becomes_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A v1 selection cannot be relabeled as the Defaults execution identity."""
+
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    settings = user_data / "settings"
+    settings.mkdir(parents=True)
+    settings.joinpath("startup_profiles.json").write_bytes(
+        canonical_json(_legacy_runtime_collection()) + b"\n"
+    )
+    profiles_root = user_data / "profiles"
+    profiles_root.mkdir()
+    legacy_pointer = profiles_root / "active_profile.json"
+    legacy_pointer.write_bytes(
+        canonical_json({"version": 1, "active_profile_id": "default-profile"}) + b"\n"
+    )
+    host_profile_catalog()
+    definitions = ProfileDefinitionStore(user_data)
+    assert [item.profile_id for item in definitions.list_profiles()] == [
+        "default-profile",
+        "new-custom-profile",
+        "new-custom-profile-2",
+        "defaults",
+    ]
+    capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    pointer_store = ActiveProfileStore(user_data)
+    assert pointer_store.require(verify_snapshot=True).profile_id == "defaults"
+    pointer_store.path.unlink()
+    assert active_default_profile_exists()
+
+    repaired = repair_legacy_active_profile_pointer()
+
+    assert repaired is None
+    assert pointer_store.load() is None
+    assert legacy_pointer.is_file()
+    assert definitions.legacy_state()["active_profile_id"] == "default-profile"
+    assert definitions.get_profile("default-profile") is not None
+    assert definitions.get_profile("defaults") is not None
+    assert repair_legacy_active_profile_pointer() is None
+    assert pointer_store.load() is None
+
+
 def test_legacy_defaults_id_does_not_replace_bootstrap_template(
     tmp_path: Path,
 ) -> None:
@@ -413,13 +641,13 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     definitions = ProfileDefinitionStore(user_data)
     defaults = definitions.get_profile("defaults")
     assert defaults is not None
-    profile_a = definitions.duplicate_profile(
+    definitions.duplicate_profile(
         "defaults",
         new_profile_id="profile-a",
         display_name="Profile A",
         expected_profile_revision=defaults.profile_revision,
     )
-    profile_b = definitions.duplicate_profile(
+    definitions.duplicate_profile(
         "defaults",
         new_profile_id="profile-b",
         display_name="Profile B",

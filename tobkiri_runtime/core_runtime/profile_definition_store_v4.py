@@ -31,6 +31,7 @@ from .active_profile_store_v4 import exclusive_profile_lock
 
 PROFILE_STORE_SCHEMA = "io.tobkiri.profile-definition-store.v1"
 PROFILE_STORE_FILENAME = "index.json"
+_LEGACY_LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$")
 
 
 class ProfileDefinitionStoreError(RuntimeError):
@@ -276,6 +277,62 @@ class ProfileDefinitionStore:
             expected_store_generation=expected_store_generation,
         )
 
+    def repair_legacy_display_names(self) -> int:
+        """Append canonical successors for legacy localized display names.
+
+        Historical revisions remain byte-for-byte represented in the immutable
+        chain.  Each repaired successor keeps the complete localized mapping in
+        ``legacy_display_name`` while exposing one deterministic string in
+        ``display_name``.  All successors are published in one atomic registry
+        transaction, and a second call is a no-op.
+
+        Returns:
+            Number of live Profile entries repaired by the transaction.
+        """
+
+        with self._locked():
+            state = self._read_state()
+            repaired: list[tuple[dict[str, Any], dict[str, Any], str]] = []
+            for entry in state["profiles"]:
+                if entry["tombstone"]:
+                    continue
+                current = entry["revisions"][-1]
+                profile = current.get("profile")
+                if not isinstance(profile, Mapping):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "live Profile revision document is invalid"
+                    )
+                normalized = _normalize_legacy_display_name(profile)
+                if normalized == profile:
+                    continue
+                repaired.append(
+                    (
+                        entry,
+                        normalized,
+                        str(current["profile_revision"]),
+                    )
+                )
+            if not repaired:
+                return 0
+
+            now = self._now()
+            for entry, normalized, parent_revision in repaired:
+                revision = canonical_digest(normalized)
+                entry["current_revision"] = revision
+                entry["revisions"].append(
+                    _revision_record(
+                        normalized,
+                        revision=revision,
+                        parent_revision=parent_revision,
+                        now=now,
+                    )
+                )
+                entry["updated_at"] = now
+            state["generation"] += len(repaired)
+            state["updated_at"] = now
+            self._write_state(state)
+            return len(repaired)
+
     def update_profile(
         self,
         profile_id: str,
@@ -494,7 +551,8 @@ class ProfileDefinitionStore:
             document = copy.deepcopy(item)
             document["profile_id"] = candidate_id
             if "display_name" not in document and document.get("name"):
-                document["display_name"] = str(document["name"])
+                document["display_name"] = document["name"]
+            document = _normalize_legacy_display_name(document)
             now = self._legacy_timestamp(item)
             updated = self._legacy_timestamp(item, key="updated_at", fallback=now)
             prepared.append((legacy_id, candidate_id, document, now, updated))
@@ -1054,7 +1112,98 @@ def _profile_document(
     document["profile_id"] = safe_id
     if display_name is not None:
         document["display_name"] = str(display_name)
+    if "display_name" in document and (
+        not isinstance(document["display_name"], str)
+        or not document["display_name"].strip()
+    ):
+        raise ProfileDefinitionStoreIntegrityError(
+            "Profile display_name must be a non-empty string"
+        )
     canonical_json(document)
+    return document
+
+
+def _normalize_legacy_display_name(
+    profile: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a lossless runtime-facing legacy name projection.
+
+    The declared Profile locale wins when it names an available localized
+    value.  Japanese then English match the established control-panel legacy
+    fallback, followed by the scalar legacy ``name``.  Unknown or structurally
+    ambiguous localized mappings are rejected rather than stringified.
+    """
+
+    document = copy.deepcopy(dict(profile))
+    if "display_name" not in document:
+        return document
+    display_name = document.get("display_name")
+    preserved = document.get("legacy_display_name")
+    if isinstance(display_name, str):
+        if not display_name.strip():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile display_name is empty"
+            )
+        if preserved is not None and not isinstance(preserved, Mapping):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy_display_name must preserve an object"
+            )
+        return document
+    if not isinstance(display_name, Mapping) or not display_name:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy Profile display_name is invalid"
+        )
+    if preserved is not None and preserved != display_name:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy Profile display_name preservation is ambiguous"
+        )
+
+    localized: dict[str, str] = {}
+    for key, value in display_name.items():
+        if (
+            not isinstance(key, str)
+            or _LEGACY_LOCALE_RE.fullmatch(key) is None
+            or not isinstance(value, str)
+            or not value.strip()
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile localized display_name is invalid"
+            )
+        normalized_key = key.replace("_", "-").casefold()
+        if normalized_key in localized:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile localized display_name is ambiguous"
+            )
+        localized[normalized_key] = value.strip()
+
+    candidates: list[str] = []
+    locale = document.get("locale")
+    if locale is not None:
+        if not isinstance(locale, str) or _LEGACY_LOCALE_RE.fullmatch(locale) is None:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile locale is invalid"
+            )
+        normalized_locale = locale.replace("_", "-").casefold()
+        candidates.append(normalized_locale)
+        language = normalized_locale.split("-", 1)[0]
+        if language != normalized_locale:
+            candidates.append(language)
+    candidates.extend(("ja", "en"))
+    canonical_name = next(
+        (localized[candidate] for candidate in candidates if candidate in localized),
+        None,
+    )
+    if canonical_name is None:
+        legacy_name = document.get("name")
+        if isinstance(legacy_name, str) and legacy_name.strip():
+            canonical_name = legacy_name.strip()
+    if canonical_name is None:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy Profile localized display_name has no deterministic fallback"
+        )
+
+    document["legacy_display_name"] = copy.deepcopy(dict(display_name))
+    document["display_name"] = canonical_name
     return document
 
 
