@@ -4,6 +4,7 @@
 
 mod app_data_migration;
 mod artifact_integrity;
+mod ci_e2e_app_data;
 mod config;
 mod debug_approval;
 mod defaultspack_authority;
@@ -2154,6 +2155,7 @@ pub fn run() {
 
 fn run_launcher(context: tauri::Context<tauri::Wry>) {
     env_logger::init();
+    let app_identifier = context.config().identifier.clone();
 
     #[cfg(debug_assertions)]
     let debug_parallel_instance = debug_parallel_instance_policy_from_env().and_then(|policy| {
@@ -2251,6 +2253,8 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                 .path()
                 .app_data_dir()
                 .context("failed to resolve app_data_dir")?;
+            let app_data_dir =
+                ci_e2e_app_data::resolve_app_data_dir_from_env(&app_identifier, &app_data_dir)?;
             if app_data_migration::migrate_legacy_app_data(&app_data_dir)? {
                 info!("copied legacy Rumi Viewer application data into Tobkiri Launcher storage");
             }
