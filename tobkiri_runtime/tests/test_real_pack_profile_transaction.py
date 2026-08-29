@@ -13,12 +13,30 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
-from core_runtime.authority.v4 import AuthorityStore
+import pytest
+
+from core_runtime.authority.v4 import (
+    AuthorityScope,
+    AuthorityStore,
+    DomainBoundary,
+    ExecutionDomain,
+    FunctionPrincipal,
+)
+from core_runtime.bootstrap.production_v4 import (
+    _commit_plan_authority,
+    _packvm_approval_provenance,
+)
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    ActiveDefaultProfile,
+    ResolvedDefaultProfile,
+)
+from tobkiri_protocol.canonical import canonical_digest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_PACK = "rumi_git_read_pack"
 BOOTSTRAP_SECRET = "isolated-host-owned-panel-bootstrap-secret"
+NATIVE_PACKVM_ACCEPTANCE_ENV = "TOBKIRI_RUN_NATIVE_PACKVM_ACCEPTANCE"
 
 
 _CHILD = r"""
@@ -65,11 +83,21 @@ def _capture():
             confirmation=prepare_default_profile_confirmation(),
         )
     authority = AuthorityStore(USER_DATA / "authority" / "v4.sqlite3")
+    packvm_lifecycle = None
+    if os.environ.get("TOBKIRI_TEST_NATIVE_PACKVM") == "1":
+        from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
+
+        packvm_lifecycle = PackVMLifecycleV4()
+        if packvm_lifecycle.production_backend_registration() is None:
+            raise RuntimeError(
+                "native PackVM acceptance requires provisioned signed direct-VZ facts"
+            )
     session = capture_production_dispatch(
         active,
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=ROOT / "ecosystem",
         authority_store=authority,
+        packvm_provisioner=packvm_lifecycle,
     )
     catalog = BundledCatalog.load(BUNDLE_ROOT)
     bindings = load_frontend_contract_bindings(
@@ -409,8 +437,19 @@ def _disk_profile_state(user_data: Path) -> dict[str, Any]:
         "profile_revision": str(plan["profile_revision"]),
         "plan_digest": str(plan["plan_digest"]),
         "activation_id": str(activation["activation_id"]),
+        "profile_authority_digest": str(
+            activation["profile_authority_snapshot_digest"]
+        ),
+        "security_epoch": int(activation["security_epoch"]),
+        "fencing_token": int(activation["fencing_token"]),
+        "packvm_target_principal_ids": [
+            FunctionPrincipal.from_dict(item["function_principal"]).principal_id
+            for item in plan["bindings"]
+            if str(item["execution_kind"]) == "pack_vm"
+        ],
         "effective_pack_set": [
-            [str(item["identity"]), str(item["artifact_digest"])] for item in lock["effective_set"]
+            [str(item["identity"]), str(item["artifact_digest"])]
+            for item in lock["effective_set"]
         ],
     }
 
@@ -430,8 +469,10 @@ def _assert_snapshots_immutable(before: Mapping[str, bytes], user_data: Path) ->
         assert current.get(name) == content
 
 
-def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
+def _exercise_real_pack_profile_transaction(
     tmp_path: Path,
+    *,
+    expect_authenticated_packvm: bool,
 ) -> None:
     """Exercise one Pack approval/activation transaction over real loopback HTTP."""
 
@@ -452,6 +493,10 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
             "TOBKIRI_TEST_RUNTIME_ROOT": str(ROOT),
         }
     )
+    if expect_authenticated_packvm:
+        env["TOBKIRI_TEST_NATIVE_PACKVM"] = "1"
+    else:
+        env.pop("TOBKIRI_TEST_NATIVE_PACKVM", None)
     children: list[subprocess.Popen[str]] = []
     public_output: list[str] = []
     try:
@@ -517,7 +562,7 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
 
         enabled_catalog = _catalog(int(first_state["port"]), first_auth)
         enabled_disk = _disk_profile_state(user_data)
-        enabled_activation_id = enabled_disk["activation_id"]
+        enabled_authority_binding = dict(enabled_disk)
         enabled_set = {item[0] for item in enabled_disk["effective_pack_set"]}
         assert TARGET_PACK in enabled_set
         assert enabled_disk["profile_id"] == initial_disk["profile_id"]
@@ -534,7 +579,6 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
             user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
         )
         stable_pack_approval = approval_path.read_bytes()
-
         # Repeat the full UI-facing ceremony twice without changing the Pack
         # catalog.  Each activation is a new immutable authority generation;
         # the persistent Pack approval and stable principals remain the same.
@@ -705,45 +749,132 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
             events = authority.audit_events()
             grants = authority.list_grants()
             providers = authority.list_provider_authorities()
-        target_artifact_digest = next(
-            digest
-            for pack_id, digest in enabled_disk["effective_pack_set"]
-            if pack_id == TARGET_PACK
-        )
+            approvals = {
+                approval_id: authority.get_approval(approval_id)
+                for approval_id in {
+                    grant.approval_id for grant in grants if grant.approval_id is not None
+                }
+            }
+            all_domains = authority.list_domains()
+            domains = {domain.domain_id: domain for domain in all_domains}
+        profile_id = str(enabled_disk["profile_id"])
+        grant_prefix = f"grant.{profile_id}.profile-pack-vm."
+        provider_prefix = f"provider.{profile_id}.profile-pack-vm."
+        approval_prefix = f"approval.{profile_id}.profile-pack-vm."
         dynamic_grants = [
             grant
             for grant in grants
-            if grant.grant_id.startswith("grant.defaults.dynamic-pack.")
-            and grant.target.parent_artifact_digest == target_artifact_digest
+            if grant.grant_id.startswith(grant_prefix)
         ]
-        assert {
-            enabled_activation_id,
-            first_ceremony_disk["activation_id"],
-            second_ceremony_disk["activation_id"],
-        }.issubset({grant.activation_id for grant in dynamic_grants})
-        assert len({grant.grant_id for grant in dynamic_grants}) == len(dynamic_grants)
         dynamic_providers = [
             provider
             for provider in providers
-            if provider.record_id.startswith("provider.defaults.dynamic-pack.")
-            and provider.provider.parent_artifact_digest == target_artifact_digest
+            if provider.record_id.startswith(provider_prefix)
         ]
         principals_by_operation: dict[str, set[str]] = {}
         for provider in dynamic_providers:
             principals_by_operation.setdefault(provider.provider.operation_id, set()).add(
                 provider.provider.principal_id
             )
-        assert principals_by_operation
-        assert all(len(principals) == 1 for principals in principals_by_operation.values())
         dynamic_approval_ids = {
             str(record["record_id"])
             for event in events
             if event["event_type"] == "authority_records_committed"
             for record in event["payload"].get("records", [])
             if record["record_type"] == "approval"
-            and str(record["record_id"]).startswith("approval.defaults.dynamic-pack.")
+            and str(record["record_id"]).startswith(approval_prefix)
         }
-        assert len(dynamic_approval_ids) >= 3
+        if expect_authenticated_packvm:
+            authority_bindings = {
+                str(item["activation_id"]): item
+                for item in (
+                    enabled_authority_binding,
+                    first_ceremony_disk,
+                    second_ceremony_disk,
+                )
+            }
+            assert set(authority_bindings).issubset(
+                {grant.activation_id for grant in dynamic_grants}
+            )
+            assert len({grant.grant_id for grant in dynamic_grants}) == len(
+                dynamic_grants
+            )
+            assert principals_by_operation
+            assert all(
+                len(principals) == 1
+                for principals in principals_by_operation.values()
+            )
+            assert len(dynamic_approval_ids) >= 3
+            providers_by_id = {
+                provider.record_id: provider for provider in dynamic_providers
+            }
+            for grant in dynamic_grants:
+                binding = authority_bindings.get(grant.activation_id)
+                if binding is None:
+                    continue
+                assert grant.target.principal_id in set(
+                    binding["packvm_target_principal_ids"]
+                )
+                approval = approvals[grant.approval_id]
+                provider_id = grant.grant_id.replace("grant.", "provider.", 1)
+                provider = providers_by_id[provider_id]
+                domain = domains[provider.execution_domain_id]
+                assert approval is not None
+                assert domain is not None
+                assert grant.profile_id == binding["profile_id"] == "defaults"
+                assert grant.profile_authority_digest == binding[
+                    "profile_authority_digest"
+                ]
+                assert grant.security_epoch == binding["security_epoch"]
+                assert approval.profile_id == binding["profile_id"]
+                assert approval.security_epoch == binding["security_epoch"]
+                assert approval.snapshot_digest == canonical_digest(
+                    {
+                        "ceremony": "defaults.activate",
+                        "activation_id": binding["activation_id"],
+                        "plan_digest": binding["plan_digest"],
+                        "profile_authority_snapshot_digest": binding[
+                            "profile_authority_digest"
+                        ],
+                        "security_epoch": binding["security_epoch"],
+                        "scope": grant.scope.to_dict(),
+                        "pack_approval_revision": None,
+                    }
+                )
+                assert provider.security_epoch == binding["security_epoch"]
+                assert provider.trust_provenance_digest == canonical_digest(
+                    {
+                        "source": "locked-defaults-profile",
+                        "plan_digest": binding["plan_digest"],
+                        "target": provider.provider.to_dict(),
+                    }
+                )
+                assert domain.profile_id == binding["profile_id"]
+                assert domain.activation_id == binding["activation_id"]
+                assert domain.security_epoch == binding["security_epoch"]
+                assert domain.fencing_token == binding["fencing_token"]
+        else:
+            # Optional-Pack approval, client enablement, and an immutable Plan
+            # are insufficient to mint execution authority.  Without an exact
+            # authenticated production backend there is no target domain,
+            # Grant, Provider authority, or Approval bundle for this artifact.
+            assert dynamic_grants == []
+            assert dynamic_providers == []
+            assert dynamic_approval_ids == set()
+            packvm_target_principal_ids = {
+                principal_id
+                for binding in (
+                    enabled_authority_binding,
+                    first_ceremony_disk,
+                    second_ceremony_disk,
+                )
+                for principal_id in binding["packvm_target_principal_ids"]
+            }
+            assert packvm_target_principal_ids
+            assert all(
+                packvm_target_principal_ids.isdisjoint(domain.principal_ids)
+                for domain in all_domains
+            )
         assert any(
             event["event_type"] == "pack_approval_revoked"
             and event["event_state"] == "committed"
@@ -793,3 +924,168 @@ def test_real_pack_profile_transaction_survives_process_restart_and_revocation(
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.wait(timeout=10)
+
+
+def test_real_pack_profile_transaction_fails_closed_without_authenticated_packvm(
+    tmp_path: Path,
+) -> None:
+    """Keep optional-Pack authority absent without a verified PackVM backend."""
+
+    _exercise_real_pack_profile_transaction(
+        tmp_path,
+        expect_authenticated_packvm=False,
+    )
+
+
+def test_packvm_authority_rejects_ambiguous_caller_artifact_provenance() -> None:
+    """A shared digest cannot choose one Profile Pack identity for authority."""
+
+    valid, approval_pack_id = _packvm_approval_provenance(
+        caller_artifact_digest="sha256:" + "a" * 64,
+        target_pack_id="profile-a-pack",
+        optional_pack_ids={"profile-a-pack", "profile-b-pack"},
+        pack_ids_by_artifact_digest={
+            "sha256:" + "a" * 64: {"profile-a-pack", "profile-b-pack"},
+        },
+    )
+
+    assert valid is False
+    assert approval_pack_id is None
+
+
+def test_packvm_authority_binds_each_profile_activation_without_cross_talk() -> None:
+    """Profile A/B produce disjoint activation-bound authority bundles."""
+
+    class EmptyAuthorityStore:
+        @staticmethod
+        def get_host_extension_trust(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_approval(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_provider_authority(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_grant(record_id: str) -> None:
+            return None
+
+    class RecordingAuthorityControl:
+        def __init__(self) -> None:
+            self.bundles: list[tuple[Any, Any, Any]] = []
+
+        def commit_approval_bundle(
+            self,
+            approval: Any,
+            *,
+            host_extension_trust: Any,
+            provider_authorities: tuple[Any, ...],
+            grants: tuple[Any, ...],
+        ) -> None:
+            assert host_extension_trust is None
+            self.bundles.append((approval, provider_authorities[0], grants[0]))
+
+    def digest(label: str) -> str:
+        return canonical_digest({"label": label})
+
+    caller = FunctionPrincipal(
+        parent_artifact_digest=digest("caller-artifact"),
+        function_implementation_digest=digest("caller-function"),
+        function_id="caller.function",
+        contract_revision_digest=digest("caller-contract"),
+        operation_id="caller.operation",
+    )
+    target = FunctionPrincipal(
+        parent_artifact_digest=digest("target-artifact"),
+        function_implementation_digest=digest("target-function"),
+        function_id="target.function",
+        contract_revision_digest=digest("target-contract"),
+        operation_id="target.operation",
+    )
+    scope = AuthorityScope(
+        capability="target.read",
+        semantics_digest=digest("target-semantics"),
+    )
+    control = RecordingAuthorityControl()
+
+    for index, profile_id in enumerate(("profile-a", "profile-b"), start=1):
+        activation_id = f"activation.{profile_id}"
+        active = ActiveDefaultProfile(
+            resolved=ResolvedDefaultProfile(
+                profile={"profile_id": profile_id},
+                lock={},
+                plan={},
+            ),
+            activation={
+                "activation_id": activation_id,
+                "created_at": f"2026-08-29T00:00:0{index}Z",
+                "plan_digest": digest(f"plan-{profile_id}"),
+                "profile_authority_snapshot_digest": digest(
+                    f"authority-{profile_id}"
+                ),
+                "security_epoch": index,
+                "fencing_token": index,
+            },
+        )
+        domain = ExecutionDomain(
+            domain_id=f"domain.{profile_id}",
+            profile_id=profile_id,
+            activation_id=activation_id,
+            boot_epoch=1,
+            process_identity=f"process.{profile_id}",
+            authenticated_channel_digest=digest(f"channel-{profile_id}"),
+            sandbox_profile_digest=digest(f"sandbox-{profile_id}"),
+            resource_namespace=f"resource.{profile_id}",
+            principals=(target,),
+            boundary=DomainBoundary.DEDICATED_PROCESS,
+            security_epoch=index,
+            fencing_token=index,
+        )
+        _commit_plan_authority(
+            active=active,
+            store=EmptyAuthorityStore(),
+            control=control,
+            caller=caller,
+            target=target,
+            contract_id="target.contract",
+            caller_publisher_lineage="publisher.caller",
+            target_publisher_lineage="publisher.target",
+            target_domain=domain,
+            scope=scope,
+            authority_label="profile-pack-vm",
+            pack_approval_revision=digest(f"approval-{profile_id}"),
+        )
+
+    assert len(control.bundles) == 2
+    for expected_profile, bundle in zip(
+        ("profile-a", "profile-b"), control.bundles, strict=True
+    ):
+        approval, provider, grant = bundle
+        assert approval.profile_id == expected_profile
+        assert grant.profile_id == expected_profile
+        assert grant.activation_id == f"activation.{expected_profile}"
+        assert f".{expected_profile}.profile-pack-vm." in approval.approval_id
+        assert f".{expected_profile}.profile-pack-vm." in provider.record_id
+        assert f".{expected_profile}.profile-pack-vm." in grant.grant_id
+        assert provider.execution_domain_id == f"domain.{expected_profile}"
+
+
+@pytest.mark.skipif(
+    os.environ.get(NATIVE_PACKVM_ACCEPTANCE_ENV) != "1",
+    reason=(
+        "native acceptance requires a provisioned signed direct-VZ helper, "
+        "verified boot assets, and allocation-scoped authenticated transport"
+    ),
+)
+def test_real_pack_profile_transaction_with_native_authenticated_packvm(
+    tmp_path: Path,
+) -> None:
+    """Mint activation-bound PackVM authority only with native verified facts."""
+
+    _exercise_real_pack_profile_transaction(
+        tmp_path,
+        expect_authenticated_packvm=True,
+    )

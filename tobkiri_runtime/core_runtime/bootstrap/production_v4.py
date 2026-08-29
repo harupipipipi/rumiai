@@ -911,6 +911,29 @@ def _commit_plan_authority(
         raise AuthorityDenied("Pack catalog authority snapshot changed")
 
 
+def _packvm_approval_provenance(
+    *,
+    caller_artifact_digest: str,
+    target_pack_id: str,
+    optional_pack_ids: set[str],
+    pack_ids_by_artifact_digest: Mapping[str, set[str]],
+) -> tuple[bool, str | None]:
+    """Resolve one unambiguous optional-Pack approval source for a PackVM edge."""
+
+    caller_pack_ids = pack_ids_by_artifact_digest.get(caller_artifact_digest, set())
+    if len(caller_pack_ids) != 1:
+        return False, None
+    caller_pack_id = next(iter(caller_pack_ids))
+    approval_pack_ids = {
+        pack_id
+        for pack_id in (target_pack_id, caller_pack_id)
+        if pack_id in optional_pack_ids
+    }
+    if len(approval_pack_ids) > 1:
+        return False, None
+    return True, next(iter(approval_pack_ids), None)
+
+
 def _bridge_targets_by_outer_edge(
     edges: tuple[_CapturedPlanEdge, ...],
 ) -> dict[
@@ -1280,6 +1303,17 @@ def capture_production_dispatch(
     captured_dynamic_approvals: dict[str, str] = {}
     approved_host_binding_keys: set[tuple[str, str, str]] = set()
     dynamic_domain_ids: dict[tuple[str, str, str], str] = {}
+    optional_pack_ids = {
+        str(item["pack_id"])
+        for item in profile.get("packs", ())
+        if str(item["pack_id"]) not in catalog.packs
+    }
+    pack_ids_by_artifact_digest: dict[str, set[str]] = {}
+    for item in lock["effective_set"]:
+        pack_ids_by_artifact_digest.setdefault(
+            str(item["artifact_digest"]),
+            set(),
+        ).add(str(item["identity"]))
     selected_backend_registry = BackendRegistry(registered_backends)
     for captured_edge in sorted(captured_edges, key=lambda item: item.key):
         if captured_edge.resolved_binding.operation.contract_id in _CONTROL_CONTRACTS:
@@ -1353,6 +1387,25 @@ def capture_production_dispatch(
             continue
         if not callable(getattr(backend, "bind_target_domain_resolver", None)):
             continue
+        provenance_valid, approval_pack_id = _packvm_approval_provenance(
+            caller_artifact_digest=captured_edge.caller.parent_artifact_digest,
+            target_pack_id=resolved_binding.artifact.pack_id,
+            optional_pack_ids=optional_pack_ids,
+            pack_ids_by_artifact_digest=pack_ids_by_artifact_digest,
+        )
+        if not provenance_valid:
+            continue
+        pack_approval_revision: str | None = None
+        if approval_pack_id is not None:
+            try:
+                pack_approval = capture_valid_pack_approval(approval_pack_id)
+                pack_approval_revision = str(pack_approval["approval_revision"])
+            except Exception:
+                # A selected Pack can remain in an immutable historical Plan,
+                # but a missing, stale, corrupt, or revoked approval must never
+                # recreate runtime authority for it.
+                continue
+            captured_dynamic_approvals[approval_pack_id] = pack_approval_revision
         target_domain = _execution_domain(
             domain_id=(
                 f"domain.provider.{target.principal_id.removeprefix('sha256:')[:24]}."
@@ -1389,6 +1442,7 @@ def capture_production_dispatch(
             target_domain=target_domain,
             scope=captured_edge.ceilings.caller_effect,
             authority_label="profile-pack-vm",
+            pack_approval_revision=pack_approval_revision,
         )
         target_backend_digests[target.principal_id] = backend.status.backend_digest
 
