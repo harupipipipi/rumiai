@@ -11,15 +11,36 @@ import {
   Dashboard,
 } from './Dashboard';
 import type {NamedProfileRegistry} from '@/src/lib/api';
+import {DialogContainer} from '@/src/components/ui/DialogContainer';
 import {useAppStore} from '@/src/store';
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
 
 function profileRecord(profileId: string, displayName: string, revision: string) {
+  const resolved = profileId === 'defaults';
   return {
     profile_id: profileId,
     profile_revision: revision,
-    profile: {profile_id: profileId, display_name: displayName},
+    profile: {
+      profile_id: profileId,
+      display_name: displayName,
+      profile_api_version: 'io.tobkiri.profile.v4',
+      state: resolved ? 'resolved' : 'needs_resolution',
+      mode: 'interactive',
+      catalog_revision: resolved ? digest('c') : null,
+      base: {
+        pack_id: 'defaults-basepack',
+        artifact_digest: resolved ? digest('d') : null,
+        definition_revision: resolved ? digest('e') : null,
+      },
+      shell: resolved ? {
+        provider_id: 'shell.tauri.default',
+        pack_id: 'shell.tauri.default',
+        artifact_digest: digest('f'),
+        definition_revision: digest('1'),
+      } : null,
+      packs: [{pack_id: 'defaultspack', artifact_digest: resolved ? digest('2') : null}],
+    },
     order: profileId === 'defaults' ? 0 : 1,
     parent_revision: null,
     tombstone: false,
@@ -71,10 +92,11 @@ function buttonByLabel(container: HTMLElement, label: string): HTMLButtonElement
   return button;
 }
 
-function linkByLabel(container: HTMLElement, label: string): HTMLAnchorElement {
-  const link = container.querySelector<HTMLAnchorElement>(`a[aria-label="${label}"]`);
-  assert.ok(link, `missing link ${label}`);
-  return link;
+function menuItemByText(text: string): HTMLElement {
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    .find((candidate) => candidate.textContent?.includes(text));
+  assert.ok(item, `missing menu item ${text}`);
+  return item;
 }
 
 async function settle(): Promise<void> {
@@ -157,23 +179,143 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         await act(async () => { addProfile.click(); });
         assert.ok(container.querySelector('input[aria-label="New Profile ID"]'));
 
-        for (const displayName of ['Defaults Profile', 'Research Profile']) {
-          assert.ok(buttonByLabel(container, `Edit ${displayName}`));
-          assert.ok(buttonByLabel(container, `Duplicate ${displayName}`));
-          assert.ok(buttonByLabel(container, `Delete ${displayName}`));
-        }
-        assert.equal(buttonByLabel(container, 'Delete Defaults Profile').disabled, true);
-        assert.equal(buttonByLabel(container, 'Delete Research Profile').disabled, false);
+        assert.ok(container.querySelector('[data-testid="profile-grid"]'));
+        assert.equal(container.querySelectorAll('[data-profile-card]').length, 2);
+        assert.ok(container.querySelector('[data-profile-card="defaults"][data-profile-status="ready"]'));
+        assert.ok(container.querySelector('[data-profile-card="research"][data-profile-status="error"]'));
+        assert.equal(
+          container.querySelector<HTMLAnchorElement>('a[aria-label="View Pack closure for Defaults Profile"]')?.getAttribute('href'),
+          '/profile?profile_id=defaults#profile-closure',
+        );
+        assert.equal(
+          container.querySelector<HTMLAnchorElement>('a[aria-label="Browse and review Research Profile"]')?.getAttribute('href'),
+          '/profile?profile_id=research',
+        );
 
-        const activate = linkByLabel(container, 'Activate Research Profile');
+        await act(async () => { buttonByLabel(container, 'Open actions for Defaults Profile').click(); });
+        assert.ok(menuItemByText('Edit'));
+        assert.ok(menuItemByText('Active'));
+        assert.ok(menuItemByText('Duplicate'));
+        const defaultsDelete = menuItemByText('Delete') as HTMLButtonElement;
+        assert.equal(defaultsDelete.disabled, true);
+        await act(async () => { buttonByLabel(container, 'Open actions for Defaults Profile').click(); });
+
+        await act(async () => { buttonByLabel(container, 'Open actions for Research Profile').click(); });
+        const activate = menuItemByText('Set Active') as HTMLAnchorElement;
+        assert.equal(activate.getAttribute('aria-label'), 'Activate Research Profile');
         assert.equal(activate.getAttribute('aria-disabled'), 'true', scenario.name);
         assert.equal(activate.getAttribute('tabindex'), '-1', scenario.name);
-        assert.match(activate.textContent ?? '', /Setup required/);
+        assert.match(activate.textContent ?? '', /Set Active/);
+        const researchDelete = menuItemByText('Delete') as HTMLButtonElement;
+        assert.equal(researchDelete.disabled, false);
         assert.equal(buttonByLabel(container, 'Launch Defaults Profile').disabled, true, scenario.name);
+        await act(async () => { researchDelete.click(); });
+        assert.equal(useAppStore.getState().dialog?.title, 'Delete Research Profile?');
+        await act(async () => useAppStore.getState().closeDialog());
       } finally {
         await act(async () => root.unmount());
         dom.window.close();
       }
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    useAppStore.setState(previousState, true);
+  }
+});
+
+test('Home keeps browsing selection separate from active execution', async () => {
+  const previousState = useAppStore.getState();
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  const previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+
+  try {
+    globalThis.fetch = (async () => jsonResponse(profileRegistry())) as typeof fetch;
+    useAppStore.setState({
+      isSetupDone: false,
+      runtimeReady: false,
+      runtimeStatus: 'starting',
+      runtimeError: null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: null,
+    });
+    const {dom, container, root} = createDashboardDom();
+    try {
+      await act(async () => {
+        root.render(<MemoryRouter initialEntries={['/?profile_id=research']}><Dashboard /></MemoryRouter>);
+      });
+      await settle();
+      const defaultsCard = container.querySelector<HTMLElement>('[data-profile-card="defaults"]');
+      const researchCard = container.querySelector<HTMLElement>('[data-profile-card="research"]');
+      assert.ok(defaultsCard);
+      assert.ok(researchCard);
+      assert.match(defaultsCard.textContent ?? '', /Active execution/);
+      assert.doesNotMatch(defaultsCard.textContent ?? '', /Selected browsing/);
+      assert.match(researchCard.textContent ?? '', /Selected browsing/);
+      assert.doesNotMatch(researchCard.textContent ?? '', /Active execution/);
+    } finally {
+      await act(async () => root.unmount());
+      dom.window.close();
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    useAppStore.setState(previousState, true);
+  }
+});
+
+test('Home presents the deletion confirmation without deleting a Profile', async () => {
+  const previousState = useAppStore.getState();
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  const previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+
+  try {
+    globalThis.fetch = (async () => jsonResponse(profileRegistry())) as typeof fetch;
+    useAppStore.setState({
+      isSetupDone: true,
+      runtimeReady: false,
+      runtimeStatus: 'starting',
+      runtimeError: null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: null,
+    });
+    const {dom, container, root} = createDashboardDom();
+    try {
+      await act(async () => {
+        root.render(<MemoryRouter><><Dashboard /><DialogContainer /></></MemoryRouter>);
+      });
+      await settle();
+      await act(async () => { buttonByLabel(container, 'Open actions for Research Profile').click(); });
+      await act(async () => { menuItemByText('Delete').click(); });
+      assert.equal(container.querySelector('[role="alertdialog"] h2')?.textContent, 'Delete Research Profile?');
+      assert.equal(useAppStore.getState().dialog?.title, 'Delete Research Profile?');
+      assert.ok(container.textContent?.includes('Keep Profile'));
+      assert.ok(container.textContent?.includes('Delete Profile'));
+      assert.equal(container.querySelector('[data-profile-card="research"]') !== null, true);
+    } finally {
+      await act(async () => useAppStore.getState().closeDialog());
+      await act(async () => root.unmount());
+      dom.window.close();
     }
   } finally {
     globalThis.fetch = previousFetch;

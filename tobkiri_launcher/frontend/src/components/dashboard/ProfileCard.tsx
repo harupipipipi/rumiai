@@ -1,0 +1,249 @@
+import type {FormEvent} from 'react';
+import {Copy, Edit2, MoreHorizontal, Package, Rocket, Star, Trash2, AlertCircle, Box} from 'lucide-react';
+import {Link} from 'react-router';
+
+import {Badge} from '@/src/components/ui/Badge';
+import {Button} from '@/src/components/ui/Button';
+import {Card} from '@/src/components/ui/Card';
+import {Popover, PopoverContent, PopoverTrigger} from '@/src/components/ui/Popover';
+import type {NamedProfileRecord} from '@/src/lib/profileRegistry';
+import type {NamedProfileView} from '@/src/lib/profileRegistryView';
+import {cn} from '@/src/lib/utils';
+
+export interface ProfileCardProps {
+  activationHref: string;
+  browseHref: string;
+  closureHref: string;
+  editing: boolean;
+  editingName: string;
+  isActive: boolean;
+  isBrowsing: boolean;
+  isBusy: boolean;
+  profile: NamedProfileRecord;
+  profileView: NamedProfileView;
+  runtimeVerified: boolean;
+  desktopShellAvailable: boolean;
+  actionType?: string | null;
+  onCancelEdit: () => void;
+  onDelete: (profile: NamedProfileRecord) => void;
+  onDuplicate: (profile: NamedProfileRecord) => void;
+  onEdit: (profile: NamedProfileRecord) => void;
+  onEditingNameChange: (name: string) => void;
+  onLaunch: (profile: NamedProfileRecord) => void;
+  onSubmitEdit: (event: FormEvent<HTMLFormElement>, profile: NamedProfileRecord) => void;
+}
+
+function actionButtonClass(): string {
+  return 'flex min-h-10 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]';
+}
+
+export function ProfileCard({
+  activationHref,
+  browseHref,
+  closureHref,
+  editing,
+  editingName,
+  isActive,
+  isBrowsing,
+  isBusy,
+  profile,
+  profileView,
+  runtimeVerified,
+  desktopShellAvailable,
+  actionType,
+  onCancelEdit,
+  onDelete,
+  onDuplicate,
+  onEdit,
+  onEditingNameChange,
+  onLaunch,
+  onSubmitEdit,
+}: ProfileCardProps) {
+  const displayName = profileView.displayName;
+  const launchBlockedReason = !isActive
+    ? 'Activate this Profile before launching it.'
+    : profileView.status === 'error'
+      ? profileView.statusDescription ?? 'Resolve this Profile before launching it.'
+      : !runtimeVerified
+        ? 'Complete Setup verification before launching.'
+        : !desktopShellAvailable
+          ? 'Launch is available in Tobkiri Launcher.'
+          : null;
+  const launchDisabled = Boolean(launchBlockedReason) || isBusy;
+
+  return (
+    <Card
+      aria-labelledby={`profile-${profile.profile_id}-title`}
+      className={cn(
+        'group relative flex min-h-[245px] flex-col overflow-hidden transition-all duration-[var(--transition-base)] hover:shadow-[var(--shadow-md)]',
+        isActive && 'ring-1 ring-accent/30',
+        isBrowsing && 'border-accent/50',
+      )}
+      data-profile-card={profile.profile_id}
+      data-profile-status={profileView.status}
+    >
+      <div className="flex flex-1 flex-col p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="truncate text-sm font-semibold text-text-main" id={`profile-${profile.profile_id}-title`}>
+                {displayName}
+              </h3>
+              {isActive && (
+                <span
+                  aria-label="Active execution Profile"
+                  className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
+                  role="img"
+                />
+              )}
+            </div>
+            <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-text-muted">
+              <Box aria-hidden="true" className="h-3 w-3 shrink-0" />
+              <span title={profileView.basePackId ?? undefined}>{profileView.basePackId ?? 'Base Pack unavailable'}</span>
+            </p>
+          </div>
+
+          <Popover>
+            <PopoverTrigger
+              aria-label={`Open actions for ${displayName}`}
+              className="rounded-md p-2 text-text-muted transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+              title={`Open actions for ${displayName}`}
+            >
+              <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
+              <span className="sr-only">Profile actions</span>
+            </PopoverTrigger>
+            <PopoverContent align="right" className="w-48">
+              <div className="flex flex-col gap-0.5 py-1">
+                <button className={actionButtonClass()} onClick={() => onEdit(profile)} role="menuitem" type="button">
+                  <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
+                </button>
+                {isActive ? (
+                  <button
+                    aria-disabled="true"
+                    className={cn(actionButtonClass(), 'cursor-not-allowed text-text-muted opacity-60')}
+                    disabled
+                    role="menuitem"
+                    type="button"
+                  >
+                    <Star aria-hidden="true" className="h-3.5 w-3.5 fill-accent text-accent" /> Active
+                  </button>
+                ) : (
+                  <Link
+                    aria-disabled={!runtimeVerified}
+                    aria-label={`Activate ${displayName}`}
+                    className={cn(
+                      actionButtonClass(),
+                      !runtimeVerified && 'cursor-not-allowed text-text-muted opacity-60',
+                    )}
+                    onClick={(event) => {
+                      if (!runtimeVerified) event.preventDefault();
+                    }}
+                    role="menuitem"
+                    tabIndex={runtimeVerified ? undefined : -1}
+                    title={runtimeVerified ? 'Open v4 activation ceremony' : 'Complete Setup verification before activating'}
+                    to={activationHref}
+                  >
+                    <Star aria-hidden="true" className="h-3.5 w-3.5" /> Set Active
+                  </Link>
+                )}
+                <button
+                  className={actionButtonClass()}
+                  disabled={isBusy}
+                  onClick={() => onDuplicate(profile)}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Copy aria-hidden="true" className="h-3.5 w-3.5" /> Duplicate
+                </button>
+                <div aria-hidden="true" className="my-1 border-t border-border" />
+                <button
+                  aria-label={`Delete ${displayName}`}
+                  className={cn(actionButtonClass(), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20')}
+                  disabled={isActive || isBusy}
+                  onClick={() => onDelete(profile)}
+                  role="menuitem"
+                  title={isActive ? 'Switch away before deleting this Profile' : 'Delete Profile'}
+                  type="button"
+                >
+                  <Trash2 aria-hidden="true" className="h-3.5 w-3.5" /> Delete
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="mt-4 flex min-h-[54px] flex-wrap content-start gap-1.5">
+          {isActive && <Badge variant="success" className="text-[10px]">Active execution</Badge>}
+          {isBrowsing && <Badge variant="default" className="text-[10px]">Selected browsing</Badge>}
+          {profileView.status === 'ready' ? (
+            <Badge variant="success" className="text-[10px]">Ready</Badge>
+          ) : (
+            <div
+              aria-label={`${profileView.statusLabel}: ${profileView.statusDescription ?? 'Profile needs attention.'}`}
+              className="flex w-full items-start gap-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950/20 dark:text-red-300"
+              role="status"
+            >
+              <AlertCircle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="line-clamp-2">
+                <span className="font-medium">{profileView.statusLabel}.</span>{' '}
+                {profileView.statusDescription}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {editing && (
+          <form className="mt-2 space-y-2 border-t border-border pt-3" onSubmit={(event) => onSubmitEdit(event, profile)}>
+            <label className="block text-xs font-medium text-text-main" htmlFor={`edit-profile-${profile.profile_id}`}>
+              Display name
+            </label>
+            <input
+              aria-label={`Display name for ${profile.profile_id}`}
+              className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-main outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+              id={`edit-profile-${profile.profile_id}`}
+              maxLength={120}
+              onChange={(event) => onEditingNameChange(event.target.value)}
+              required
+              value={editingName}
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button onClick={onCancelEdit} size="sm" type="button" variant="ghost">Cancel</Button>
+              <Button disabled={isBusy} size="sm" type="submit">Save</Button>
+            </div>
+          </form>
+        )}
+
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <Link
+              aria-label={`Browse and review ${displayName}`}
+              className="rounded px-1 py-1 text-text-muted underline-offset-2 hover:text-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+              to={browseHref}
+            >
+              Browse
+            </Link>
+            <Link
+              aria-label={`View Pack closure for ${displayName}`}
+              className="flex items-center gap-1 rounded px-1 py-1 text-text-muted underline-offset-2 hover:text-text-main hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+              to={closureHref}
+            >
+              <Package aria-hidden="true" className="h-3.5 w-3.5" /> Pack closure
+            </Link>
+          </div>
+          <Button
+            aria-label={`Launch ${displayName}`}
+            disabled={launchDisabled}
+            loading={isBusy && actionType === 'launch'}
+            onClick={() => onLaunch(profile)}
+            size="sm"
+            title={launchBlockedReason ?? `Launch ${displayName}`}
+            type="button"
+          >
+            <Rocket aria-hidden="true" className="h-3.5 w-3.5" />
+            {isBusy && actionType === 'launch' ? 'Launching…' : 'Launch'}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
