@@ -46,6 +46,32 @@ class ActiveProfileStoreLockTimeout(ActiveProfileStoreError):
     """Raised when the Host-global pointer lock cannot be acquired."""
 
 
+def _default_snapshot_path(profile_id: str, activation_id: str) -> str:
+    """Return the only activation-envelope path valid for one identity."""
+
+    suffix = activation_id.removeprefix("activation:")
+    return (
+        Path("workspaces")
+        / profile_id
+        / "activation"
+        / "activations"
+        / f"{suffix}.json"
+    ).as_posix()
+
+
+def _validate_snapshot_path_binding(
+    profile_id: str,
+    activation_id: str,
+    snapshot_path: str,
+) -> None:
+    """Reject paths that are not canonical for the Profile activation."""
+
+    if snapshot_path != _default_snapshot_path(profile_id, activation_id):
+        raise ActiveProfileStoreIntegrityError(
+            "activation snapshot path is not bound to the active Profile activation"
+        )
+
+
 @dataclass(frozen=True)
 class ActiveProfilePointer:
     """The immutable identity binding published by the Host."""
@@ -84,6 +110,11 @@ class ActiveProfilePointer:
             raise ActiveProfileStoreIntegrityError(
                 "activation snapshot path must be relative and traversal-free"
             )
+        _validate_snapshot_path_binding(
+            self.profile_id,
+            self.activation_id,
+            self.activation_snapshot_path,
+        )
         if (
             isinstance(self.generation, bool)
             or not isinstance(self.generation, int)
@@ -417,6 +448,11 @@ class ActiveProfileStore:
                 "catalog_revision": catalog_revision,
             }
         requested = self._coerce_pointer(pointer)
+        _validate_snapshot_path_binding(
+            requested.profile_id,
+            requested.activation_id,
+            requested.activation_snapshot_path,
+        )
         expected_pointer = self._coerce_expected(expected)
         with exclusive_profile_lock(
             self._directory,
@@ -531,7 +567,7 @@ class ActiveProfileStore:
         )
 
     def _read_snapshot(self, pointer: ActiveProfilePointer) -> Mapping[str, Any]:
-        relative = self._relative_to_root(pointer.activation_snapshot_path)
+        relative = self._relative_to_root(pointer)
         try:
             value = strict_loads(self._read_relative(relative))
         except (OSError, SecurePersistenceError, ValueError) as error:
@@ -545,7 +581,7 @@ class ActiveProfileStore:
     def _read_snapshot_bytes(self, pointer: ActiveProfilePointer) -> bytes:
         """Read the pinned activation envelope bytes below the Host root."""
 
-        relative = self._relative_to_root(pointer.activation_snapshot_path)
+        relative = self._relative_to_root(pointer)
         try:
             return self._read_relative(relative)
         except (OSError, SecurePersistenceError) as error:
@@ -688,7 +724,13 @@ class ActiveProfileStore:
             raise ActiveProfileStoreError("active Profile predecessor must be an object")
         return self._coerce_pointer(value)
 
-    def _relative_to_root(self, value: str) -> Path:
+    def _relative_to_root(self, pointer: ActiveProfilePointer) -> Path:
+        value = pointer.activation_snapshot_path
+        _validate_snapshot_path_binding(
+            pointer.profile_id,
+            pointer.activation_id,
+            value,
+        )
         candidate = Path(value)
         if not ActiveProfilePointer._safe_snapshot_path(value):
             raise ActiveProfileStoreIntegrityError("activation snapshot path is unsafe")
@@ -696,11 +738,6 @@ class ActiveProfileStore:
         # path is rooted at user_data/.  All snapshot reads therefore use the
         # user-data root as a separate pinned directory.
         return candidate
-
-
-def _default_snapshot_path(profile_id: str, activation_id: str) -> str:
-    suffix = activation_id.removeprefix("activation:")
-    return f"workspaces/{profile_id}/activation/activations/{suffix}.json"
 
 
 def _snapshot_digest(snapshot: Mapping[str, Any] | None) -> str | None:

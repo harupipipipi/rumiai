@@ -198,6 +198,95 @@ def test_active_pointer_rejects_memory_disk_mismatch(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("case", "snapshot_path"),
+    (
+        (
+            "cross-profile",
+            "workspaces/profile-b/activation/activations/profile-a-path.json",
+        ),
+        (
+            "invalid-filename",
+            "workspaces/profile-a/activation/activations/not-the-activation.json",
+        ),
+    ),
+)
+def test_active_pointer_rejects_unbound_snapshot_path_on_commit(
+    tmp_path: Path,
+    case: str,
+    snapshot_path: str,
+) -> None:
+    """Commit cannot point Profile A at another workspace or activation file."""
+
+    root = tmp_path / case
+    store = ActiveProfileStore(root)
+    activation, snapshot, _canonical_path = _write_activation(
+        root,
+        "profile-a",
+        "path",
+    )
+    path = root / snapshot_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(canonical_json(snapshot) + b"\n")
+
+    with pytest.raises(ActiveProfileStoreIntegrityError, match="snapshot path"):
+        store.commit_activation(
+            activation,
+            activation_snapshot=snapshot,
+            activation_snapshot_path=snapshot_path,
+        )
+    assert store.load() is None
+
+
+@pytest.mark.parametrize(
+    ("case", "snapshot_path"),
+    (
+        (
+            "cross-profile",
+            "workspaces/profile-b/activation/activations/profile-a-reload.json",
+        ),
+        (
+            "invalid-filename",
+            "workspaces/profile-a/activation/activations/not-the-activation.json",
+        ),
+    ),
+)
+def test_active_pointer_rejects_unbound_snapshot_path_on_reload(
+    tmp_path: Path,
+    case: str,
+    snapshot_path: str,
+) -> None:
+    """Reload cannot follow a persisted pointer outside its bound activation."""
+
+    root = tmp_path / case
+    store = ActiveProfileStore(root)
+    activation, snapshot, canonical_path = _write_activation(
+        root,
+        "profile-a",
+        "reload",
+    )
+    store.commit_activation(
+        activation,
+        activation_snapshot=snapshot,
+        activation_snapshot_path=canonical_path,
+    )
+
+    path = root / snapshot_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(canonical_json(snapshot) + b"\n")
+    pointer = dict(store.load().to_dict())
+    pointer["activation_snapshot_path"] = snapshot_path
+    pointer["pointer_digest"] = canonical_digest(
+        {key: value for key, value in pointer.items() if key != "pointer_digest"}
+    )
+    store.path.write_bytes(canonical_json(pointer) + b"\n")
+
+    with pytest.raises(ActiveProfileStoreIntegrityError, match="snapshot path"):
+        store.load(verify_snapshot=False)
+    with pytest.raises(ActiveProfileStoreIntegrityError, match="snapshot path"):
+        store.require(verify_snapshot=True)
+
+
 def test_legacy_collection_preserves_order_selection_timestamps_and_workspaces(
     tmp_path: Path,
 ) -> None:
