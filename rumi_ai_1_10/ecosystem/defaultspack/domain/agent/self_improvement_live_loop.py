@@ -107,6 +107,14 @@ def _adapt_tools() -> list[dict[str, Any]]:
     return [adapt_tool_definition(t) for t in TOOL_DEFINITIONS]
 
 
+def _approval_context_allows_privileged_tools(context: dict[str, Any] | None) -> bool:
+    return (
+        isinstance(context, dict)
+        and context.get("_tool_server_approval_token_valid") is True
+        and context.get("_tool_server_approved") is True
+    )
+
+
 def _normalize_args(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Fix common MiMo argument quirks."""
     args = dict(arguments)
@@ -136,47 +144,35 @@ def _execute_tool(
     tool_name: str,
     arguments: dict[str, Any],
     workspace_root: Path,
+    approval_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute a tool by dispatching to the appropriate block function."""
     arguments = _normalize_args(tool_name, arguments)
+    execution_context = {"workspace_root": str(workspace_root)}
+    if isinstance(approval_context, dict):
+        execution_context.update(approval_context)
     try:
         if tool_name == "coding_file_read":
             from blocks.coding.file_read import run as file_read_run
-            return file_read_run(arguments, {"workspace_root": str(workspace_root)})
+            return file_read_run(arguments, execution_context)
 
         if tool_name == "coding_file_patch":
             from blocks.coding.file_patch import run as file_patch_run
-            ctx = {
-                "workspace_root": str(workspace_root),
-                "_tool_server_approved": True,
-                "_tool_server_approval_token_valid": True,
-            }
-            return file_patch_run(arguments, ctx)
+            return file_patch_run(arguments, execution_context)
 
         if tool_name == "coding_terminal_exec":
+            from blocks.coding.terminal_exec import run as terminal_exec_run
             command = arguments.get("command", "")
             cwd = arguments.get("cwd") or str(workspace_root)
             timeout = int(arguments.get("timeout", 60))
-            proc = subprocess.run(
-                command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+            return terminal_exec_run(
+                {**arguments, "command": command, "cwd": cwd, "timeout": timeout},
+                execution_context,
             )
-            return {
-                "status": "ok",
-                "data": {
-                    "exit_code": proc.returncode,
-                    "stdout": proc.stdout[-2000:] if proc.stdout else "",
-                    "stderr": proc.stderr[-1000:] if proc.stderr else "",
-                },
-            }
 
         if tool_name == "coding_git_commit":
             from blocks.coding.git_commit import run as git_commit_run
-            ctx = {
-                "workspace_root": str(workspace_root),
-                "_tool_server_approved": True,
-                "_tool_server_approval_token_valid": True,
-            }
-            return git_commit_run(arguments, ctx)
+            return git_commit_run(arguments, execution_context)
 
         if tool_name == "coding_git_status":
             git = GitOps(workspace_root)
@@ -218,6 +214,7 @@ def run_live_improvement(
     max_tool_calls: int = 15,
     model: str = "mimo-v2.5-pro",
     state_path: str | Path | None = None,
+    approval_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one live self-improvement cycle with MiMo v2.5 Pro.
 
@@ -309,7 +306,7 @@ def run_live_improvement(
                 runtime.record_tool_call(tool_name, arguments)
                 tool_calls_made += 1
 
-                result = _execute_tool(tool_name, arguments, workspace_root)
+                result = _execute_tool(tool_name, arguments, workspace_root, approval_context=approval_context)
                 result_str = json.dumps(result, ensure_ascii=False, default=str)[:1500]
 
                 if tool_name == "coding_file_read" and result.get("status") == "ok":
@@ -346,7 +343,12 @@ def run_live_improvement(
         error_message = str(exc)
         runtime.record_model_error(error_message)
 
-    if not last_commit_hash and files_modified and not error_message:
+    if (
+        not last_commit_hash
+        and files_modified
+        and not error_message
+        and _approval_context_allows_privileged_tools(approval_context)
+    ):
         try:
             test_cmd = f"{sys.executable} -m pytest test_utils.py -v --tb=short"
             proc = subprocess.run(test_cmd, shell=True, cwd=str(workspace_root), capture_output=True, text=True, timeout=30)

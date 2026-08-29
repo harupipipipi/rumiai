@@ -11,6 +11,10 @@ on:
         description: "Number of improvement tasks per cycle"
         required: false
         default: "3"
+      live_execution:
+        description: "Run live privileged self-improvement instead of dry-run"
+        required: false
+        default: "false"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +43,8 @@ jobs:
       - name: Run soak test
         env:
           XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY: ${{ secrets.XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY }}
+          RUMI_SOAK_ALLOW_LIVE_PRIVILEGED: ${{ github.event.inputs.live_execution || 'false' }}
+          RUMI_SOAK_ALLOWED_WORKSPACE_ROOT: ${{ github.workspace }}
         run: |
           set -o pipefail
           python -c "
@@ -48,12 +54,12 @@ jobs:
           sys.path.insert(0, 'rumi_ai_1_10/ecosystem/defaultspack')
           sys.path.insert(0, 'rumi_ai_1_10')
 
-          from domain.agent.self_improvement_live_loop import run_multi_task_dogfood, run_vision_qa
           from domain.agent.self_improvement_runtime import create_mimo_profile
           from domain.agent.soak_test_runner import SoakTestRunner
 
           duration_hours = float('${{ github.event.inputs.duration_hours || 24 }}')
           task_count = int('${{ github.event.inputs.task_count || 3 }}')
+          live_execution = str('${{ github.event.inputs.live_execution || 'false' }}').strip().lower() == 'true'
           workspace = Path('soak_workspace')
           report_path = Path('soak_report')
 
@@ -61,7 +67,7 @@ jobs:
           report_path.mkdir(exist_ok=True)
 
           api_key = os.environ.get('XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY', '').strip()
-          if not api_key:
+          if live_execution and not api_key:
               final_report = {
                   'status': 'failed',
                   'error': 'XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY is not configured',
@@ -132,7 +138,18 @@ jobs:
               # Reset workspace to seed state for each cycle
               subprocess.run(['git', 'checkout', 'HEAD', '--', '.'], cwd=workspace, capture_output=True)
 
-              result = run_multi_task_dogfood(workspace_root=workspace, task_count=task_count)
+              result = runner.run_claimed_dogfood_tasks(
+                  workspace_root=workspace,
+                  task_count=task_count,
+                  lease_seconds=3600,
+                  dry_run=not live_execution,
+                  allow_live_execution=live_execution,
+                  allowed_workspace_root=Path(os.environ.get('GITHUB_WORKSPACE', '.')),
+                  approval_context={
+                      '_tool_server_approved': True,
+                      '_tool_server_approval_token_valid': True,
+                  } if live_execution else {},
+              )
               all_results.append(result)
 
               summary = {
@@ -142,18 +159,6 @@ jobs:
                   'results': result['results'],
                   'elapsed_hours': round((time.time() - start) / 3600, 2),
               }
-
-              for r in result['results']:
-                  runner.record_task_result(
-                      r['task_id'],
-                      status='completed' if r['success'] else 'failed',
-                      model_role='main',
-                      model_id=r.get('model', ''),
-                      files_read=r.get('files_read', []),
-                      files_modified=r.get('files_modified', []),
-                      test_result='pass' if r.get('test_exit_code') == 0 else 'fail',
-                      failures=[r['error']] if r.get('error') else [],
-                  )
 
               health = runner.health_status()
               summary['health'] = health
