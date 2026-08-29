@@ -285,6 +285,55 @@ def _entrypoint_implementation_digest(entrypoint: Mapping[str, Any]) -> str | No
     return _file_digest(candidate)
 
 
+def _executable_source_for_contract(
+    pack_id: str,
+    contract_id: str,
+) -> Mapping[str, Any] | None:
+    """Resolve one source record from a function-keyed executable registry.
+
+    The source registry is intentionally operation-complete, so a Pack can
+    have several Function records instead of one lossy Pack-level record.  A
+    legacy import still needs the schema override for one Contract; resolve
+    that record explicitly and reject conflicting source claims.
+    """
+
+    payload = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))
+    source_records = payload.get("packs") if isinstance(payload, Mapping) else None
+    if not isinstance(source_records, Mapping):
+        raise PackV4MigrationError("executable source registry is malformed")
+    candidates = [
+        entry
+        for entry in source_records.values()
+        if isinstance(entry, Mapping)
+        and entry.get("pack_id") == pack_id
+        and entry.get("contract_id") == contract_id
+    ]
+    direct = source_records.get(pack_id)
+    if (
+        isinstance(direct, Mapping)
+        and direct.get("pack_id") == pack_id
+        and direct.get("contract_id") == contract_id
+        and direct not in candidates
+    ):
+        candidates.append(direct)
+    if not candidates:
+        return None
+    first = candidates[0]
+    comparable_fields = (
+        "contract_version",
+        "implementation_path",
+        "input_schema",
+        "output_schema",
+        "error_schema",
+    )
+    for candidate in candidates[1:]:
+        if any(candidate.get(field) != first.get(field) for field in comparable_fields):
+            raise PackV4MigrationError(
+                f"conflicting executable source records: {pack_id}:{contract_id}"
+            )
+    return first
+
+
 def _import_record(pack_root: Path) -> dict[str, Any]:
     legacy_path = pack_root / "ecosystem.json"
     v3_path = pack_root / "rumi.pack.v3.json"
@@ -355,21 +404,53 @@ def _import_record(pack_root: Path) -> dict[str, Any]:
         if owner is not None:
             provided_contract["owner"] = owner
         provided.append(provided_contract)
-    executable_sources = json.loads(EXECUTABLE_SOURCES.read_text(encoding="utf-8"))["packs"]
-    executable_source = executable_sources.get(pack_root.name)
-    if executable_source is not None:
-        matches = [
-            item for item in provided if item["contract_id"] == executable_source["contract_id"]
-        ]
-        if len(matches) != 1:
-            raise PackV4MigrationError(f"canonical executable Contract mismatch: {pack_root.name}")
-        matches[0]["schemas"] = {
+    for provided_contract in provided:
+        executable_source = _executable_source_for_contract(
+            pack_root.name,
+            str(provided_contract["contract_id"]),
+        )
+        if executable_source is None:
+            continue
+        required_schema_fields = ("input_schema", "output_schema", "error_schema")
+        if any(field not in executable_source for field in required_schema_fields):
+            raise PackV4MigrationError(
+                f"canonical executable source schema is incomplete: {pack_root.name}"
+            )
+        provided_contract["schemas"] = {
             "input": executable_source["input_schema"],
             "output": executable_source["output_schema"],
             "error": executable_source["error_schema"],
         }
-        implementation_digest = _file_digest(pack_root / executable_source["implementation_path"])
-        for operation in matches[0]["operations"]:
+        implementation_path = Path(str(executable_source.get("implementation_path") or ""))
+        if implementation_path.is_absolute() or ".." in implementation_path.parts:
+            raise PackV4MigrationError(
+                f"canonical executable source escapes Pack: {pack_root.name}"
+            )
+        local_implementation = (pack_root / implementation_path).resolve()
+        try:
+            local_implementation.relative_to(pack_root.resolve())
+        except ValueError as exc:
+            raise PackV4MigrationError(
+                f"canonical executable source escapes Pack: {pack_root.name}"
+            ) from exc
+        implementation = local_implementation
+        if not implementation.is_file():
+            repository_implementation = (
+                ECOSYSTEM / pack_root.name / implementation_path
+            ).resolve()
+            try:
+                repository_implementation.relative_to(ECOSYSTEM.resolve())
+            except ValueError as exc:
+                raise PackV4MigrationError(
+                    f"repository executable source escapes Pack: {pack_root.name}"
+                ) from exc
+            implementation = repository_implementation
+        if not implementation.is_file():
+            raise PackV4MigrationError(
+                f"canonical executable source is missing: {implementation}"
+            )
+        implementation_digest = _file_digest(implementation)
+        for operation in provided_contract["operations"]:
             operation["implementation_digest"] = implementation_digest
     required = []
     for item in contracts.get("requires", []):

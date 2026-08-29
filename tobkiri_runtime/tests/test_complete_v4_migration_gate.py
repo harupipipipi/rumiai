@@ -898,10 +898,119 @@ def _load_independent_migration_proof() -> tuple[
         or not isinstance(packs, Mapping)
     ):
         return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    digest_pattern = re.compile(r"sha256:[0-9a-f]{64}")
+    if (
+        source.get("authority") != "evidence-only"
+        or source.get("signature_scheme") != "sha256-canonical-content"
+        or not isinstance(source.get("input_digest"), str)
+        or not digest_pattern.fullmatch(source["input_digest"])
+        or not isinstance(source.get("input_paths"), list)
+        or not source["input_paths"]
+        or any(not isinstance(path, str) or not path.strip() for path in source["input_paths"])
+        or not any("legacy_profile_bundle.v1.json" in path for path in source["input_paths"])
+        or not any("legacy_executable_sources.v1.json" in path for path in source["input_paths"])
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    identity = source.get("identity_proof")
+    identity_fields = (
+        "profile_ids",
+        "workspace_ids",
+        "conversation_ids",
+        "settings_ids",
+        "credential_ids",
+    )
+    if (
+        not isinstance(identity, Mapping)
+        or any(
+            not isinstance(identity.get(field), list)
+            or not identity[field]
+            or any(not isinstance(value, str) or not value.strip() for value in identity[field])
+            for field in identity_fields
+        )
+        or identity.get("defaults_collapsed") is not False
+        or identity.get("all_ids_distinct") is not True
+        or not isinstance(identity.get("profile_names"), Mapping)
+        or not isinstance(identity.get("digest"), str)
+        or not digest_pattern.fullmatch(identity["digest"])
+        or _proof_digest({key: value for key, value in identity.items() if key != "digest"})
+        != identity.get("digest")
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    identity_values = [
+        value
+        for field in identity_fields
+        for value in identity[field]
+    ]
+    if any(
+        value.casefold() == "defaults" or value.casefold().startswith("defaults-")
+        for value in identity_values
+    ) or len(identity_values) != len(set(identity_values)):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    transaction = source.get("transaction")
+    if (
+        not isinstance(transaction, Mapping)
+        or transaction.get("algorithm") != "profile-definition-store.import_legacy_collection.v1"
+        or transaction.get("lossless") is not True
+        or transaction.get("restart_verified") is not True
+        or transaction.get("replay_rejected_without_mutation") is not True
+        or transaction.get("identity_proof_digest") != identity.get("digest")
+        or not isinstance(transaction.get("source_digest"), str)
+        or not digest_pattern.fullmatch(transaction["source_digest"])
+        or not isinstance(transaction.get("receipt_digest"), str)
+        or not digest_pattern.fullmatch(transaction["receipt_digest"])
+        or _proof_digest({key: value for key, value in transaction.items() if key != "receipt_digest"})
+        != transaction.get("receipt_digest")
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    failure_injection = transaction.get("failure_injection")
+    if (
+        not isinstance(failure_injection, Mapping)
+        or any(
+            not isinstance(failure_injection.get(name), Mapping)
+            or failure_injection[name].get("raised") is not True
+            or failure_injection[name].get("committed_state") is not False
+            for name in ("symlink_preflight", "state_write")
+        )
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    if (
+        not isinstance(source.get("pack_count"), int)
+        or isinstance(source["pack_count"], bool)
+        or source["pack_count"] != len(packs)
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    unsigned_payload = dict(payload)
+    unsigned_source = dict(source)
+    unsigned_source.pop("signature", None)
+    unsigned_payload["source"] = unsigned_source
+    if _proof_digest(unsigned_payload) != source["signature"]:
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
     entries: dict[str, Mapping[str, Any]] = {}
     for pack_id, entry in packs.items():
         if not isinstance(pack_id, str) or not pack_id.strip() or not isinstance(
             entry, Mapping
+        ):
+            return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+        evidence = entry.get("evidence")
+        artifact_verification = (
+            evidence.get("artifact_verification")
+            if isinstance(evidence, Mapping)
+            else None
+        )
+        if (
+            not isinstance(entry.get("artifact_digest"), str)
+            or not digest_pattern.fullmatch(entry["artifact_digest"])
+            or not isinstance(evidence, Mapping)
+            or evidence.get("independent") is not True
+            or evidence.get("source_format") != "legacy-shaped"
+            or evidence.get("source_digest") != transaction.get("source_digest")
+            or evidence.get("identity_proof_digest") != identity.get("digest")
+            or evidence.get("transaction_receipt_digest") != transaction.get("receipt_digest")
+            or not isinstance(artifact_verification, Mapping)
+            or artifact_verification.get("artifact_set_digest") != entry.get("artifact_digest")
         ):
             return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
         entries[pack_id] = entry
@@ -968,6 +1077,18 @@ def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
             }
         )
     return Counter(str(record["classified_as"]) for record in records), records
+
+
+def _proof_digest(value: Any) -> str:
+    """Return the canonical content digest used by independent proof records."""
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def _migration_evidence_findings() -> list[dict[str, Any]]:
@@ -2678,37 +2799,34 @@ def test_v4_runtime_and_protocol_composition_apis_are_live() -> None:
     assert callable(load_verified_catalog)
 
 
-def test_executable_source_registry_is_not_allowed_to_cover_only_two_packs() -> None:
-    """The source registry must cover every executable operation, not a sample."""
+def test_executable_source_registry_covers_every_executable_operation() -> None:
+    """The source registry covers every executable Function and Operation."""
     findings = _executable_source_findings()
 
-    assert findings
-    assert findings[0]["rule"] == "executable_source_registry_incomplete"
-    assert findings[0]["expected_function_count"] > 2
-    assert findings[0]["expected_operation_count"] > findings[0]["actual_operation_count"]
+    assert not findings
 
 
-def test_migration_status_requires_independent_proof() -> None:
-    """A generated quartet remains a draft without external installation proof."""
+def test_migration_status_requires_complete_independent_proof() -> None:
+    """Every generated quartet has independent lossless migration proof."""
     proof, proof_findings = _load_independent_migration_proof()
 
-    assert not proof
-    assert proof_findings[0]["rule"] == "independent_migration_proof_missing"
+    assert not proof_findings
+    assert len(proof) == len(_production_pack_dirs())
     assert all(
-        _migration_status(path.name, path, proof) == "generated-draft"
+        _migration_status(path.name, path, proof) == "release-verified"
         for path in _production_pack_dirs()
     )
 
 
-def test_current_sha_evidence_is_red_until_independent_migration_is_verified() -> None:
-    """Current evidence is fail-closed while independent migration proof is absent."""
+def test_current_sha_evidence_is_green_after_independent_migration_is_verified() -> None:
+    """Current evidence is GREEN only after independent proof is verified."""
     report = _audit_snapshot()
     expected_head = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
     ).strip()
     assert report["head_sha"] == expected_head
-    assert report["gate"]["status"] == "RED"
-    assert report["gate"]["clean"] is False
+    assert report["gate"]["status"] == "GREEN"
+    assert report["gate"]["clean"] is True
     pack_count = len(_production_pack_dirs())
     assert report["pack_inventory"]["production_pack_directories"] == pack_count
     assert report["pack_inventory"]["catalog_pack_directories"] == pack_count
@@ -2716,9 +2834,29 @@ def test_current_sha_evidence_is_red_until_independent_migration_is_verified() -
         PACK_ARTIFACTS
     )
     assert report["pack_inventory"]["migration_status_counts"] == {
-        "generated-draft": pack_count
+        "release-verified": pack_count
     }
     assert report["gates"]["artifact_contracts"]["status"] == "GREEN"
     assert report["gates"]["declaration_disk_runtime"]["status"] == "GREEN"
-    assert report["gates"]["executable_source_registry"]["status"] == "RED"
-    assert report["gates"]["migration_evidence"]["status"] == "RED"
+    assert report["gates"]["executable_source_registry"]["status"] == "GREEN"
+    assert report["gates"]["migration_evidence"]["status"] == "GREEN"
+
+
+def test_independent_migration_proof_rejects_tampered_signature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proof content changes cannot pass by retaining the old signature."""
+    payload = _load_json(MIGRATION_PROOF_PATH)
+    payload["source"]["identity_proof"]["defaults_collapsed"] = True
+    tampered = tmp_path / "pack_migration_proof.v1.json"
+    tampered.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        "tests.test_complete_v4_migration_gate.MIGRATION_PROOF_PATH",
+        tampered,
+    )
+
+    proof, findings = _load_independent_migration_proof()
+
+    assert not proof
+    assert findings[0]["rule"] == "independent_migration_proof_invalid"
