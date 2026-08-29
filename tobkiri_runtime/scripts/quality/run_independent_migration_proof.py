@@ -28,6 +28,7 @@ ECOSYSTEM = ROOT / "ecosystem"
 PROFILE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_profile_bundle.v1.json"
 PROFILE_WORKSPACE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_profile_bundle"
 EXECUTABLE_SOURCE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_executable_sources.v1.json"
+EXECUTABLE_SOURCE_REGISTRY = ROOT / "schemas" / "executable_sources.v1.json"
 DEFAULT_OUTPUT = ROOT / "scripts" / "quality" / "evidence" / "pack_migration_proof.v1.json"
 PACK_ARTIFACTS = (
     "artifact-index.v4.json",
@@ -128,9 +129,13 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
             raise IndependentMigrationProofError("legacy Profile ID is missing")
         if not isinstance(display_name, str) or not display_name.strip():
             raise IndependentMigrationProofError(f"Profile name is missing: {profile_id}")
-        if not isinstance(workspace, Mapping) or not isinstance(workspace.get("workspace_id"), str):
+        if not isinstance(workspace, Mapping) or not isinstance(
+            workspace.get("workspace_id"), str
+        ):
             raise IndependentMigrationProofError(f"workspace identity is missing: {profile_id}")
-        if not isinstance(settings, Mapping) or not isinstance(settings.get("settings_id"), str):
+        if not isinstance(settings, Mapping) or not isinstance(
+            settings.get("settings_id"), str
+        ):
             raise IndependentMigrationProofError(f"settings identity is missing: {profile_id}")
         if not isinstance(conversations, list) or len(conversations) != 1:
             raise IndependentMigrationProofError(
@@ -145,11 +150,15 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(conversation, Mapping) or not isinstance(
             conversation.get("conversation_id"), str
         ):
-            raise IndependentMigrationProofError(f"conversation identity is missing: {profile_id}")
+            raise IndependentMigrationProofError(
+                f"conversation identity is missing: {profile_id}"
+            )
         if not isinstance(credential, Mapping) or not isinstance(
             credential.get("credential_id"), str
         ):
-            raise IndependentMigrationProofError(f"credential identity is missing: {profile_id}")
+            raise IndependentMigrationProofError(
+                f"credential identity is missing: {profile_id}"
+            )
         credential_ref = credential.get("secret_ref")
         if not isinstance(credential_ref, str) or not credential_ref.startswith("vault://"):
             raise IndependentMigrationProofError(
@@ -188,8 +197,9 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
         "profile_names": profile_names,
         "active_profile_id": active_profile_id,
         "last_launched_profile_id": last_launched_profile_id,
-        "all_ids_distinct": len({value for values in identity_sets.values() for value in values})
-        == sum(len(values) for values in identity_sets.values()),
+        "all_ids_distinct": len(
+            {value for values in identity_sets.values() for value in values}
+        ) == sum(len(values) for values in identity_sets.values()),
         "defaults_collapsed": False,
     }
     if not unsigned["all_ids_distinct"]:
@@ -294,7 +304,9 @@ def _run_profile_transaction_proof(
     if result.active_profile_id != source["active_profile_id"]:
         raise IndependentMigrationProofError("active Profile identity changed during import")
     if result.last_launched_profile_id != source["last_launched_profile_id"]:
-        raise IndependentMigrationProofError("last-launched Profile identity changed during import")
+        raise IndependentMigrationProofError(
+            "last-launched Profile identity changed during import"
+        )
     if store.legacy_state().get("source_document") != dict(source):
         raise IndependentMigrationProofError("legacy source document was not preserved")
 
@@ -307,13 +319,17 @@ def _run_profile_transaction_proof(
         actual_profile = copy.deepcopy(dict(stored.profile))
         actual_profile.pop("legacy_migration", None)
         if actual_profile != source_by_id[profile_id]:
-            raise IndependentMigrationProofError(f"Profile payload is not lossless: {profile_id}")
+            raise IndependentMigrationProofError(
+                f"Profile payload is not lossless: {profile_id}"
+            )
         source_workspace = workspace_root / "profiles" / profile_id
         migrated_workspace = committed_destination / "workspaces" / profile_id
         source_files = _workspace_snapshot(source_workspace)
         migrated_files = _workspace_snapshot(migrated_workspace)
         if source_files != migrated_files:
-            raise IndependentMigrationProofError(f"workspace payload is not lossless: {profile_id}")
+            raise IndependentMigrationProofError(
+                f"workspace payload is not lossless: {profile_id}"
+            )
         workspace_digests[profile_id] = canonical_digest(source_files)
 
     committed_snapshot = store.snapshot()
@@ -365,9 +381,7 @@ def _safe_artifact_path(pack_root: Path, relative: str) -> Path:
 
     candidate = Path(relative)
     if candidate.is_absolute() or ".." in candidate.parts:
-        raise IndependentMigrationProofError(
-            f"artifact path escapes Pack: {pack_root.name}:{relative}"
-        )
+        raise IndependentMigrationProofError(f"artifact path escapes Pack: {pack_root.name}:{relative}")
     resolved = (pack_root / candidate).resolve()
     try:
         resolved.relative_to(pack_root.resolve())
@@ -383,14 +397,15 @@ def _safe_artifact_path(pack_root: Path, relative: str) -> Path:
 def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
     """Verify v4 quartet bytes, seals, and digest relationships."""
 
-    documents = {name: _load_json(pack_root / name) for name in PACK_ARTIFACTS}
+    documents = {
+        name: _load_json(pack_root / name)
+        for name in PACK_ARTIFACTS
+    }
     manifest = documents["pack.v4.json"]
     contracts = documents["contracts.v4.json"]
     index = documents["artifact-index.v4.json"]
     executable = documents["executables.v4.json"]
-    pack_id = (
-        manifest.get("pack", {}).get("id") if isinstance(manifest.get("pack"), Mapping) else None
-    )
+    pack_id = manifest.get("pack", {}).get("id") if isinstance(manifest.get("pack"), Mapping) else None
     if not isinstance(pack_id, str) or pack_id != pack_root.name:
         raise IndependentMigrationProofError(f"Pack identity is invalid: {pack_root.name}")
     if not (
@@ -402,11 +417,7 @@ def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
     source_identities = {
         value
         for document in (manifest, contracts, index, executable)
-        for value in [
-            document.get("integrity", {}).get("source_identity")
-            if document is manifest
-            else document.get("source_identity")
-        ]
+        for value in [document.get("integrity", {}).get("source_identity") if document is manifest else document.get("source_identity")]
         if isinstance(value, str)
     }
     if len(source_identities) != 1:
@@ -496,6 +507,7 @@ def _source_inputs() -> list[dict[str, str]]:
 
     paths: list[tuple[str, Path]] = [("legacy-profile-bundle", PROFILE_FIXTURE)]
     paths.append(("legacy-executable-source-fixture", EXECUTABLE_SOURCE_FIXTURE))
+    paths.append(("hardened-executable-source-registry", EXECUTABLE_SOURCE_REGISTRY))
     for workspace_file in sorted(PROFILE_WORKSPACE_FIXTURE.rglob("*")):
         if workspace_file.is_file() and not workspace_file.is_symlink():
             paths.append(("legacy-workspace-file", workspace_file))
@@ -512,6 +524,7 @@ def _source_inputs() -> list[dict[str, str]]:
 def _pack_source_record(
     pack_root: Path,
     explicit_packs: Mapping[str, Any],
+    registry_records: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Return a Pack-specific legacy source record, or an honest missing record."""
 
@@ -523,13 +536,20 @@ def _pack_source_record(
         if artifact_manifest.is_file():
             paths.append(artifact_manifest)
         files = [{"path": _label(path), "digest": _file_digest(path)} for path in paths]
-        return {
+        source = {
             "status": "available",
             "pack_id": pack_id,
             "format": "rumi.pack.v3",
             "files": files,
             "digest": canonical_digest(files),
         }
+        if registry_records:
+            source["executable_source_registry"] = {
+                "path": _label(EXECUTABLE_SOURCE_REGISTRY),
+                "digest": canonical_digest(registry_records),
+                "record_count": len(registry_records),
+            }
+        return source
 
     explicit = explicit_packs.get(pack_id)
     if isinstance(explicit, Mapping):
@@ -546,6 +566,11 @@ def _pack_source_record(
                 }
             ],
             "digest": canonical_digest(payload),
+            "executable_source_registry": {
+                "path": _label(EXECUTABLE_SOURCE_REGISTRY),
+                "digest": canonical_digest(registry_records),
+                "record_count": len(registry_records),
+            },
         }
 
     return {
@@ -558,16 +583,311 @@ def _pack_source_record(
     }
 
 
-def _draft_pack_record(
+def _v4_executable_records(pack_root: Path) -> tuple[
+    dict[str, Mapping[str, Any]],
+    dict[tuple[str, str], Mapping[str, Any]],
+]:
+    """Index v4 variants and operations by their exact identities."""
+
+    executable = _load_json(pack_root / "executables.v4.json")
+    variants: dict[str, Mapping[str, Any]] = {}
+    operations: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for variant in executable.get("variants", []):
+        if not isinstance(variant, Mapping):
+            continue
+        function_id = variant.get("function_id")
+        if not isinstance(function_id, str):
+            continue
+        variants[function_id] = variant
+        for operation in variant.get("operations", []):
+            if isinstance(operation, Mapping) and isinstance(
+                operation.get("operation_id"), str
+            ):
+                operations[(function_id, operation["operation_id"])] = operation
+    return variants, operations
+
+
+def _v4_contract_records(pack_root: Path) -> dict[str, Mapping[str, Any]]:
+    """Index v4 Contracts by their exact identities."""
+
+    catalog = _load_json(pack_root / "contracts.v4.json")
+    return {
+        str(contract["contract_id"]): contract
+        for contract in catalog.get("contracts", [])
+        if isinstance(contract, Mapping) and isinstance(contract.get("contract_id"), str)
+    }
+
+
+def _legacy_authority_records(pack_root: Path) -> tuple[
+    dict[str, Mapping[str, Any]],
+    dict[str, Mapping[str, Any]],
+    dict[str, Mapping[str, Any]],
+]:
+    """Index legacy entrypoints, provided Contracts, and artifact roles."""
+
+    v3 = _load_json(pack_root / "rumi.pack.v3.json")
+    entrypoints = {
+        str(entrypoint["id"]): entrypoint
+        for entrypoint in v3.get("entrypoints", [])
+        if isinstance(entrypoint, Mapping) and isinstance(entrypoint.get("id"), str)
+    }
+    contracts = v3.get("contracts")
+    provides = (
+        {
+            str(contract["id"]): contract
+            for contract in contracts.get("provides", [])
+            if isinstance(contract, Mapping) and isinstance(contract.get("id"), str)
+        }
+        if isinstance(contracts, Mapping)
+        else {}
+    )
+    artifact_manifest_path = pack_root / "artifact-manifest.json"
+    artifacts: dict[str, Mapping[str, Any]] = {}
+    if artifact_manifest_path.is_file():
+        artifact_manifest = _load_json(artifact_manifest_path)
+        artifacts = {
+            str(artifact["path"]): artifact
+            for artifact in artifact_manifest.get("artifacts", [])
+            if isinstance(artifact, Mapping) and isinstance(artifact.get("path"), str)
+        }
+    return entrypoints, provides, artifacts
+
+
+def _semantic_pack_comparison(
+    pack_root: Path,
+    registry_records: list[Mapping[str, Any]],
+) -> tuple[str, dict[str, Any]]:
+    """Compare legacy-shaped operation semantics with the v4 target."""
+
+    pack_id = pack_root.name
+    variants, v4_operations = _v4_executable_records(pack_root)
+    inventory = {
+        "legacy_count": sum(
+            len(record.get("operations", [])) for record in registry_records
+        ),
+        "v4_count": len(v4_operations),
+    }
+    if not v4_operations:
+        categories = ["non_executable_pack_semantics_unmodeled"]
+        if not (pack_root / "rumi.pack.v3.json").is_file() and not registry_records:
+            categories.append("pack_specific_legacy_source_missing")
+        return "generated-draft", {
+            "status": "unverified",
+            "equivalent": None,
+            "method": None,
+            "operation_inventory": inventory,
+            "operation_mappings": [],
+            "missing_categories": categories,
+            "reason": (
+                "The committed legacy-shaped sources contain no executable operation "
+                "model for this Pack's non-executable behavior"
+            ),
+        }
+    if not registry_records:
+        return "generated-draft", {
+            "status": "unverified",
+            "equivalent": None,
+            "method": None,
+            "operation_inventory": inventory,
+            "operation_mappings": [],
+            "missing_categories": ["pack_specific_executable_source_missing"],
+            "reason": "No hardened legacy executable source records cover the v4 operations",
+        }
+    if not (pack_root / "rumi.pack.v3.json").is_file():
+        return "generated-draft", {
+            "status": "unverified",
+            "equivalent": None,
+            "method": None,
+            "operation_inventory": inventory,
+            "operation_mappings": [],
+            "missing_categories": ["pack_specific_authority_source_missing"],
+            "reason": (
+                "Explicit legacy operation/schema records exist, but no independent "
+                "legacy Pack authority/role manifest is committed"
+            ),
+        }
+
+    entrypoints, legacy_contracts, legacy_artifacts = _legacy_authority_records(pack_root)
+    v4_contracts = _v4_contract_records(pack_root)
+    mappings: list[dict[str, Any]] = []
+    observed_keys: set[tuple[str, str]] = set()
+    errors: list[str] = []
+    for record in registry_records:
+        function_id = record.get("function_id")
+        variant = variants.get(str(function_id))
+        legacy_operation_sources = [
+            operation
+            for operation in record.get("operations", [])
+            if isinstance(operation, Mapping)
+            and operation.get("kind") == "legacy-v3-entrypoint"
+        ]
+        if variant is None or len(legacy_operation_sources) != 1:
+            errors.append(f"function_mapping:{function_id}")
+            continue
+        legacy_entrypoint = entrypoints.get(
+            str(legacy_operation_sources[0].get("entrypoint_id"))
+        )
+        legacy_contract = (
+            legacy_contracts.get(str(legacy_entrypoint.get("contract_id")))
+            if isinstance(legacy_entrypoint, Mapping)
+            else None
+        )
+        v4_contract = v4_contracts.get(str(record.get("contract_id")))
+        provider = (
+            v4_contract.get("provider_semantics")
+            if isinstance(v4_contract, Mapping)
+            else None
+        )
+        if not isinstance(legacy_contract, Mapping) or not isinstance(provider, Mapping):
+            errors.append(f"authority_mapping:{function_id}")
+            continue
+        legacy_authority = {
+            key: legacy_contract.get(key)
+            for key in (
+                "cardinality",
+                "failure",
+                "isolation",
+                "lifecycle",
+                "required_capabilities",
+                "security",
+            )
+        }
+        expected_provider = {
+            **legacy_authority,
+            "provider_id": f"{pack_id}.{legacy_contract.get('provider_instance_id')}",
+        }
+        if any(provider.get(key) != value for key, value in expected_provider.items()):
+            errors.append(f"authority_semantics:{function_id}")
+            continue
+        artifact = legacy_artifacts.get(str(record.get("implementation_path")))
+        if not isinstance(artifact, Mapping):
+            errors.append(f"legacy_artifact_record_missing:{function_id}")
+            continue
+        if artifact.get("role") != "runtime":
+            errors.append(f"legacy_artifact_role_missing:{function_id}")
+            continue
+        artifact_digest = str(artifact.get("sha256"))
+        if not artifact_digest.startswith("sha256:"):
+            artifact_digest = f"sha256:{artifact_digest}"
+        if artifact_digest != record.get("implementation_digest"):
+            errors.append(f"artifact_digest_mapping_mismatch:{function_id}")
+            continue
+        if (
+            variant.get("implementation_path") != record.get("implementation_path")
+            or variant.get("implementation_digest") != record.get("implementation_digest")
+        ):
+            errors.append(f"implementation_mapping_mismatch:{function_id}")
+            continue
+        for legacy_operation in record.get("operations", []):
+            if not isinstance(legacy_operation, Mapping):
+                continue
+            operation_id = legacy_operation.get("operation_id")
+            key = (str(function_id), str(operation_id))
+            target_operation = v4_operations.get(key)
+            if target_operation is None:
+                errors.append(f"operation_mapping_missing:{function_id}:{operation_id}")
+                continue
+            schema_fields = ("input_schema", "output_schema")
+            if any(
+                canonical_digest(legacy_operation.get(field))
+                != canonical_digest(target_operation.get(field))
+                for field in schema_fields
+            ) or any(
+                legacy_operation.get(field) != target_operation.get(field)
+                for field in ("contract_id", "contract_version")
+            ):
+                errors.append(f"parameter_schema_mapping_mismatch:{function_id}:{operation_id}")
+                continue
+            observed_keys.add(key)
+            mappings.append(
+                {
+                    "legacy_operation_id": str(legacy_operation.get("entrypoint_id")),
+                    "legacy_operation_kind": legacy_operation.get("kind"),
+                    "v4_contract_id": target_operation.get("contract_id"),
+                    "v4_operation_id": operation_id,
+                    "function_id": function_id,
+                    "parameter_mapping": {
+                        "status": "verified",
+                        "method": "canonical-json-schema-equality",
+                        "legacy_schema_digest": canonical_digest(
+                            legacy_operation.get("input_schema")
+                        ),
+                        "v4_schema_digest": canonical_digest(
+                            target_operation.get("input_schema")
+                        ),
+                        "output_schema_digest": canonical_digest(
+                            legacy_operation.get("output_schema")
+                        ),
+                        "rules": ["input:identity", "output:identity"],
+                    },
+                    "authority_mapping": {
+                        "status": "verified",
+                        "legacy": {
+                            "contract_id": legacy_entrypoint.get("contract_id"),
+                            "provider_instance_id": legacy_contract.get(
+                                "provider_instance_id"
+                            ),
+                            **legacy_authority,
+                            "artifact_role": artifact.get("role"),
+                        },
+                        "v4": {
+                            "contract_id": target_operation.get("contract_id"),
+                            **dict(provider),
+                            "function_role": next(
+                                (
+                                    function.get("role")
+                                    for function in _load_json(
+                                        pack_root / "pack.v4.json"
+                                    ).get("functions", [])
+                                    if isinstance(function, Mapping)
+                                    and function.get("id") == function_id
+                                ),
+                                None,
+                            ),
+                        },
+                    },
+                }
+            )
+    if errors or observed_keys != set(v4_operations):
+        if not errors and observed_keys != set(v4_operations):
+            errors.append("operation_coverage_incomplete")
+        categories = sorted({error.split(":", 1)[0] for error in errors})
+        return "generated-draft", {
+            "status": "unverified",
+            "equivalent": False,
+            "method": "legacy-to-v4-semantic-comparator.v1",
+            "operation_inventory": inventory,
+            "operation_mappings": mappings,
+            "missing_categories": categories,
+            "errors": sorted(set(errors)),
+            "reason": "Pack-specific legacy and v4 semantic records do not compare exactly",
+        }
+    comparison = {
+        "status": "verified",
+        "equivalent": True,
+        "method": "legacy-to-v4-semantic-comparator.v1",
+        "operation_inventory": inventory,
+        "operation_mappings": mappings,
+        "missing_categories": [],
+    }
+    return "semantically-reviewed", comparison
+
+
+def _pack_record(
     pack_root: Path,
     explicit_packs: Mapping[str, Any],
+    registry_records: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Build an integrity-only Pack record that cannot imply semantic release."""
+    """Build the strongest reproducible Pack migration record available."""
 
     artifact_evidence = _verify_pack_artifacts(pack_root)
-    source = _pack_source_record(pack_root, explicit_packs)
-    return {
-        "status": "generated-draft",
+    source = _pack_source_record(pack_root, explicit_packs, registry_records)
+    status, semantic_comparison = _semantic_pack_comparison(
+        pack_root,
+        registry_records,
+    )
+    record = {
+        "status": status,
         "source": source,
         "target": {
             "status": "artifact-integrity-verified",
@@ -576,19 +896,18 @@ def _draft_pack_record(
             "digest": artifact_evidence["artifact_set_digest"],
             "artifact_verification": artifact_evidence,
         },
-        "semantic_comparison": {
-            "status": "unverified",
-            "equivalent": None,
-            "method": None,
-            "operation_mappings": [],
-            "reason": (
-                "Pack-specific legacy-to-v4 operation, parameter, and authority "
-                "mapping has not been reviewed"
-                if source["status"] == "available"
-                else source["reason"]
-            ),
-        },
+        "semantic_comparison": semantic_comparison,
     }
+    if status == "semantically-reviewed":
+        record["migration_receipt_digest"] = canonical_digest(
+            {
+                "pack_id": pack_root.name,
+                "source_digest": source.get("digest"),
+                "target_digest": artifact_evidence["artifact_set_digest"],
+                "semantic_comparison": semantic_comparison,
+            }
+        )
+    return record
 
 
 def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
@@ -599,6 +918,13 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
         raise IndependentMigrationProofError("legacy Profile fixture schema is invalid")
     identity = _identity_proof(source)
     fixture = _load_json(EXECUTABLE_SOURCE_FIXTURE)
+    registry = _load_json(EXECUTABLE_SOURCE_REGISTRY)
+    registry_by_pack: dict[str, list[Mapping[str, Any]]] = {}
+    for record in registry.get("packs", {}).values():
+        if isinstance(record, Mapping) and isinstance(record.get("pack_id"), str):
+            registry_by_pack.setdefault(record["pack_id"], []).append(record)
+    for records in registry_by_pack.values():
+        records.sort(key=lambda item: str(item.get("function_id")))
     source_inputs = _source_inputs()
     with tempfile.TemporaryDirectory(prefix="tobkiri-independent-migration-") as temporary:
         transaction = _run_profile_transaction_proof(
@@ -614,7 +940,36 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
     explicit_packs = fixture.get("packs") if isinstance(fixture.get("packs"), Mapping) else {}
     pack_records: dict[str, dict[str, Any]] = {}
     for pack_root in pack_dirs:
-        pack_records[pack_root.name] = _draft_pack_record(pack_root, explicit_packs)
+        pack_records[pack_root.name] = _pack_record(
+            pack_root,
+            explicit_packs,
+            registry_by_pack.get(pack_root.name, []),
+        )
+    status_counts: dict[str, int] = {}
+    missing_by_category: dict[str, list[str]] = {}
+    for pack_id, record in pack_records.items():
+        status = str(record["status"])
+        status_counts[status] = status_counts.get(status, 0) + 1
+        semantic = record["semantic_comparison"]
+        for category in semantic.get("missing_categories", []):
+            missing_by_category.setdefault(str(category), []).append(pack_id)
+    feasibility_audit = {
+        "semantically_reviewed": {
+            "count": status_counts.get("semantically-reviewed", 0),
+            "pack_ids": sorted(
+                pack_id
+                for pack_id, record in pack_records.items()
+                if record["status"] == "semantically-reviewed"
+            ),
+        },
+        "unresolved": {
+            category: {
+                "count": len(pack_ids),
+                "pack_ids": sorted(pack_ids),
+            }
+            for category, pack_ids in sorted(missing_by_category.items())
+        },
+    }
     source_payload: dict[str, Any] = {
         "kind": "repository-generated-evidence",
         "generator_id": RUNNER_ID,
@@ -630,10 +985,14 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
         },
         "pack_count": len(pack_records),
         "migration_status_counts": {
-            "generated-draft": len(pack_records),
+            **dict(sorted(status_counts.items())),
             "release-verified": 0,
         },
+        "feasibility_audit": feasibility_audit,
         "unproved_pack_count": len(pack_records),
+        "semantic_unproved_pack_count": (
+            len(pack_records) - status_counts.get("semantically-reviewed", 0)
+        ),
         "content_digest": "",
     }
     document = {

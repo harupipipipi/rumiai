@@ -124,16 +124,27 @@ def test_release_status_requires_pack_specific_source_target_and_mappings() -> N
     assert "pack_specific_migration_receipt_invalid" in errors
 
 
-def test_generated_pack_records_do_not_reuse_profile_transaction_receipt() -> None:
-    """Profile collection proof is top-level and never copied into Pack records."""
+def test_pack_feasibility_audit_is_specific_and_separate_from_profile_receipt() -> None:
+    """The audit promotes exact comparisons and enumerates unresolved categories."""
 
     proof = proof_generator.build_proof(observed_head_sha="a" * 40)
     profile_receipt = proof["source"]["profile_collection_proof"]["transaction"]["receipt_digest"]
     serialized_packs = json.dumps(proof["packs"], sort_keys=True)
 
     assert profile_receipt not in serialized_packs
-    assert all(entry["status"] == "generated-draft" for entry in proof["packs"].values())
+    statuses = {
+        status: sum(entry["status"] == status for entry in proof["packs"].values())
+        for status in ("semantically-reviewed", "generated-draft")
+    }
+    assert statuses == {"semantically-reviewed": 45, "generated-draft": 98}
     assert proof["source"]["unproved_pack_count"] == len(proof["packs"])
+    assert proof["source"]["semantic_unproved_pack_count"] == 98
+    unresolved = proof["source"]["feasibility_audit"]["unresolved"]
+    assert unresolved["non_executable_pack_semantics_unmodeled"]["count"] == 54
+    assert unresolved["pack_specific_legacy_source_missing"]["count"] == 45
+    assert unresolved["pack_specific_authority_source_missing"]["count"] == 3
+    assert unresolved["legacy_artifact_role_missing"]["count"] == 40
+    assert unresolved["parameter_schema_mapping_mismatch"]["count"] == 1
     assert all(
         entry["target"]["pack_id"] == pack_id and entry["source"]["pack_id"] == pack_id
         for pack_id, entry in proof["packs"].items()
