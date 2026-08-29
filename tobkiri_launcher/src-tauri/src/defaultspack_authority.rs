@@ -858,7 +858,7 @@ fn validate_profile_pack_closure(
         let pack = read_json(&path, "selected Profile Pack")?;
         if value_str(&pack, "/pack/id") != Some(pack_id.as_str())
             || value_str(&pack, "/pack_api_version") != Some("io.tobkiri.pack.v4")
-            || value_str(&pack, "/migration/compatibility") != Some("none")
+            || !profile_pack_migration_is_admissible(selected, &pack_id, &pack)
         {
             bail!("selected Profile Pack identity is inconsistent: {pack_id}");
         }
@@ -899,6 +899,39 @@ fn validate_profile_pack_closure(
         }
     }
     Ok(())
+}
+
+fn profile_pack_migration_is_admissible(
+    selected: &SelectedProfileAuthority,
+    pack_id: &str,
+    pack: &Value,
+) -> bool {
+    // `read_only` describes the retained legacy compatibility projection; it
+    // is not an execution trust level. The v4 Pack remains authoritative and
+    // reaches this check only after its bytes and bundle role are digest-locked.
+    // Keep the exception narrower than execution admission: only an explicitly
+    // selected Host Extension provider may retain that projection metadata.
+    match value_str(pack, "/migration/compatibility") {
+        Some("none") => true,
+        Some("read_only") => {
+            selected_profile_pack_role(selected, pack_id) == Some("provider")
+                && value_str(pack, "/pack/kind") == Some("host_extension")
+        }
+        _ => false,
+    }
+}
+
+fn selected_profile_pack_role<'a>(
+    selected: &'a SelectedProfileAuthority,
+    pack_id: &str,
+) -> Option<&'a str> {
+    selected
+        .profile
+        .get("packs")?
+        .as_array()?
+        .iter()
+        .find(|item| value_str(item, "/pack_id") == Some(pack_id))
+        .and_then(|item| value_str(item, "/role"))
 }
 
 fn bundle_pack_path(
@@ -3019,6 +3052,67 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn read_only_migration_requires_selected_host_extension_provider() {
+        let mut profile = generic_profile("profile.migration", "application.migration");
+        profile["packs"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "pack_id": "provider.migration",
+                "role": "provider"
+            }));
+        let selected = selected_profile_from_documents(
+            profile.clone(),
+            None,
+            None,
+            "profile.migration".into(),
+            canonical_value_digest(&profile).unwrap(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let host_extension = serde_json::json!({
+            "pack": {"id": "provider.migration", "kind": "host_extension"},
+            "migration": {"compatibility": "read_only"}
+        });
+        assert!(profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &host_extension
+        ));
+
+        let mut application_binding = host_extension.clone();
+        application_binding["pack"]["id"] = Value::String("application.migration".into());
+        assert!(!profile_pack_migration_is_admissible(
+            &selected,
+            "application.migration",
+            &application_binding
+        ));
+
+        let mut ordinary_application = host_extension.clone();
+        ordinary_application["pack"]["kind"] = Value::String("application".into());
+        ordinary_application["functions"] = serde_json::json!([{
+            "id": "provider.migration.forged-host-capability",
+            "role": "host_capability_provider"
+        }]);
+        assert!(!profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &ordinary_application
+        ));
+
+        let mut unknown_compatibility = host_extension;
+        unknown_compatibility["migration"]["compatibility"] = Value::String("legacy".into());
+        assert!(!profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &unknown_compatibility
+        ));
     }
 
     #[test]
