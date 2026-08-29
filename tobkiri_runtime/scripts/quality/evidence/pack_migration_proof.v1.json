@@ -2817,11 +2817,11 @@
       "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/artifact-manifest.json"
     ],
     "kind": "independent-runner",
-    "observed_head_sha": "8fef96f36cd0c5427879bd42b7c4e056df37ef37",
+    "observed_head_sha": "e6d1e6d3433bcf1b5d162828c1b433b1e3afcb11",
     "pack_count": 143,
     "runner_id": "tobkiri.quality.independent-profile-migration",
     "runner_version": "1.0.0",
-    "signature": "sha256:3461d1e7e6a2561d10bb1243a1be2d7b35e254c9bdb7bbadbbef234ae0e117bc",
+    "signature": "sha256:28999e7e2eec87b3fe41418a469cc5c11d1f35f8a5c8831117138612c946039b",
     "signature_scheme": "sha256-canonical-content",
     "transaction": {
       "algorithm": "profile-definition-store.import_legacy_collection.v1",
