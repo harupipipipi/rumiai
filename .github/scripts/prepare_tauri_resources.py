@@ -20,6 +20,8 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = SCRIPT_DIR.parents[1]
 _CLEANUP_HELPER = REPOSITORY_ROOT / "tobkiri_runtime/scripts/packaging_cleanup.py"
@@ -37,6 +39,7 @@ remove_owned_path = _CLEANUP_MODULE.remove_owned_path
 
 APP_SOURCE_DIR = "tobkiri_runtime"
 APP_RESOURCE_DIR = "tobkiri_launcher/src-tauri/gen/app"
+APP_RESOURCE_OWNER_DIR = "tobkiri_launcher/src-tauri/gen"
 
 EXCLUDED_DIR_NAMES = {
     ".git",
@@ -1585,6 +1588,37 @@ def format_size(num_bytes: int) -> str:
     return f"{size:.1f} GiB"
 
 
+def ensure_resource_owner_root(repo_root: Path) -> Path:
+    """Create the private generated-resource owner root on a clean checkout."""
+    owner_root = repo_root / APP_RESOURCE_OWNER_DIR
+    parent = owner_root.parent
+    try:
+        parent_metadata = parent.lstat()
+        parent_resolved = parent.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Tauri resource owner parent is unavailable: {parent}"
+        ) from exc
+    if (
+        parent.is_symlink()
+        or not stat.S_ISDIR(parent_metadata.st_mode)
+        or parent_resolved != parent
+    ):
+        raise RuntimeError(f"Tauri resource owner parent is unsafe: {parent}")
+    try:
+        owner_metadata = owner_root.lstat()
+    except FileNotFoundError:
+        owner_root.mkdir(mode=0o700, parents=False, exist_ok=False)
+        owner_metadata = owner_root.lstat()
+    if (
+        owner_root.is_symlink()
+        or not stat.S_ISDIR(owner_metadata.st_mode)
+        or owner_root.resolve(strict=True) != owner_root
+    ):
+        raise RuntimeError(f"Tauri resource owner root is unsafe: {owner_root}")
+    return owner_root
+
+
 def main() -> int:
     args = parse_args()
     repo_root = args.repo_root.resolve()
@@ -1646,10 +1680,11 @@ def main() -> int:
         manifest = verify_runtime_resource_manifest(dest_root)
         expected_tree = runtime_resource_expected_tree(manifest)
 
+    owner_root = ensure_resource_owner_root(repo_root)
     sealed_reset = expected_tree is not None and os.name != "nt"
     remove_owned_path(
         dest_root,
-        owner_root=repo_root / "tobkiri_launcher/src-tauri/gen",
+        owner_root=owner_root,
         operation="reset staged Tauri resources",
         expected_tree=expected_tree if sealed_reset else None,
         unseal_read_only=sealed_reset,

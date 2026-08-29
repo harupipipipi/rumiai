@@ -15,6 +15,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Mapping, Sequence
 
+sys.dont_write_bytecode = True
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TAURI_TARGET_ENV = "TAURI_ENV_TARGET_TRIPLE"
 UV_PATH_ENV = "RUMI_UV_PATH"
@@ -115,10 +117,13 @@ def run_command(
     cwd: Path | None = None,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.run(
         [os.fspath(part) for part in command],
         cwd=cwd,
         check=True,
+        env=environment,
         text=True,
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,

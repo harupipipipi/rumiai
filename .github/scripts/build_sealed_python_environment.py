@@ -40,6 +40,8 @@ from datetime import date
 from pathlib import Path
 from typing import Iterable, Sequence
 
+sys.dont_write_bytecode = True
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SEALED_SOURCE_ROOT = SCRIPT_DIR / "sealed_python_sources"

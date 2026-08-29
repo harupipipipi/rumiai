@@ -250,6 +250,21 @@ def test_stage_uv_only_uses_private_external_root_without_checkout_mutation(
     assert output_root.stat().st_mode & 0o077 == 0
 
 
+def test_clean_checkout_creates_private_tauri_resource_owner_root(
+    tmp_path: Path,
+) -> None:
+    """Resource cleanup has a descriptor-bindable owner on a clean checkout."""
+    module = _load_prepare_tauri_resources()
+    repository = (tmp_path / "repository").resolve()
+    (repository / "tobkiri_launcher/src-tauri").mkdir(parents=True)
+
+    owner_root = module.ensure_resource_owner_root(repository)
+
+    assert owner_root == repository / module.APP_RESOURCE_OWNER_DIR
+    assert stat.S_IMODE(owner_root.stat().st_mode) == 0o700
+    assert module.ensure_resource_owner_root(repository) == owner_root
+
+
 def test_formal_sealed_resource_uses_producer_snapshot_without_rebuilding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

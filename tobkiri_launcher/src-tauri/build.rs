@@ -41,6 +41,8 @@ const MACOS_ARTIFACT_POLICY_ENV: &str = "TOBKIRI_MACOS_ARTIFACT_POLICY";
 const MACOS_CI_CERT_SHA256_ENV: &str = "TOBKIRI_MACOS_CI_CERT_SHA256";
 const MACOS_CI_PUBLIC_KEY_ENV: &str = "TOBKIRI_MACOS_CI_PUBLIC_KEY";
 const APPLE_TEAM_ID_ENV: &str = "APPLE_TEAM_ID";
+#[cfg(target_os = "macos")]
+const MACOS_XATTR_PATH: &str = "/usr/bin/xattr";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 const SEALED_PYTHON_DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
@@ -209,6 +211,8 @@ fn main() {
     bind_macos_artifact_policy().expect("failed to bind macOS artifact policy");
     warn_legacy_defaultspack_app_bundle();
     stage_runtime_bundle().expect("failed to stage runtime bundle");
+    reset_tauri_macos_resource_copy()
+        .expect("failed to reset the manifest-bound Tauri resource copy");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_setup_progress",
@@ -591,7 +595,205 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .map_err(|error| stage_error("bind sealed Python environment", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
+    prepare_staged_macos_xattr_transport(&staged_root)
+        .map_err(|error| stage_error("prepare staged macOS xattr transport", error))?;
 
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reset_tauri_macos_resource_copy() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_resource_copy_at(out_dir: &Path, profile_root: &Path) -> io::Result<PathBuf> {
+    reject_staged_path_components(out_dir)?;
+    reject_staged_path_components(profile_root)?;
+    let build_root = profile_root.join("build");
+    let relative = out_dir.strip_prefix(&build_root).map_err(|_| {
+        invalid_release("Cargo OUT_DIR escaped the expected target profile build root")
+    })?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.len() != 2
+        || !matches!(components[0], Component::Normal(_))
+        || components[1].as_os_str() != "out"
+    {
+        return Err(invalid_release(
+            "Cargo OUT_DIR has an unexpected target profile shape",
+        ));
+    }
+    let resource_root = profile_root.join("app");
+    reset_staged_runtime(&resource_root)?;
+    Ok(resource_root)
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_macos_resource_copy() -> io::Result<()> {
+    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_root = resolve_tauri_shell_target_dir(&project_dir)?;
+    let target = required_cargo_target()?;
+    let profile = std::env::var("PROFILE")
+        .map_err(|_| invalid_release("Cargo PROFILE is missing for resource reset"))?;
+    let profile_root = target_root.join(target).join(profile);
+    let out_dir = std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| invalid_release("Cargo OUT_DIR is missing for resource reset"))?;
+    reset_tauri_resource_copy_at(&out_dir, &profile_root)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prepare_staged_macos_xattr_transport(_root: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct MacosStagedEntryIdentity {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    mode: u32,
+    size: u64,
+    directory: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_staged_entry_identities(root: &Path) -> io::Result<Vec<MacosStagedEntryIdentity>> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    fn visit(path: &Path, entries: &mut Vec<MacosStagedEntryIdentity>) -> io::Result<()> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink()
+            || (!metadata.is_dir() && !metadata.is_file())
+            || (metadata.is_file() && metadata.nlink() != 1)
+            || metadata.uid() != unsafe { libc::geteuid() }
+        {
+            return Err(invalid_release(format!(
+                "staged macOS xattr entry has unsafe identity: {}",
+                path.display()
+            )));
+        }
+        entries.push(MacosStagedEntryIdentity {
+            path: path.to_path_buf(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            mode: metadata.permissions().mode() & 0o777,
+            size: metadata.len(),
+            directory: metadata.is_dir(),
+        });
+        if metadata.is_dir() {
+            let mut children = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+            children.sort_by_key(fs::DirEntry::file_name);
+            for child in children {
+                visit(&child.path(), entries)?;
+            }
+        }
+        Ok(())
+    }
+
+    let metadata = fs::symlink_metadata(MACOS_XATTR_PATH)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != 0
+        || metadata.permissions().mode() & 0o022 != 0
+        || metadata.permissions().mode() & 0o111 == 0
+        || Path::new(MACOS_XATTR_PATH).canonicalize()? != Path::new(MACOS_XATTR_PATH)
+    {
+        return Err(invalid_release(
+            "canonical macOS xattr tool identity is unsafe",
+        ));
+    }
+
+    let mut entries = Vec::new();
+    visit(root, &mut entries)?;
+    Ok(entries)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_staged_transport(entries: &[MacosStagedEntryIdentity]) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    for entry in entries {
+        let metadata = fs::symlink_metadata(&entry.path)?;
+        if metadata.file_type().is_symlink()
+            || metadata.dev() != entry.device
+            || metadata.ino() != entry.inode
+            || metadata.permissions().mode() & 0o777
+                != if entry.directory {
+                    entry.mode | 0o700
+                } else {
+                    entry.mode | 0o200
+                }
+            || metadata.len() != entry.size
+            || metadata.is_dir() != entry.directory
+        {
+            return Err(invalid_release(format!(
+                "staged macOS entry changed during xattr transport preparation: {}",
+                entry.path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn restore_macos_staged_modes(entries: &[MacosStagedEntryIdentity]) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    for entry in entries.iter().rev() {
+        let metadata = fs::symlink_metadata(&entry.path)?;
+        if metadata.file_type().is_symlink()
+            || metadata.dev() != entry.device
+            || metadata.ino() != entry.inode
+            || metadata.len() != entry.size
+            || metadata.is_dir() != entry.directory
+        {
+            return Err(invalid_release(format!(
+                "staged macOS entry changed before mode rollback: {}",
+                entry.path.display()
+            )));
+        }
+        fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn prepare_staged_macos_xattr_transport(root: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let entries = macos_staged_entry_identities(root)?;
+    for entry in &entries {
+        let writable_mode = if entry.directory {
+            entry.mode | 0o700
+        } else {
+            entry.mode | 0o200
+        };
+        if let Err(error) =
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(writable_mode))
+        {
+            restore_macos_staged_modes(&entries)?;
+            return Err(error);
+        }
+    }
+
+    let output = Command::new(MACOS_XATTR_PATH)
+        .env_clear()
+        .args(["-c", "-r"])
+        .arg(root)
+        .output()?;
+    verify_macos_staged_transport(&entries)?;
+    if !output.status.success() {
+        restore_macos_staged_modes(&entries)?;
+        return Err(invalid_release(format!(
+            "canonical macOS xattr transport probe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
     Ok(())
 }
 
@@ -7285,6 +7487,72 @@ mod tests {
         fs::set_permissions(root, fs::Permissions::from_mode(0o555))
             .expect("staged fixture root should be sealed");
         nested
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_xattr_transport_reproduces_read_only_failure_and_binds_delta() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-xattr-cleanup");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        let resource = staged.join("sealed.txt");
+        fs::write(&resource, b"sealed resource bytes").expect("fixture should be writable");
+        let wrote = Command::new(MACOS_XATTR_PATH)
+            .args(["-w", "io.tobkiri.test", "present"])
+            .arg(&resource)
+            .status()
+            .expect("canonical xattr should run");
+        assert!(wrote.success());
+        fs::set_permissions(&resource, fs::Permissions::from_mode(0o444))
+            .expect("fixture should become read-only");
+
+        let reproduced = Command::new(MACOS_XATTR_PATH)
+            .args(["-c", "-r"])
+            .arg(&staged)
+            .status()
+            .expect("canonical xattr should run");
+        assert!(
+            !reproduced.success(),
+            "recursive xattr cleanup must reproduce the read-only failure"
+        );
+
+        prepare_staged_macos_xattr_transport(&staged)
+            .expect("Host-owned transport view should admit canonical xattr");
+        assert_eq!(fs::read(&resource).unwrap(), b"sealed resource bytes");
+        assert_eq!(
+            fs::metadata(&resource).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let admitted = Command::new(MACOS_XATTR_PATH)
+            .args(["-c", "-r"])
+            .arg(&staged)
+            .status()
+            .expect("canonical xattr should run on the transport view");
+        assert!(admitted.success());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_reaps_only_the_bound_profile_cache() {
+        let tree = TestTree::new("tauri-resource-copy-reset");
+        let profile = tree.path().join("target/aarch64-apple-darwin/release");
+        let out = profile.join("build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&out).expect("Cargo OUT_DIR fixture should be creatable");
+        let resource = profile.join("app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+
+        let reset = reset_tauri_resource_copy_at(&out, &profile)
+            .expect("manifest-bound Tauri resource cache should reset");
+
+        assert_eq!(reset, resource);
+        assert!(resource.is_dir());
+        assert!(!nested.exists());
+        assert!(fs::read_dir(&resource).unwrap().next().is_none());
+        let outside = tree.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        assert!(reset_tauri_resource_copy_at(&outside, &profile).is_err());
     }
 
     #[cfg(target_os = "macos")]
