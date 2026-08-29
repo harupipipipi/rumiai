@@ -9342,7 +9342,7 @@
       "description": "Immutable verified provider and model descriptors without execution code.",
       "display_name": "Rumi Model Catalog",
       "execution_boundary": "host_brokered",
-      "kind": "application",
+      "kind": "host_extension",
       "legacy_ids": [
         "rumi.resource.ai.model.catalog.v1",
         "rumi:ecosystem/rumi_model_catalog_pack",

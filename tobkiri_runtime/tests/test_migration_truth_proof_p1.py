@@ -10,6 +10,8 @@ import pytest
 
 from scripts.quality import run_independent_migration_proof as proof_generator
 from tests import test_complete_v4_migration_gate as complete_gate
+from tobkiri_host.artifact_compiler import compile_pack_root
+from tobkiri_host.models import ExecutionKind, PackageKind
 
 
 def test_profile_transaction_receipt_is_checkout_path_independent(
@@ -149,3 +151,19 @@ def test_pack_feasibility_audit_is_specific_and_separate_from_profile_receipt() 
         entry["target"]["pack_id"] == pack_id and entry["source"]["pack_id"] == pack_id
         for pack_id, entry in proof["packs"].items()
     )
+
+
+def test_model_catalog_pack_compiles_as_a_host_extension() -> None:
+    """The host-brokered model catalog must never be admitted to PackVM."""
+
+    pack_root = proof_generator.ECOSYSTEM / "rumi_model_catalog_pack"
+    compiled = compile_pack_root(pack_root)
+
+    assert compiled.artifact.package_kind is PackageKind.HOST_EXTENSION
+    assert compiled.artifact.variants
+    assert {
+        variant.execution_kind for variant in compiled.artifact.variants
+    } == {ExecutionKind.HOST_EXTENSION}
+    assert {
+        route["execution_kind"] for route in compiled.routes.values()
+    } == {ExecutionKind.HOST_EXTENSION.value}
