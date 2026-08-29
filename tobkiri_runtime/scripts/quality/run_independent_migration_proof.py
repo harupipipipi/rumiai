@@ -37,7 +37,7 @@ PACK_ARTIFACTS = (
     "executables.v4.json",
 )
 RUNNER_ID = "tobkiri.quality.migration-proof-generator"
-RUNNER_VERSION = "2.0.0"
+RUNNER_VERSION = "2.1.0"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -503,9 +503,17 @@ def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
 
 
 def _source_inputs() -> list[dict[str, str]]:
-    """Collect repository-relative inputs used by the two proof sections."""
+    """Collect every repository file read by the two proof sections."""
 
-    paths: list[tuple[str, Path]] = [("legacy-profile-bundle", PROFILE_FIXTURE)]
+    paths: list[tuple[str, Path]] = [
+        ("proof-algorithm", Path(__file__)),
+        (
+            "profile-import-algorithm",
+            ROOT / "core_runtime" / "profile_definition_store_v4.py",
+        ),
+        ("canonical-digest-algorithm", ROOT / "tobkiri_protocol" / "canonical.py"),
+        ("legacy-profile-bundle", PROFILE_FIXTURE),
+    ]
     paths.append(("legacy-executable-source-fixture", EXECUTABLE_SOURCE_FIXTURE))
     paths.append(("hardened-executable-source-registry", EXECUTABLE_SOURCE_REGISTRY))
     for workspace_file in sorted(PROFILE_WORKSPACE_FIXTURE.rglob("*")):
@@ -516,9 +524,47 @@ def _source_inputs() -> list[dict[str, str]]:
         artifact_manifest = v3_path.parent / "artifact-manifest.json"
         if artifact_manifest.is_file():
             paths.append(("legacy-artifact-manifest", artifact_manifest))
+    for pack_root in sorted(
+        path for path in ECOSYSTEM.iterdir() if path.is_dir() and path.name != "setup_pack"
+    ):
+        for name in PACK_ARTIFACTS:
+            paths.append(("v4-artifact", pack_root / name))
+        index = _load_json(pack_root / "artifact-index.v4.json")
+        artifacts = index.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise IndependentMigrationProofError(
+                f"artifact index entries are invalid: {pack_root.name}"
+            )
+        for artifact in artifacts:
+            if not isinstance(artifact, Mapping) or not isinstance(
+                artifact.get("path"), str
+            ):
+                raise IndependentMigrationProofError(
+                    f"artifact index entry is invalid: {pack_root.name}"
+                )
+            paths.append(("v4-indexed-artifact", pack_root / artifact["path"]))
+    unique: dict[str, tuple[str, Path]] = {}
+    for kind, path in paths:
+        label = _label(path)
+        previous = unique.get(label)
+        if previous is not None and previous[0] != kind:
+            continue
+        unique[label] = (kind, path)
     return [
-        {"kind": kind, "path": _label(path), "digest": _file_digest(path)} for kind, path in paths
+        {"kind": kind, "path": label, "digest": _file_digest(path)}
+        for label, (kind, path) in sorted(unique.items())
     ]
+
+
+def _semantic_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Return proof content without informational or self-digest fields."""
+
+    normalized = copy.deepcopy(dict(document))
+    source = normalized.get("source")
+    if isinstance(source, dict):
+        source.pop("observed_head_sha", None)
+        source.pop("content_digest", None)
+    return normalized
 
 
 def _pack_source_record(
@@ -976,8 +1022,10 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
         "generator_version": RUNNER_VERSION,
         "authority": "evidence-only",
         "attestation": "none",
+        "freshness_basis": "exact-input-digests-and-deterministic-recomputation",
         "observed_head_sha": observed_head_sha or _head_sha(),
         "input_digest": canonical_digest(source_inputs),
+        "inputs": source_inputs,
         "input_paths": [item["path"] for item in source_inputs],
         "profile_collection_proof": {
             "identity_proof": identity,
@@ -1000,9 +1048,9 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
         "source": source_payload,
         "packs": pack_records,
     }
-    unsigned = copy.deepcopy(document)
-    unsigned["source"].pop("content_digest", None)
-    document["source"]["content_digest"] = canonical_digest(unsigned)
+    document["source"]["content_digest"] = canonical_digest(
+        _semantic_document(document)
+    )
     return document
 
 
@@ -1018,7 +1066,11 @@ def write_proof(
     text = json.dumps(proof, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     output = Path(output)
     if check:
-        if not output.is_file() or output.read_text(encoding="utf-8") != text:
+        try:
+            tracked = _load_json(output)
+        except IndependentMigrationProofError:
+            tracked = {}
+        if _semantic_document(tracked) != _semantic_document(proof):
             raise IndependentMigrationProofError(f"migration proof drift: {output}")
     else:
         output.parent.mkdir(parents=True, exist_ok=True)

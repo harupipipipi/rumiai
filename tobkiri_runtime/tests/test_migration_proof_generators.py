@@ -97,6 +97,12 @@ def test_source_registry_is_complete_without_v4_catalog_inputs() -> None:
     records = payload["packs"]
 
     assert payload["source"]["kind"] == "legacy-shaped"
+    assert payload["source"]["input_digest"] == _canonical_digest_for_test(
+        payload["source"]["inputs"]
+    )
+    assert payload["source"]["input_paths"] == [
+        item["path"] for item in payload["source"]["inputs"]
+    ]
     assert len(records) == 162
     assert sum(len(record["operations"]) for record in records.values()) == 221
     assert all(
@@ -191,8 +197,9 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
     """The proof runner keeps three named users separate through restart."""
     proof = build_proof(observed_head_sha="a" * 40)
     source = proof["source"]
-    identity = source["identity_proof"]
-    transaction = source["transaction"]
+    profile_proof = source["profile_collection_proof"]
+    identity = profile_proof["identity_proof"]
+    transaction = profile_proof["transaction"]
 
     assert len(proof["packs"]) == 143
     assert identity["all_ids_distinct"] is True
@@ -201,4 +208,26 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
     assert transaction["lossless"] is True
     assert transaction["restart_verified"] is True
     assert transaction["replay_rejected_without_mutation"] is True
-    assert all(entry["status"] == "release-verified" for entry in proof["packs"].values())
+    statuses = {
+        status: sum(entry["status"] == status for entry in proof["packs"].values())
+        for status in ("semantically-reviewed", "generated-draft")
+    }
+    assert statuses == {"semantically-reviewed": 45, "generated-draft": 98}
+    assert source["migration_status_counts"] == {
+        "generated-draft": 98,
+        "release-verified": 0,
+        "semantically-reviewed": 45,
+    }
+
+
+def _canonical_digest_for_test(value: object) -> str:
+    """Return the registry's canonical digest without importing private code."""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()

@@ -636,6 +636,7 @@ def build_registry(
             "generator_version": GENERATOR_VERSION,
             "input_count": len(source_inputs),
             "input_digest": _canonical_digest(source_inputs),
+            "inputs": source_inputs,
             "input_paths": [item["path"] for item in source_inputs],
         },
         "packs": {key: records[key] for key in sorted(records)},

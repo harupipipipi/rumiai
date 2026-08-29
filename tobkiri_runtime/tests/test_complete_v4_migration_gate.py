@@ -902,13 +902,32 @@ def _load_independent_migration_proof() -> tuple[
     ):
         return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
     digest_pattern = re.compile(r"sha256:[0-9a-f]{64}")
+    inputs = source.get("inputs")
     if (
         source.get("authority") != "evidence-only"
         or source.get("attestation") != "none"
+        or source.get("freshness_basis")
+        != "exact-input-digests-and-deterministic-recomputation"
         or not isinstance(source.get("input_digest"), str)
         or not digest_pattern.fullmatch(source["input_digest"])
+        or not isinstance(inputs, list)
+        or not inputs
+        or any(
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("kind"), str)
+            or not item["kind"].strip()
+            or not isinstance(item.get("path"), str)
+            or not item["path"].strip()
+            or Path(item["path"]).is_absolute()
+            or item["path"].startswith("external:")
+            or not isinstance(item.get("digest"), str)
+            or not digest_pattern.fullmatch(item["digest"])
+            for item in inputs
+        )
+        or _proof_digest(inputs) != source.get("input_digest")
         or not isinstance(source.get("input_paths"), list)
         or not source["input_paths"]
+        or source["input_paths"] != [item["path"] for item in inputs]
         or any(not isinstance(path, str) or not path.strip() for path in source["input_paths"])
         or any(
             Path(path).is_absolute() or path.startswith("external:")
@@ -989,6 +1008,7 @@ def _load_independent_migration_proof() -> tuple[
 
     unsigned_payload = dict(payload)
     unsigned_source = dict(source)
+    unsigned_source.pop("observed_head_sha", None)
     unsigned_source.pop("content_digest", None)
     unsigned_payload["source"] = unsigned_source
     if _proof_digest(unsigned_payload) != source["content_digest"]:
@@ -1233,9 +1253,6 @@ def _migration_proof_generator_findings() -> list[dict[str, Any]]:
     """Run the proof generator's own check so drift fails the complete gate."""
 
     try:
-        payload = _load_json(MIGRATION_PROOF_PATH)
-        source = payload.get("source") if isinstance(payload, Mapping) else None
-        tracked_head = source.get("observed_head_sha") if isinstance(source, Mapping) else ""
         result = subprocess.run(
             [
                 sys.executable,
@@ -1244,8 +1261,6 @@ def _migration_proof_generator_findings() -> list[dict[str, Any]]:
                 "--output",
                 str(MIGRATION_PROOF_PATH),
                 "--check",
-                "--head-sha",
-                str(tracked_head),
             ],
             cwd=ROOT,
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
