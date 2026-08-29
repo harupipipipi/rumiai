@@ -416,26 +416,26 @@ fn read_active_profile_snapshot(config: &AppConfig) -> Result<Option<ActiveProfi
     }
     let envelope = snapshot
         .get("envelope")
-        .filter(Value::is_object)
+        .filter(|value| value.is_object())
         .unwrap_or(&snapshot);
     let profile = envelope
         .get("profile")
-        .filter(Value::is_object)
+        .filter(|value| value.is_object())
         .cloned()
         .context("active Profile snapshot Profile record is missing")?;
     let lock = envelope
         .get("lock")
-        .filter(Value::is_object)
+        .filter(|value| value.is_object())
         .cloned()
         .context("active Profile snapshot ProfileLock record is missing")?;
     let plan = envelope
         .get("plan")
-        .filter(Value::is_object)
+        .filter(|value| value.is_object())
         .cloned()
         .context("active Profile snapshot ResolvedPlan record is missing")?;
     let activation = envelope
         .get("activation")
-        .filter(Value::is_object)
+        .filter(|value| value.is_object())
         .context("active Profile snapshot ActivationRecord is missing")?;
     if value_str(&profile, "/profile_id") != Some(profile_id)
         || value_str(&plan, "/profile_revision") != Some(profile_revision)
