@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Run an independent, lossless Profile migration and emit release proof.
+"""Generate repository migration evidence without overstating attestation.
 
-This runner deliberately does not import the complete-migration scanner or the
-canonical Pack catalog.  It consumes legacy-shaped profile/workspace inputs,
-exercises the Host-owned Profile migration transaction, verifies a fresh
-restart from disk, and independently checks the four committed Pack artifact
-files before producing evidence for the fail-closed quality gate.
+The Profile collection/workspace transaction and Pack artifact migration are
+different claims.  This command proves the former with a real transactional
+import.  For each Pack it records only Pack-specific legacy-source and v4-target
+integrity that can be reproduced from the checkout.  A Pack remains
+``generated-draft`` until separately authored semantic mappings and comparison
+receipts exist; repository-generated hashes are not independent attestation.
 """
 
 from __future__ import annotations
@@ -34,8 +35,8 @@ PACK_ARTIFACTS = (
     "contracts.v4.json",
     "executables.v4.json",
 )
-RUNNER_ID = "tobkiri.quality.independent-profile-migration"
-RUNNER_VERSION = "1.0.0"
+RUNNER_ID = "tobkiri.quality.migration-proof-generator"
+RUNNER_VERSION = "2.0.0"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -71,12 +72,18 @@ def _file_digest(path: Path) -> str:
 
 
 def _label(path: Path) -> str:
-    """Return a stable repository-relative path for evidence."""
+    """Return a stable repository-relative path for evidence.
+
+    Absolute/external labels are deliberately rejected because embedding them
+    makes an otherwise identical proof differ between checkout locations.
+    """
 
     try:
         return path.resolve().relative_to(REPOSITORY_ROOT.resolve()).as_posix()
-    except ValueError:
-        return f"external:{path.resolve().as_posix()}"
+    except ValueError as exc:
+        raise IndependentMigrationProofError(
+            f"proof input is outside the repository: {path}"
+        ) from exc
 
 
 def _head_sha() -> str:
@@ -121,13 +128,9 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
             raise IndependentMigrationProofError("legacy Profile ID is missing")
         if not isinstance(display_name, str) or not display_name.strip():
             raise IndependentMigrationProofError(f"Profile name is missing: {profile_id}")
-        if not isinstance(workspace, Mapping) or not isinstance(
-            workspace.get("workspace_id"), str
-        ):
+        if not isinstance(workspace, Mapping) or not isinstance(workspace.get("workspace_id"), str):
             raise IndependentMigrationProofError(f"workspace identity is missing: {profile_id}")
-        if not isinstance(settings, Mapping) or not isinstance(
-            settings.get("settings_id"), str
-        ):
+        if not isinstance(settings, Mapping) or not isinstance(settings.get("settings_id"), str):
             raise IndependentMigrationProofError(f"settings identity is missing: {profile_id}")
         if not isinstance(conversations, list) or len(conversations) != 1:
             raise IndependentMigrationProofError(
@@ -142,15 +145,11 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(conversation, Mapping) or not isinstance(
             conversation.get("conversation_id"), str
         ):
-            raise IndependentMigrationProofError(
-                f"conversation identity is missing: {profile_id}"
-            )
+            raise IndependentMigrationProofError(f"conversation identity is missing: {profile_id}")
         if not isinstance(credential, Mapping) or not isinstance(
             credential.get("credential_id"), str
         ):
-            raise IndependentMigrationProofError(
-                f"credential identity is missing: {profile_id}"
-            )
+            raise IndependentMigrationProofError(f"credential identity is missing: {profile_id}")
         credential_ref = credential.get("secret_ref")
         if not isinstance(credential_ref, str) or not credential_ref.startswith("vault://"):
             raise IndependentMigrationProofError(
@@ -189,9 +188,8 @@ def _identity_proof(source: Mapping[str, Any]) -> dict[str, Any]:
         "profile_names": profile_names,
         "active_profile_id": active_profile_id,
         "last_launched_profile_id": last_launched_profile_id,
-        "all_ids_distinct": len(
-            {value for values in identity_sets.values() for value in values}
-        ) == sum(len(values) for values in identity_sets.values()),
+        "all_ids_distinct": len({value for values in identity_sets.values() for value in values})
+        == sum(len(values) for values in identity_sets.values()),
         "defaults_collapsed": False,
     }
     if not unsigned["all_ids_distinct"]:
@@ -231,10 +229,10 @@ def _assert_uncommitted(root: Path) -> None:
         raise IndependentMigrationProofError("failed migration left a workspace")
 
 
-def _copy_broken_workspace_fixture(destination: Path) -> Path:
+def _copy_broken_workspace_fixture(source: Path, destination: Path) -> Path:
     """Copy the fixture and add one unsafe link for preflight rollback proof."""
 
-    shutil.copytree(PROFILE_WORKSPACE_FIXTURE, destination, symlinks=True)
+    shutil.copytree(source, destination, symlinks=True)
     outside = destination.parent / "outside-proof-target.txt"
     outside.write_text("outside", encoding="utf-8")
     link = destination / "profiles" / "profile-cleo" / "notes" / "escape"
@@ -243,18 +241,27 @@ def _copy_broken_workspace_fixture(destination: Path) -> Path:
 
 
 def _run_profile_transaction_proof(
-    source_path: Path,
     source: Mapping[str, Any],
     identity: Mapping[str, Any],
     temporary_root: Path,
+    *,
+    workspace_root: Path = PROFILE_WORKSPACE_FIXTURE,
 ) -> dict[str, Any]:
-    """Exercise failure, commit, restart, and replay paths of Profile import."""
+    """Exercise failure, commit, restart, and replay paths of Profile import.
 
-    broken_workspace = _copy_broken_workspace_fixture(temporary_root / "broken-legacy")
+    The parsed document is passed to the store instead of its absolute path.
+    Workspace discovery is still explicit.  This keeps the committed receipt
+    identical after relocating the checkout while exercising the same bytes.
+    """
+
+    broken_workspace = _copy_broken_workspace_fixture(
+        workspace_root,
+        temporary_root / "broken-legacy",
+    )
     broken_destination = temporary_root / "broken-destination"
     try:
         ProfileDefinitionStore(broken_destination).import_legacy_collection(
-            source_path,
+            source,
             legacy_workspace_root=broken_workspace,
         )
     except ProfileDefinitionStoreIntegrityError:
@@ -266,8 +273,8 @@ def _run_profile_transaction_proof(
     injected_destination = temporary_root / "injected-destination"
     try:
         _FailingProfileStore(injected_destination).import_legacy_collection(
-            source_path,
-            legacy_workspace_root=PROFILE_WORKSPACE_FIXTURE,
+            source,
+            legacy_workspace_root=workspace_root,
         )
     except ProfileDefinitionStoreError:
         pass
@@ -278,8 +285,8 @@ def _run_profile_transaction_proof(
     committed_destination = temporary_root / "committed-destination"
     store = ProfileDefinitionStore(committed_destination, clock=lambda: 1700000300)
     result = store.import_legacy_collection(
-        source_path,
-        legacy_workspace_root=PROFILE_WORKSPACE_FIXTURE,
+        source,
+        legacy_workspace_root=workspace_root,
     )
     expected_profile_ids = tuple(str(item["profile_id"]) for item in source["profiles"])
     if result.profile_ids != expected_profile_ids:
@@ -287,9 +294,7 @@ def _run_profile_transaction_proof(
     if result.active_profile_id != source["active_profile_id"]:
         raise IndependentMigrationProofError("active Profile identity changed during import")
     if result.last_launched_profile_id != source["last_launched_profile_id"]:
-        raise IndependentMigrationProofError(
-            "last-launched Profile identity changed during import"
-        )
+        raise IndependentMigrationProofError("last-launched Profile identity changed during import")
     if store.legacy_state().get("source_document") != dict(source):
         raise IndependentMigrationProofError("legacy source document was not preserved")
 
@@ -302,17 +307,13 @@ def _run_profile_transaction_proof(
         actual_profile = copy.deepcopy(dict(stored.profile))
         actual_profile.pop("legacy_migration", None)
         if actual_profile != source_by_id[profile_id]:
-            raise IndependentMigrationProofError(
-                f"Profile payload is not lossless: {profile_id}"
-            )
-        source_workspace = PROFILE_WORKSPACE_FIXTURE / "profiles" / profile_id
+            raise IndependentMigrationProofError(f"Profile payload is not lossless: {profile_id}")
+        source_workspace = workspace_root / "profiles" / profile_id
         migrated_workspace = committed_destination / "workspaces" / profile_id
         source_files = _workspace_snapshot(source_workspace)
         migrated_files = _workspace_snapshot(migrated_workspace)
         if source_files != migrated_files:
-            raise IndependentMigrationProofError(
-                f"workspace payload is not lossless: {profile_id}"
-            )
+            raise IndependentMigrationProofError(f"workspace payload is not lossless: {profile_id}")
         workspace_digests[profile_id] = canonical_digest(source_files)
 
     committed_snapshot = store.snapshot()
@@ -326,8 +327,8 @@ def _run_profile_transaction_proof(
     before_replay = copy.deepcopy(committed_snapshot)
     try:
         store.import_legacy_collection(
-            source_path,
-            legacy_workspace_root=PROFILE_WORKSPACE_FIXTURE,
+            source,
+            legacy_workspace_root=workspace_root,
         )
     except ProfileDefinitionStoreError:
         replay_rejected = True
@@ -364,7 +365,9 @@ def _safe_artifact_path(pack_root: Path, relative: str) -> Path:
 
     candidate = Path(relative)
     if candidate.is_absolute() or ".." in candidate.parts:
-        raise IndependentMigrationProofError(f"artifact path escapes Pack: {pack_root.name}:{relative}")
+        raise IndependentMigrationProofError(
+            f"artifact path escapes Pack: {pack_root.name}:{relative}"
+        )
     resolved = (pack_root / candidate).resolve()
     try:
         resolved.relative_to(pack_root.resolve())
@@ -378,17 +381,16 @@ def _safe_artifact_path(pack_root: Path, relative: str) -> Path:
 
 
 def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
-    """Independently verify v4 quartet bytes, seals, and digest relationships."""
+    """Verify v4 quartet bytes, seals, and digest relationships."""
 
-    documents = {
-        name: _load_json(pack_root / name)
-        for name in PACK_ARTIFACTS
-    }
+    documents = {name: _load_json(pack_root / name) for name in PACK_ARTIFACTS}
     manifest = documents["pack.v4.json"]
     contracts = documents["contracts.v4.json"]
     index = documents["artifact-index.v4.json"]
     executable = documents["executables.v4.json"]
-    pack_id = manifest.get("pack", {}).get("id") if isinstance(manifest.get("pack"), Mapping) else None
+    pack_id = (
+        manifest.get("pack", {}).get("id") if isinstance(manifest.get("pack"), Mapping) else None
+    )
     if not isinstance(pack_id, str) or pack_id != pack_root.name:
         raise IndependentMigrationProofError(f"Pack identity is invalid: {pack_root.name}")
     if not (
@@ -400,7 +402,11 @@ def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
     source_identities = {
         value
         for document in (manifest, contracts, index, executable)
-        for value in [document.get("integrity", {}).get("source_identity") if document is manifest else document.get("source_identity")]
+        for value in [
+            document.get("integrity", {}).get("source_identity")
+            if document is manifest
+            else document.get("source_identity")
+        ]
         if isinstance(value, str)
     }
     if len(source_identities) != 1:
@@ -429,17 +435,28 @@ def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
     }
     if len(manifest_by_path) != len(manifest_artifacts):
         raise IndependentMigrationProofError(f"Pack artifact paths are duplicated: {pack_id}")
+    if len(index_by_path) != len(index_artifacts):
+        raise IndependentMigrationProofError(f"index artifact paths are duplicated: {pack_id}")
     for relative, item in index_by_path.items():
         expected_digest = item.get("digest")
         if not isinstance(expected_digest, str):
-            raise IndependentMigrationProofError(f"artifact digest is missing: {pack_id}:{relative}")
+            raise IndependentMigrationProofError(
+                f"artifact digest is missing: {pack_id}:{relative}"
+            )
         if _file_digest(_safe_artifact_path(pack_root, relative)) != expected_digest:
             raise IndependentMigrationProofError(f"artifact bytes are stale: {pack_id}:{relative}")
-        if relative in manifest_by_path and manifest_by_path[relative].get("digest") != expected_digest:
-            raise IndependentMigrationProofError(f"manifest/index digest mismatch: {pack_id}:{relative}")
+        if (
+            relative in manifest_by_path
+            and manifest_by_path[relative].get("digest") != expected_digest
+        ):
+            raise IndependentMigrationProofError(
+                f"manifest/index digest mismatch: {pack_id}:{relative}"
+            )
     for relative in manifest_by_path:
         if relative not in index_by_path:
-            raise IndependentMigrationProofError(f"manifest artifact is not indexed: {pack_id}:{relative}")
+            raise IndependentMigrationProofError(
+                f"manifest artifact is not indexed: {pack_id}:{relative}"
+            )
     if index.get("integrity_seal", {}).get("signed_digest") != canonical_digest(
         {key: value for key, value in index.items() if key != "integrity_seal"}
     ):
@@ -465,46 +482,126 @@ def _verify_pack_artifacts(pack_root: Path) -> dict[str, Any]:
                 f"contract revision is stale: {pack_id}:{contract.get('contract_id')}"
             )
     return {
+        "pack_id": pack_id,
         "artifact_set_digest": expected_artifact_digest,
         "artifact_count": len(index_by_path),
         "artifact_index_digest": _file_digest(pack_root / "artifact-index.v4.json"),
         "executable_catalog_digest": executable["catalog_digest"],
+        "quartet": {name: _file_digest(pack_root / name) for name in PACK_ARTIFACTS},
     }
 
 
-def _source_inputs(fixture: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Collect only legacy-shaped input files used to establish proof."""
+def _source_inputs() -> list[dict[str, str]]:
+    """Collect repository-relative inputs used by the two proof sections."""
 
     paths: list[tuple[str, Path]] = [("legacy-profile-bundle", PROFILE_FIXTURE)]
     paths.append(("legacy-executable-source-fixture", EXECUTABLE_SOURCE_FIXTURE))
     for workspace_file in sorted(PROFILE_WORKSPACE_FIXTURE.rglob("*")):
         if workspace_file.is_file() and not workspace_file.is_symlink():
             paths.append(("legacy-workspace-file", workspace_file))
-    del fixture
     for v3_path in sorted(ECOSYSTEM.glob("*/rumi.pack.v3.json")):
         paths.append(("legacy-v3-manifest", v3_path))
         artifact_manifest = v3_path.parent / "artifact-manifest.json"
         if artifact_manifest.is_file():
             paths.append(("legacy-artifact-manifest", artifact_manifest))
     return [
-        {"kind": kind, "path": _label(path), "digest": _file_digest(path)}
-        for kind, path in paths
+        {"kind": kind, "path": _label(path), "digest": _file_digest(path)} for kind, path in paths
     ]
 
 
+def _pack_source_record(
+    pack_root: Path,
+    explicit_packs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a Pack-specific legacy source record, or an honest missing record."""
+
+    pack_id = pack_root.name
+    v3_path = pack_root / "rumi.pack.v3.json"
+    if v3_path.is_file():
+        paths = [v3_path]
+        artifact_manifest = pack_root / "artifact-manifest.json"
+        if artifact_manifest.is_file():
+            paths.append(artifact_manifest)
+        files = [{"path": _label(path), "digest": _file_digest(path)} for path in paths]
+        return {
+            "status": "available",
+            "pack_id": pack_id,
+            "format": "rumi.pack.v3",
+            "files": files,
+            "digest": canonical_digest(files),
+        }
+
+    explicit = explicit_packs.get(pack_id)
+    if isinstance(explicit, Mapping):
+        payload = copy.deepcopy(dict(explicit))
+        return {
+            "status": "available",
+            "pack_id": pack_id,
+            "format": "legacy-entrypoint-map",
+            "files": [
+                {
+                    "path": _label(EXECUTABLE_SOURCE_FIXTURE),
+                    "json_pointer": f"/packs/{pack_id}",
+                    "digest": canonical_digest(payload),
+                }
+            ],
+            "digest": canonical_digest(payload),
+        }
+
+    return {
+        "status": "missing",
+        "pack_id": pack_id,
+        "format": None,
+        "files": [],
+        "digest": None,
+        "reason": "no Pack-specific legacy source record is present",
+    }
+
+
+def _draft_pack_record(
+    pack_root: Path,
+    explicit_packs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build an integrity-only Pack record that cannot imply semantic release."""
+
+    artifact_evidence = _verify_pack_artifacts(pack_root)
+    source = _pack_source_record(pack_root, explicit_packs)
+    return {
+        "status": "generated-draft",
+        "source": source,
+        "target": {
+            "status": "artifact-integrity-verified",
+            "pack_id": pack_root.name,
+            "format": "tobkiri-pack-v4-quartet",
+            "digest": artifact_evidence["artifact_set_digest"],
+            "artifact_verification": artifact_evidence,
+        },
+        "semantic_comparison": {
+            "status": "unverified",
+            "equivalent": None,
+            "method": None,
+            "operation_mappings": [],
+            "reason": (
+                "Pack-specific legacy-to-v4 operation, parameter, and authority "
+                "mapping has not been reviewed"
+                if source["status"] == "available"
+                else source["reason"]
+            ),
+        },
+    }
+
+
 def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
-    """Run independent migration and artifact checks and return proof JSON."""
+    """Run Profile migration and Pack integrity checks and return proof JSON."""
 
     source = _load_json(PROFILE_FIXTURE)
     if source.get("schema") != "io.tobkiri.legacy-profile-bundle.v1":
         raise IndependentMigrationProofError("legacy Profile fixture schema is invalid")
     identity = _identity_proof(source)
     fixture = _load_json(EXECUTABLE_SOURCE_FIXTURE)
-    source_inputs = _source_inputs(fixture)
-    source_digest = canonical_digest(source)
+    source_inputs = _source_inputs()
     with tempfile.TemporaryDirectory(prefix="tobkiri-independent-migration-") as temporary:
         transaction = _run_profile_transaction_proof(
-            PROFILE_FIXTURE,
             source,
             identity,
             Path(temporary),
@@ -517,50 +614,36 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
     explicit_packs = fixture.get("packs") if isinstance(fixture.get("packs"), Mapping) else {}
     pack_records: dict[str, dict[str, Any]] = {}
     for pack_root in pack_dirs:
-        artifact_evidence = _verify_pack_artifacts(pack_root)
-        v3_path = pack_root / "rumi.pack.v3.json"
-        source_input = (
-            _label(v3_path)
-            if v3_path.is_file()
-            else _label(EXECUTABLE_SOURCE_FIXTURE)
-            if pack_root.name in explicit_packs
-            else _label(PROFILE_FIXTURE)
-        )
-        pack_records[pack_root.name] = {
-            "status": "release-verified",
-            "artifact_digest": artifact_evidence["artifact_set_digest"],
-            "evidence": {
-                "independent": True,
-                "source_format": "legacy-shaped",
-                "source_input": source_input,
-                "source_digest": source_digest,
-                "identity_proof_digest": identity["digest"],
-                "transaction_receipt_digest": transaction["receipt_digest"],
-                "artifact_verification": artifact_evidence,
-            },
-        }
+        pack_records[pack_root.name] = _draft_pack_record(pack_root, explicit_packs)
     source_payload: dict[str, Any] = {
-        "kind": "independent-runner",
-        "runner_id": RUNNER_ID,
-        "runner_version": RUNNER_VERSION,
+        "kind": "repository-generated-evidence",
+        "generator_id": RUNNER_ID,
+        "generator_version": RUNNER_VERSION,
         "authority": "evidence-only",
+        "attestation": "none",
         "observed_head_sha": observed_head_sha or _head_sha(),
-        "signature_scheme": "sha256-canonical-content",
         "input_digest": canonical_digest(source_inputs),
         "input_paths": [item["path"] for item in source_inputs],
-        "identity_proof": identity,
-        "transaction": transaction,
+        "profile_collection_proof": {
+            "identity_proof": identity,
+            "transaction": transaction,
+        },
         "pack_count": len(pack_records),
-        "signature": "",
+        "migration_status_counts": {
+            "generated-draft": len(pack_records),
+            "release-verified": 0,
+        },
+        "unproved_pack_count": len(pack_records),
+        "content_digest": "",
     }
     document = {
-        "schema": "io.tobkiri.quality.pack-migration-proof.v1",
+        "schema": "io.tobkiri.quality.pack-migration-proof.v2",
         "source": source_payload,
         "packs": pack_records,
     }
     unsigned = copy.deepcopy(document)
-    unsigned["source"].pop("signature", None)
-    document["source"]["signature"] = canonical_digest(unsigned)
+    unsigned["source"].pop("content_digest", None)
+    document["source"]["content_digest"] = canonical_digest(unsigned)
     return document
 
 
@@ -602,7 +685,11 @@ def main() -> int:
     except (IndependentMigrationProofError, OSError, subprocess.CalledProcessError) as exc:
         print(f"RED: {exc}", file=sys.stderr)
         return 1
-    print(f"GREEN: independent migration proof covers {len(proof['packs'])} Packs")
+    unproved = proof["source"]["unproved_pack_count"]
+    print(
+        "GREEN: deterministic evidence is fresh; "
+        f"release proof remains missing for {unproved} Packs"
+    )
     return 0
 
 

@@ -1,0 +1,140 @@
+"""P1 regression tests for truthful, relocation-stable migration evidence."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+from scripts.quality import run_independent_migration_proof as proof_generator
+from tests import test_complete_v4_migration_gate as complete_gate
+
+
+def test_profile_transaction_receipt_is_checkout_path_independent(
+    tmp_path: Path,
+) -> None:
+    """Relocating identical legacy inputs cannot change the transaction proof."""
+
+    source = proof_generator._load_json(proof_generator.PROFILE_FIXTURE)
+    identity = proof_generator._identity_proof(source)
+    receipts = []
+    for checkout_name in ("checkout-a", "checkout-b"):
+        workspace_root = tmp_path / checkout_name / "legacy_profile_bundle"
+        shutil.copytree(proof_generator.PROFILE_WORKSPACE_FIXTURE, workspace_root)
+        receipts.append(
+            proof_generator._run_profile_transaction_proof(
+                source,
+                identity,
+                tmp_path / f"transaction-{checkout_name}",
+                workspace_root=workspace_root,
+            )
+        )
+
+    assert receipts[0] == receipts[1]
+
+
+def test_repository_labels_are_stable_after_checkout_relocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evidence paths are relative labels, never relocated absolute paths."""
+
+    labels = []
+    for checkout_name in ("checkout-a", "checkout-b"):
+        checkout = tmp_path / checkout_name
+        source = checkout / "tobkiri_runtime" / "legacy.json"
+        source.parent.mkdir(parents=True)
+        source.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(proof_generator, "REPOSITORY_ROOT", checkout)
+        labels.append(proof_generator._label(source))
+
+    assert labels == ["tobkiri_runtime/legacy.json"] * 2
+    assert str(tmp_path) not in labels[0]
+
+
+def test_complete_gate_runs_generator_check_and_rejects_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A checked-in proof edit is caught by the generator invoked by the gate."""
+
+    payload = json.loads(complete_gate.MIGRATION_PROOF_PATH.read_text(encoding="utf-8"))
+    payload["packs"]["defaults"]["semantic_comparison"]["reason"] = "drifted"
+    drifted = tmp_path / "pack_migration_proof.v1.json"
+    drifted.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(complete_gate, "MIGRATION_PROOF_PATH", drifted)
+
+    findings = complete_gate._migration_proof_generator_findings()
+
+    assert [finding["rule"] for finding in findings] == ["migration_proof_generator_drift"]
+
+
+def test_generic_pack_receipt_reuse_is_rejected() -> None:
+    """One generic migration receipt cannot certify two different Packs."""
+
+    receipt = "sha256:" + "a" * 64
+    proof = {
+        "pack-a": {
+            "status": "release-verified",
+            "migration_receipt_digest": receipt,
+        },
+        "pack-b": {
+            "status": "release-verified",
+            "migration_receipt_digest": receipt,
+        },
+    }
+
+    findings = complete_gate._generic_release_receipt_findings(proof)
+
+    assert [finding["rule"] for finding in findings] == ["generic_pack_migration_receipt_reused"]
+    assert findings[0]["pack_ids"] == ["pack-a", "pack-b"]
+
+
+def test_release_status_requires_pack_specific_source_target_and_mappings() -> None:
+    """A release label fails closed without source, target, and semantic maps."""
+
+    entry = {
+        "status": "release-verified",
+        "source": {
+            "status": "missing",
+            "pack_id": "pack-a",
+            "digest": None,
+        },
+        "target": {
+            "status": "artifact-integrity-verified",
+            "pack_id": "pack-a",
+            "digest": "sha256:" + "b" * 64,
+        },
+        "semantic_comparison": {
+            "status": "unverified",
+            "equivalent": None,
+            "method": None,
+            "operation_mappings": [],
+        },
+        "migration_receipt_digest": "sha256:" + "c" * 64,
+    }
+
+    errors = complete_gate._pack_release_proof_errors("pack-a", entry)
+
+    assert "pack_specific_legacy_source_missing" in errors
+    assert "pack_specific_semantic_comparison_unverified" in errors
+    assert "pack_specific_operation_mapping_missing" in errors
+    assert "pack_specific_migration_receipt_invalid" in errors
+
+
+def test_generated_pack_records_do_not_reuse_profile_transaction_receipt() -> None:
+    """Profile collection proof is top-level and never copied into Pack records."""
+
+    proof = proof_generator.build_proof(observed_head_sha="a" * 40)
+    profile_receipt = proof["source"]["profile_collection_proof"]["transaction"]["receipt_digest"]
+    serialized_packs = json.dumps(proof["packs"], sort_keys=True)
+
+    assert profile_receipt not in serialized_packs
+    assert all(entry["status"] == "generated-draft" for entry in proof["packs"].values())
+    assert proof["source"]["unproved_pack_count"] == len(proof["packs"])
+    assert all(
+        entry["target"]["pack_id"] == pack_id and entry["source"]["pack_id"] == pack_id
+        for pack_id, entry in proof["packs"].items()
+    )
