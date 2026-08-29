@@ -96,6 +96,62 @@ def _label(path: Path, repository_root: Path) -> str:
         return f"external:{path.resolve().as_posix()}"
 
 
+def _resolve_pack_file(
+    pack_root: Path,
+    relative_path: Path,
+    *,
+    source_label: str,
+) -> Path:
+    """Resolve a regular Pack file while rejecting every symlink component."""
+
+    pack_root = Path(pack_root)
+    if pack_root.is_symlink():
+        raise ExecutableSourceRegistryError(
+            f"{source_label} uses a symlink Pack root: {pack_root}"
+        )
+    try:
+        resolved_pack_root = pack_root.resolve(strict=True)
+    except OSError as exc:
+        raise ExecutableSourceRegistryError(
+            f"{source_label} Pack root cannot be resolved: {pack_root}"
+        ) from exc
+    if not resolved_pack_root.is_dir():
+        raise ExecutableSourceRegistryError(
+            f"{source_label} Pack root is not a directory: {pack_root}"
+        )
+
+    relative_path = Path(relative_path)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ExecutableSourceRegistryError(
+            f"{source_label} escapes its Pack: {pack_root.name}:{relative_path}"
+        )
+
+    candidate = resolved_pack_root
+    for part in relative_path.parts:
+        candidate /= part
+        if candidate.is_symlink():
+            raise ExecutableSourceRegistryError(
+                f"{source_label} contains a symlink: {pack_root.name}:{relative_path}"
+            )
+    try:
+        resolved_candidate = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise ExecutableSourceRegistryError(
+            f"{source_label} is missing: {candidate}"
+        ) from exc
+    try:
+        resolved_candidate.relative_to(resolved_pack_root)
+    except ValueError as exc:
+        raise ExecutableSourceRegistryError(
+            f"{source_label} escapes its Pack: {pack_root.name}:{relative_path}"
+        ) from exc
+    if not resolved_candidate.is_file():
+        raise ExecutableSourceRegistryError(
+            f"{source_label} is not a regular file: {resolved_candidate}"
+        )
+    return resolved_candidate
+
+
 def _module_path(pack_root: Path, module: str) -> Path:
     """Resolve one v3 Python module without allowing it to escape its Pack."""
 
@@ -105,36 +161,23 @@ def _module_path(pack_root: Path, module: str) -> Path:
             f"v3 entrypoint module is outside its Pack: {pack_root.name}:{module}"
         )
     relative_module = module.removeprefix(prefix)
-    candidate = pack_root.joinpath(*relative_module.split(".")).with_suffix(".py")
-    try:
-        candidate.relative_to(pack_root.resolve())
-    except ValueError as exc:
-        raise ExecutableSourceRegistryError(
-            f"v3 entrypoint module escapes its Pack: {module}"
-        ) from exc
-    if not candidate.is_file():
-        raise ExecutableSourceRegistryError(f"v3 entrypoint module is missing: {candidate}")
-    return candidate
+    relative_path = Path(*relative_module.split(".")).with_suffix(".py")
+    return _resolve_pack_file(
+        pack_root,
+        relative_path,
+        source_label="v3 entrypoint module",
+    )
 
 
 def _relative_runtime_path(pack_root: Path, value: str) -> Path:
     """Resolve an explicit fixture runtime path under one Pack."""
 
     relative = Path(value)
-    if relative.is_absolute() or ".." in relative.parts:
-        raise ExecutableSourceRegistryError(
-            f"explicit implementation path escapes its Pack: {pack_root.name}:{value}"
-        )
-    candidate = (pack_root / relative).resolve()
-    try:
-        candidate.relative_to(pack_root.resolve())
-    except ValueError as exc:
-        raise ExecutableSourceRegistryError(
-            f"explicit implementation path escapes its Pack: {pack_root.name}:{value}"
-        ) from exc
-    if not candidate.is_file():
-        raise ExecutableSourceRegistryError(f"explicit implementation is missing: {candidate}")
-    return candidate
+    return _resolve_pack_file(
+        pack_root,
+        relative,
+        source_label="explicit implementation path",
+    )
 
 
 def _legacy_contracts(v3: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:

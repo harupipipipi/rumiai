@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -15,6 +16,79 @@ from scripts.generate_executable_source_registry_v1 import (
 from scripts.quality.run_independent_migration_proof import (
     build_proof,
 )
+
+
+def _write_empty_source_fixture(path: Path) -> Path:
+    """Write the smallest valid explicit-source fixture."""
+
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "io.tobkiri.legacy-executable-source-input.v1",
+                "source_format": "legacy-entrypoint-map",
+                "operation_id_overrides": [],
+                "packs": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_v3_pack(
+    ecosystem_root: Path,
+    *,
+    module_path: str,
+    implementation_bytes: bytes,
+) -> Path:
+    """Write a minimal v3 Pack declaring one Python entrypoint."""
+
+    pack_root = ecosystem_root / "sample_pack"
+    pack_root.mkdir(parents=True)
+    module = ".".join(Path(module_path).with_suffix("").parts)
+    (pack_root / "rumi.pack.v3.json").write_text(
+        json.dumps(
+            {
+                "contracts": {
+                    "provides": [
+                        {
+                            "id": "rumi.sample.execute.v1",
+                            "version": "1.0.0",
+                            "provider_instance_id": "sample-provider",
+                            "schemas": {
+                                "input": {"type": "object"},
+                                "output": {"type": "object"},
+                                "error": {"type": "object"},
+                            },
+                        }
+                    ]
+                },
+                "entrypoints": [
+                    {
+                        "id": "sample.execute",
+                        "contract_id": "rumi.sample.execute.v1",
+                        "module": f"ecosystem.sample_pack.{module}",
+                        "symbol": "execute",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pack_root / "artifact-manifest.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "path": module_path,
+                        "sha256": hashlib.sha256(implementation_bytes).hexdigest(),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return pack_root
 
 
 def test_source_registry_is_complete_without_v4_catalog_inputs() -> None:
@@ -50,6 +124,67 @@ def test_source_registry_rejects_unsafe_explicit_implementation_path(
 
     with pytest.raises(ExecutableSourceRegistryError, match="escapes"):
         build_registry(ECOSYSTEM, fixture_path=fixture_path)
+
+
+def test_source_registry_accepts_regular_v3_module_file(tmp_path: Path) -> None:
+    """A regular Python module inside its Pack remains a valid v3 source."""
+
+    ecosystem_root = tmp_path / "ecosystem"
+    implementation_bytes = b"def execute(payload):\n    return payload\n"
+    pack_root = _write_v3_pack(
+        ecosystem_root,
+        module_path="runtime.py",
+        implementation_bytes=implementation_bytes,
+    )
+    (pack_root / "runtime.py").write_bytes(implementation_bytes)
+    fixture_path = _write_empty_source_fixture(tmp_path / "sources.json")
+
+    payload = build_registry(ecosystem_root, fixture_path=fixture_path)
+
+    record = next(iter(payload["packs"].values()))
+    assert record["pack_id"] == "sample_pack"
+    assert record["implementation_path"] == "runtime.py"
+
+
+def test_source_registry_rejects_v3_module_file_symlink(tmp_path: Path) -> None:
+    """A Pack-local module symlink cannot register bytes outside the Pack."""
+
+    ecosystem_root = tmp_path / "ecosystem"
+    implementation_bytes = b"def execute(payload):\n    return payload\n"
+    pack_root = _write_v3_pack(
+        ecosystem_root,
+        module_path="runtime.py",
+        implementation_bytes=implementation_bytes,
+    )
+    outside = tmp_path / "outside-runtime.py"
+    outside.write_bytes(implementation_bytes)
+    (pack_root / "runtime.py").symlink_to(outside)
+    fixture_path = _write_empty_source_fixture(tmp_path / "sources.json")
+
+    with pytest.raises(ExecutableSourceRegistryError, match="symlink"):
+        build_registry(ecosystem_root, fixture_path=fixture_path)
+
+
+def test_source_registry_rejects_v3_intermediate_directory_symlink(
+    tmp_path: Path,
+) -> None:
+    """A symlinked module directory cannot redirect lookup outside the Pack."""
+
+    ecosystem_root = tmp_path / "ecosystem"
+    implementation_bytes = b"def execute(payload):\n    return payload\n"
+    pack_root = _write_v3_pack(
+        ecosystem_root,
+        module_path="runtime/execute.py",
+        implementation_bytes=implementation_bytes,
+    )
+    outside_runtime = tmp_path / "outside-runtime"
+    outside_runtime.mkdir()
+    (outside_runtime / "execute.py").write_bytes(implementation_bytes)
+    (pack_root / "runtime").symlink_to(outside_runtime, target_is_directory=True)
+    fixture_path = _write_empty_source_fixture(tmp_path / "sources.json")
+
+    with pytest.raises(ExecutableSourceRegistryError, match="symlink"):
+        build_registry(ecosystem_root, fixture_path=fixture_path)
 
 
 def test_independent_proof_preserves_named_identity_and_transactional_receipt() -> None:
