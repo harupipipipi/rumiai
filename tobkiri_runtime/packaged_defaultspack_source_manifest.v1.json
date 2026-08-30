@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26933,
-      "sha256": "06b94a7a65947a261d814c9974d3d86182d73de631530814bbe15d559ff0e3fe",
+      "sha256": "15351a55f08df39099521f8536ba15a65ef618dc561a58e9d3cc6669b1df83be",
       "executable": false
     },
     {
@@ -108,10 +108,31 @@
       "executable": false
     },
     {
+      "path": "ecosystem/defaultspack/v4/defaults.profile.intent.v1.json",
+      "type": "regular-file",
+      "size": 36285,
+      "sha256": "4b501afa2f4e6c05df1162e798483f87bacc8dcc222a3d188cd53300b853fd10",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
+      "type": "regular-file",
+      "size": 15459,
+      "sha256": "b5184184070ffa9b00ffb7b8f3830ce9e77f46111b38d8a0ee671f37a9ddc3a9",
+      "executable": false
+    },
+    {
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
       "type": "regular-file",
-      "size": 42539,
-      "sha256": "112669f09cbe1387394f26a70fe41efa73bd07adbc236d0dc17fc7023a3ee23b",
+      "size": 42548,
+      "sha256": "ffea3759b0382d053810dd8cc6004a74550f81d2e4a0f0008e04e555cfdfaccc",
+      "executable": false
+    },
+    {
+      "path": "ecosystem/defaultspack/v4/defaults.release.provenance.json",
+      "type": "regular-file",
+      "size": 33349,
+      "sha256": "a4a4c5e3e216525fe020eb9ff4e0985145c6a5f5cad3d60e6c5d4807218807b7",
       "executable": false
     },
     {
@@ -1109,6 +1130,13 @@
       "executable": false
     },
     {
+      "path": "scripts/generate_profile_artifacts.py",
+      "type": "regular-file",
+      "size": 24242,
+      "sha256": "dd6cf66e1403e3de873e824736281cca33ab8bb8ae770e9546d9e2412befc1d0",
+      "executable": false
+    },
+    {
       "path": "scripts/generator_source_manifest.py",
       "type": "regular-file",
       "size": 32614,
@@ -1454,8 +1482,8 @@
     {
       "path": "tobkiri_protocol/schema_hashes.json",
       "type": "regular-file",
-      "size": 3259,
-      "sha256": "f81649ac6ab0752e194db3f20e405fa01e3e34d455eeed528e3c1aab7f84e2d9",
+      "size": 3614,
+      "sha256": "1cc0b8ee10d723e729f7781d2d79cc0b6e34e1571dc5ffef1f44ec3bd9f17c62",
       "executable": false
     },
     {
@@ -1571,6 +1599,20 @@
       "executable": false
     },
     {
+      "path": "tobkiri_protocol/schemas/profile_artifact_lock_v1.schema.json",
+      "type": "regular-file",
+      "size": 2791,
+      "sha256": "f8035fb3cbc6d10edd66a63935b1f6f1faa1c8d301464ebb57c16d1869647f00",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_intent_v1.schema.json",
+      "type": "regular-file",
+      "size": 4795,
+      "sha256": "0d59900c2bc755fa004887d0a42e5440be66c0367b346ed9f95b7ce1ee17e646",
+      "executable": false
+    },
+    {
       "path": "tobkiri_protocol/schemas/profile_lock_v4.schema.json",
       "type": "regular-file",
       "size": 3156,
@@ -1582,6 +1624,13 @@
       "type": "regular-file",
       "size": 6450,
       "sha256": "571fe5f18b269159c3336b0b8eb5daa9e16d8b2440bbbe495551a5b9c4cc47b9",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_release_provenance_v1.schema.json",
+      "type": "regular-file",
+      "size": 2545,
+      "sha256": "5f930a08eefc229321a7d0a28c28bf38a306c474ac22e370dd6545ba7766d8ec",
       "executable": false
     },
     {
@@ -1671,8 +1720,8 @@
     {
       "path": "tobkiri_protocol/validation.py",
       "type": "regular-file",
-      "size": 20127,
-      "sha256": "d9359b13b939298d91114d33ccc06805f9029341f03b3316cdf12e1d2288adf7",
+      "size": 20330,
+      "sha256": "b92176c83599d09af7b4d6c0ca5e9271144e77141792d21d106c7ebaa04d919f",
       "executable": false
     }
   ]
