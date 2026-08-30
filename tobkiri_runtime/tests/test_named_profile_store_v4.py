@@ -778,6 +778,104 @@ def test_legacy_workspace_failure_rolls_back_registry(tmp_path: Path) -> None:
     assert not store.exists()
 
 
+@pytest.mark.parametrize(
+    "legacy_id",
+    ("../escape", "../../escape", "/absolute/escape", "nested/profile", r"..\escape"),
+)
+def test_legacy_workspace_path_lookup_rejects_unsafe_ids_without_commit(
+    tmp_path: Path,
+    legacy_id: str,
+) -> None:
+    """A legacy ID must never control traversal outside the profiles root."""
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    legacy_root = tmp_path / "legacy"
+    (legacy_root / "profiles").mkdir(parents=True)
+    outside = tmp_path / "escape"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("must-not-copy", encoding="utf-8")
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="unsafe"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": legacy_id, "name": "Attacker"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert not store.exists()
+    assert store.list_profiles() == ()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+    assert secret.read_text(encoding="utf-8") == "must-not-copy"
+
+
+def test_legacy_workspace_profiles_root_symlink_fails_closed_without_commit(
+    tmp_path: Path,
+) -> None:
+    """An intermediate profiles-root symlink must not be resolved for import."""
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    legacy_root = tmp_path / "legacy"
+    legacy_root.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "profile-a").mkdir(parents=True)
+    (outside / "profile-a" / "secret.txt").write_text("must-not-copy", encoding="utf-8")
+    (legacy_root / "profiles").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="profiles root"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert not store.exists()
+    assert store.list_profiles() == ()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+    assert (outside / "profile-a" / "secret.txt").read_text() == "must-not-copy"
+
+
+def test_legacy_workspace_copy_rejects_path_replacement_without_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source path replaced during copy must fail closed before publication."""
+
+    from core_runtime import profile_definition_store_v4 as store_module
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    legacy_root = tmp_path / "legacy"
+    workspace = legacy_root / "profiles" / "profile-a"
+    workspace.mkdir(parents=True)
+    source_file = workspace / "state.db"
+    source_file.write_text("original", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("must-not-copy", encoding="utf-8")
+
+    original_open = store_module.os.open
+    replaced = False
+
+    def racing_open(path, flags, *args, **kwargs):
+        nonlocal replaced
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if path == "state.db" and kwargs.get("dir_fd") is not None and not replaced:
+            replaced = True
+            source_file.unlink()
+            source_file.symlink_to(outside / "secret.txt")
+        return descriptor
+
+    monkeypatch.setattr(store_module.os, "open", racing_open)
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="changed"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert replaced
+    assert not store.exists()
+    assert store.list_profiles() == ()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+
+
 def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

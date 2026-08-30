@@ -11,8 +11,10 @@ for all other Profiles.
 from __future__ import annotations
 
 import copy
+import os
 import re
 import shutil
+import stat
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -820,6 +822,32 @@ class ProfileDefinitionStore:
 
         if not copy_workspaces or source_root is None:
             return [], None
+        source_root = Path(source_root).expanduser().absolute()
+        if source_root.is_symlink():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace root must not be symlinked"
+            )
+        profiles_root = source_root / "profiles"
+        if profiles_root.is_symlink():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace profiles root must not be symlinked"
+            )
+        if not profiles_root.exists():
+            return [], None
+        if not profiles_root.is_dir():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace profiles root is not a directory"
+            )
+        try:
+            resolved_profiles_root = profiles_root.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace profiles root is unavailable"
+            ) from error
+        if not resolved_profiles_root.is_dir():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace profiles root is not a directory"
+            )
         staging_root = self.user_data_root / (
             ".profile-migration-staging-" + source_digest.removeprefix("sha256:")[:24]
         )
@@ -831,7 +859,8 @@ class ProfileDefinitionStore:
         staged_workspaces: list[tuple[Path, Path, str]] = []
         try:
             for legacy_id, candidate_id, _document, _created, _updated in prepared:
-                old = source_root / "profiles" / legacy_id
+                safe_legacy_id = _safe_legacy_workspace_id(legacy_id)
+                old = profiles_root / safe_legacy_id
                 destination = self._workspace_destination(candidate_id)
                 if old.is_symlink() or destination.is_symlink():
                     raise ProfileDefinitionStoreIntegrityError(
@@ -839,12 +868,24 @@ class ProfileDefinitionStore:
                     )
                 if not old.exists():
                     continue
+                try:
+                    resolved_old = old.resolve(strict=True)
+                    resolved_old.relative_to(resolved_profiles_root)
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace escapes the profiles root"
+                    ) from error
+                old_metadata = old.stat(follow_symlinks=False)
+                if not stat.S_ISDIR(old_metadata.st_mode):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace is not a directory"
+                    )
                 if destination.exists():
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace destination already exists"
                     )
                 staged = staging_root / candidate_id
-                _copy_tree_without_symlinks(old, staged)
+                _copy_tree_without_symlinks(resolved_old, staged)
                 if not staged.is_dir() or staged.is_symlink():
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace staging copy is invalid"
@@ -1543,31 +1584,281 @@ def _guess_workspace_root(source_path: Path | None) -> Path | None:
     return source_path.parent.parent
 
 
-def _copy_tree_without_symlinks(source: Path, destination: Path) -> None:
-    """Copy a legacy workspace without following any symlink."""
+def _safe_legacy_workspace_id(value: str) -> str:
+    """Accept only one legacy ID component for workspace path lookup."""
 
-    for current, directories, files in __import__("os").walk(source, followlinks=False):
-        current_path = Path(current)
-        if current_path.is_symlink():
+    if (
+        not value
+        or value in {".", ".."}
+        or "\x00" in value
+        or "/" in value
+        or "\\" in value
+        or Path(value).is_absolute()
+    ):
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy Profile ID is unsafe for workspace lookup"
+        )
+    return value
+
+
+def _open_directory_without_symlinks(path: Path) -> int:
+    """Open one directory without following its final symlink component."""
+
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace directory could not be opened safely"
+        ) from error
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace directory is not a directory"
+            )
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _same_file_identity(
+    first: os.stat_result,
+    second: os.stat_result,
+) -> bool:
+    """Compare the metadata that matters for a pinned source file."""
+
+    return (
+        first.st_dev,
+        first.st_ino,
+        first.st_mode,
+        first.st_nlink,
+        first.st_size,
+        first.st_mtime_ns,
+        first.st_ctime_ns,
+    ) == (
+        second.st_dev,
+        second.st_ino,
+        second.st_mode,
+        second.st_nlink,
+        second.st_size,
+        second.st_mtime_ns,
+        second.st_ctime_ns,
+    )
+
+
+def _same_directory_identity(
+    first: os.stat_result,
+    second: os.stat_result,
+) -> bool:
+    """Compare the identity and type of a pinned source directory."""
+
+    return (
+        first.st_dev,
+        first.st_ino,
+        first.st_mode,
+    ) == (
+        second.st_dev,
+        second.st_ino,
+        second.st_mode,
+    )
+
+
+def _write_all(descriptor: int, content: bytes) -> None:
+    """Write all bytes to a descriptor without reopening its path."""
+
+    pending = memoryview(content)
+    while pending:
+        written = os.write(descriptor, pending)
+        if written <= 0:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file write made no progress"
+            )
+        pending = pending[written:]
+
+
+def _copy_regular_file_from_directory(
+    source_directory: int,
+    filename: str,
+    destination: Path,
+    expected: os.stat_result,
+) -> None:
+    """Copy one regular file through a no-follow descriptor and recheck it."""
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        source_descriptor = os.open(filename, flags, dir_fd=source_directory)
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace file could not be opened safely"
+        ) from error
+    destination_descriptor: int | None = None
+    try:
+        opened = os.fstat(source_descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or not _same_file_identity(expected, opened)
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during validation"
+            )
+        destination_flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            destination_descriptor = os.open(
+                destination,
+                destination_flags,
+                stat.S_IMODE(opened.st_mode) & 0o777,
+            )
+        except OSError as error:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace destination could not be created safely"
+            ) from error
+        while True:
+            chunk = os.read(source_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            _write_all(destination_descriptor, chunk)
+        final = os.fstat(source_descriptor)
+        if not _same_file_identity(opened, final):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during copy"
+            )
+        copied = os.fstat(destination_descriptor)
+        if not stat.S_ISREG(copied.st_mode) or copied.st_nlink != 1:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace copy is not a regular file"
+            )
+    finally:
+        if destination_descriptor is not None:
+            os.close(destination_descriptor)
+        os.close(source_descriptor)
+
+
+def _copy_directory_from_descriptor(
+    source_descriptor: int,
+    destination: Path,
+) -> None:
+    """Recursively copy a directory while pinning every source descriptor."""
+
+    try:
+        with os.scandir(source_descriptor) as entries:
+            children = list(entries)
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace could not be enumerated safely"
+        ) from error
+    child_flags = (
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
+    for entry in children:
+        try:
+            expected = entry.stat(follow_symlinks=False)
+        except OSError as error:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace entry could not be inspected safely"
+            ) from error
+        if stat.S_ISLNK(expected.st_mode):
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace contains a symlink"
             )
-        relative = current_path.relative_to(source)
-        target = destination / relative
-        target.mkdir(parents=True, exist_ok=True)
-        for directory in directories:
-            if (current_path / directory).is_symlink():
-                raise ProfileDefinitionStoreIntegrityError(
-                    "legacy workspace contains a symlink"
+        target = destination / entry.name
+        if stat.S_ISDIR(expected.st_mode):
+            try:
+                child_descriptor = os.open(
+                    entry.name,
+                    child_flags,
+                    dir_fd=source_descriptor,
                 )
-        for filename in files:
-            source_file = current_path / filename
-            if source_file.is_symlink():
+            except OSError as error:
                 raise ProfileDefinitionStoreIntegrityError(
-                    "legacy workspace contains a symlink"
+                    "legacy workspace directory changed during copy"
+                ) from error
+            try:
+                opened = os.fstat(child_descriptor)
+                if not _same_directory_identity(expected, opened):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace directory changed during validation"
+                    )
+                target.mkdir(
+                    mode=stat.S_IMODE(opened.st_mode) & 0o777,
+                    parents=False,
+                    exist_ok=False,
                 )
-            target_file = target / filename
-            target_file.write_bytes(source_file.read_bytes())
+                _copy_directory_from_descriptor(child_descriptor, target)
+                final = os.fstat(child_descriptor)
+                if not _same_directory_identity(opened, final):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace directory changed during copy"
+                    )
+            except OSError as error:
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace copy could not be published safely"
+                ) from error
+            finally:
+                os.close(child_descriptor)
+        elif stat.S_ISREG(expected.st_mode):
+            _copy_regular_file_from_directory(
+                source_descriptor,
+                entry.name,
+                target,
+                expected,
+            )
+        else:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace contains an unsupported entry"
+            )
+
+
+def _copy_tree_without_symlinks(source: Path, destination: Path) -> None:
+    """Copy a legacy workspace without following symlinks or races."""
+
+    if source.is_symlink() or not source.is_dir():
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace source is not a real directory"
+        )
+    if destination.exists() or destination.is_symlink():
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace staging destination already exists"
+        )
+    destination.parent.mkdir(mode=0o700, parents=False, exist_ok=True)
+    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
+    try:
+        source_metadata = source.stat(follow_symlinks=False)
+    except OSError as error:
+        destination.rmdir()
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace source is unavailable"
+        ) from error
+    try:
+        source_descriptor = _open_directory_without_symlinks(source)
+    except Exception:
+        destination.rmdir()
+        raise
+    try:
+        opened = os.fstat(source_descriptor)
+        if not _same_directory_identity(source_metadata, opened):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace source changed during validation"
+            )
+        _copy_directory_from_descriptor(source_descriptor, destination)
+        final = os.fstat(source_descriptor)
+        if not _same_directory_identity(opened, final):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace source changed during copy"
+            )
+        current = source.stat(follow_symlinks=False)
+        if not _same_file_identity(source_metadata, current):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace source path changed during copy"
+            )
+    finally:
+        os.close(source_descriptor)
 
 
 __all__ = [
