@@ -12,10 +12,11 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Context, Result as AnyResult};
+use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use log::{error, warn};
@@ -35,12 +36,13 @@ const SELECTION_SCHEMA: &str = "io.tobkiri.launcher.profile-selection.v4";
 const RELEASE_SCHEMA: &str = "io.tobkiri.shell.release.v4";
 const RELEASE_FILE: &str = "presentation_release.v4.json";
 const LAUNCHER_PANEL_PORT: u16 = 8765;
-// Both macOS waits stay below the Shell handoff's 60-second validity window.
-// A suspended or unresponsive Shell therefore cannot turn an expired handoff
-// into a successful Launcher response.
+// The complete receipt and rotation sequence stays below the Shell handoff's
+// 60-second validity window. A suspended or unresponsive Shell therefore
+// cannot turn an expired handoff into a successful Launcher response.
 const MACOS_LAUNCH_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
-const MACOS_HANDOFF_ACK_TIMEOUT: Duration = Duration::from_secs(15);
+const SHELL_LAUNCH_OVERALL_TIMEOUT: Duration = Duration::from_secs(45);
 const LAUNCH_POLL_INTERVAL: Duration = Duration::from_millis(25);
+static PRESENTATION_LAUNCH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 const PRESENTATION_CALLER_DENIED: &str =
     "presentation access is unavailable from this Launcher window";
 
@@ -485,6 +487,100 @@ pub(crate) fn launch_selected_presentation_impl(
     app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<PresentationLaunchResponse> {
+    with_presentation_launch_coordination(|| launch_selected_presentation_serialized(app, config))
+}
+
+fn with_presentation_launch_coordination<T>(
+    operation: impl FnOnce() -> AnyResult<T>,
+) -> AnyResult<T> {
+    let launch_lock = PRESENTATION_LAUNCH_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = launch_lock
+        .lock()
+        .map_err(|error| anyhow!("presentation launch lock was poisoned: {error}"))?;
+    operation()
+}
+
+fn launch_selected_presentation_serialized(
+    app: &AppHandle,
+    config: &AppConfig,
+) -> AnyResult<PresentationLaunchResponse> {
+    let deadline = Instant::now() + SHELL_LAUNCH_OVERALL_TIMEOUT;
+    let target = run_shell_rotation_sequence(
+        || resolve_verified_presentation_target(config),
+        VerifiedPresentationTarget::same_security_binding,
+        |target| launch_verified_target_once(app, config, target, deadline),
+    )?;
+
+    Ok(PresentationLaunchResponse {
+        // Preserve the existing command response discriminator. The message
+        // states the narrower admission guarantee introduced by the receipt.
+        status: "launched".to_string(),
+        provider_id: target.shell.provider_id.clone(),
+        artifact_id: target.artifact.artifact_id.clone(),
+        message: format!(
+            "{} admitted the verified Profile binding; bootstrap and page readiness are not asserted.",
+            target.shell.display_name
+        ),
+    })
+}
+
+fn run_shell_rotation_sequence<T, R, S, L>(
+    mut resolve: R,
+    same_security_binding: S,
+    mut launch: L,
+) -> AnyResult<T>
+where
+    R: FnMut() -> AnyResult<T>,
+    S: Fn(&T, &T) -> bool,
+    L: FnMut(&T) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus>,
+{
+    let target = resolve()?;
+    match launch(&target)? {
+        crate::shell_handoff::ShellHandoffReceiptStatus::BindingAdmitted => Ok(target),
+        crate::shell_handoff::ShellHandoffReceiptStatus::RotationRequired => {
+            let revalidated =
+                resolve().context("Shell rotation target could not be revalidated")?;
+            if !same_security_binding(&target, &revalidated) {
+                bail!("active Application, catalog, or Shell target changed during rotation");
+            }
+            match launch(&revalidated)? {
+                crate::shell_handoff::ShellHandoffReceiptStatus::BindingAdmitted => Ok(revalidated),
+                crate::shell_handoff::ShellHandoffReceiptStatus::RotationRequired => {
+                    bail!("replacement Shell requested another rotation")
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct VerifiedPresentationTarget {
+    execution_identity: crate::host_contract::ExecutionProfileIdentity,
+    catalog: PresentationCatalog,
+    catalog_revision: String,
+    selection: PresentationSelection,
+    shell: ShellProviderDescriptor,
+    artifact: PresentationArtifact,
+    artifact_path: PathBuf,
+    entrypoint_digest: String,
+}
+
+impl VerifiedPresentationTarget {
+    fn same_security_binding(&self, other: &Self) -> bool {
+        self.execution_identity.matches(&other.execution_identity)
+            && self.catalog_revision == other.catalog_revision
+            && self.selection == other.selection
+            && self.shell.provider_id == other.shell.provider_id
+            && self.artifact.artifact_id == other.artifact.artifact_id
+            && self.artifact.sha256 == other.artifact.sha256
+            && self.artifact_path == other.artifact_path
+            && self.entrypoint_digest == other.entrypoint_digest
+    }
+}
+
+fn resolve_verified_presentation_target(
+    config: &AppConfig,
+) -> AnyResult<VerifiedPresentationTarget> {
     let authority = crate::defaultspack_authority::resolve(config)
         .context("active Application authority could not be resolved")?;
     let execution_identity = authority.execution_identity()?;
@@ -503,6 +599,7 @@ pub(crate) fn launch_selected_presentation_impl(
         .shell_providers
         .iter()
         .find(|candidate| candidate.provider_id == authority.shell_provider_id)
+        .cloned()
         .context("active Profile Shell Provider is not in the verified catalog")?;
     let variant = shell
         .artifact_variants
@@ -517,7 +614,7 @@ pub(crate) fn launch_selected_presentation_impl(
     {
         bail!("active Profile Shell artifact handle differs from its signed catalog");
     }
-    let artifact = resolve_artifact(config, shell)?;
+    let artifact = resolve_artifact(config, &shell)?;
     if artifact.artifact_id != authority.launch.artifact_id
         || artifact.sha256.as_deref() != Some(authority.launch.artifact_digest.as_str())
     {
@@ -526,19 +623,46 @@ pub(crate) fn launch_selected_presentation_impl(
     validate_production_artifact(&artifact)?;
     let artifact_path = artifact_path(config, &artifact)?;
 
+    Ok(VerifiedPresentationTarget {
+        execution_identity,
+        catalog,
+        catalog_revision,
+        selection,
+        shell,
+        artifact,
+        artifact_path,
+        entrypoint_digest: authority.launch.entrypoint_digest.clone(),
+    })
+}
+
+fn launch_verified_target_once(
+    app: &AppHandle,
+    config: &AppConfig,
+    target: &VerifiedPresentationTarget,
+    deadline: Instant,
+) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus> {
+    if Instant::now() >= deadline {
+        bail!("timed out before verified Shell launch attempt");
+    }
     // Runtime readiness and local authentication are resolved only after the
     // exact verified Shell artifact has passed pre-admission. The authenticated
     // URL never crosses argv or the environment; only an owner-only one-shot
     // handoff path is passed to the presentation process.
     let prepared_runtime =
         crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config, "/")?;
-    if !execution_identity.matches(&prepared_runtime.identity)
-        || prepared_runtime.catalog_revision != catalog_revision
-        || prepared_runtime.base_pack_id != selection.base_pack_id
-        || prepared_runtime.shell.provider_id != shell.provider_id
-        || prepared_runtime.shell.artifact_id != artifact.artifact_id
-        || prepared_runtime.shell.artifact_digest != artifact.sha256.as_deref().unwrap_or_default()
-        || prepared_runtime.shell.entrypoint_digest != authority.launch.entrypoint_digest
+    if Instant::now() >= deadline {
+        bail!("verified Shell launch deadline elapsed during runtime preparation");
+    }
+    if !target
+        .execution_identity
+        .matches(&prepared_runtime.identity)
+        || prepared_runtime.catalog_revision != target.catalog_revision
+        || prepared_runtime.base_pack_id != target.selection.base_pack_id
+        || prepared_runtime.shell.provider_id != target.shell.provider_id
+        || prepared_runtime.shell.artifact_id != target.artifact.artifact_id
+        || prepared_runtime.shell.artifact_digest
+            != target.artifact.sha256.as_deref().unwrap_or_default()
+        || prepared_runtime.shell.entrypoint_digest != target.entrypoint_digest
     {
         bail!("active Application or Shell binding changed during launch");
     }
@@ -548,37 +672,30 @@ pub(crate) fn launch_selected_presentation_impl(
     // the packaged bootstrap Profile.
     write_selection_with_identity(
         config,
-        &catalog,
-        &selection,
+        &target.catalog,
+        &target.selection,
         Some(&prepared_runtime.identity),
     )?;
-    let handoff_path = crate::shell_handoff::create_shell_handoff(
+    let ticket = crate::shell_handoff::create_shell_handoff(
         config,
         crate::shell_handoff::ShellHandoffBinding {
             identity: &prepared_runtime.identity,
-            catalog_revision: &catalog_revision,
-            provider_id: &shell.provider_id,
-            artifact_id: &artifact.artifact_id,
+            catalog_revision: &target.catalog_revision,
+            provider_id: &target.shell.provider_id,
+            artifact_id: &target.artifact.artifact_id,
             artifact_digest: &prepared_runtime.shell.artifact_digest,
             entrypoint_digest: &prepared_runtime.shell.entrypoint_digest,
         },
         &prepared_runtime.url,
     )?;
 
-    if let Err(error) = launch_verified_artifact(&artifact_path, &handoff_path) {
-        crate::shell_handoff::discard_shell_handoff(&handoff_path);
-        return Err(error);
+    match launch_verified_artifact(&target.artifact_path, &ticket, deadline) {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            crate::shell_handoff::discard_shell_handoff(&ticket);
+            Err(error)
+        }
     }
-
-    Ok(PresentationLaunchResponse {
-        status: "launched".to_string(),
-        provider_id: shell.provider_id.clone(),
-        artifact_id: artifact.artifact_id.clone(),
-        message: format!(
-            "{} launched from its verified production artifact.",
-            shell.display_name
-        ),
-    })
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -650,14 +767,9 @@ impl LaunchProcess for Child {
     }
 }
 
-fn wait_for_launch_success<P: LaunchProcess>(process: &mut P) -> AnyResult<()> {
+fn wait_for_launch_success<P: LaunchProcess>(process: &mut P, timeout: Duration) -> AnyResult<()> {
     let started = Instant::now();
-    wait_for_launch_success_with(
-        process,
-        MACOS_LAUNCH_COMMAND_TIMEOUT,
-        || started.elapsed(),
-        thread::sleep,
-    )
+    wait_for_launch_success_with(process, timeout, || started.elapsed(), thread::sleep)
 }
 
 fn wait_for_launch_success_with<P, C, S>(
@@ -695,59 +807,51 @@ where
     }
 }
 
-fn handoff_was_consumed(path: &Path) -> io::Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(_) => Ok(false),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
-        Err(error) => Err(error),
-    }
-}
-
-fn wait_for_handoff_consumed(path: &Path) -> AnyResult<()> {
-    let started = Instant::now();
-    wait_for_handoff_consumed_with(
-        path,
-        MACOS_HANDOFF_ACK_TIMEOUT,
-        handoff_was_consumed,
-        || started.elapsed(),
+fn wait_for_shell_receipt(
+    ticket: &crate::shell_handoff::ShellHandoffTicket,
+    deadline: Instant,
+) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus> {
+    wait_for_shell_receipt_with(
+        ticket,
+        |ticket| crate::shell_handoff::try_consume_shell_handoff_receipt(ticket),
+        || Instant::now() >= deadline,
         thread::sleep,
     )
 }
 
-fn wait_for_handoff_consumed_with<A, C, S>(
-    path: &Path,
-    timeout: Duration,
-    mut acknowledged: A,
-    mut elapsed: C,
+fn wait_for_shell_receipt_with<A, C, S>(
+    ticket: &crate::shell_handoff::ShellHandoffTicket,
+    mut read_receipt: A,
+    mut deadline_reached: C,
     mut sleep: S,
-) -> AnyResult<()>
+) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus>
 where
-    A: FnMut(&Path) -> io::Result<bool>,
-    C: FnMut() -> Duration,
+    A: FnMut(
+        &crate::shell_handoff::ShellHandoffTicket,
+    ) -> AnyResult<Option<crate::shell_handoff::ShellHandoffReceiptStatus>>,
+    C: FnMut() -> bool,
     S: FnMut(Duration),
 {
     loop {
-        if acknowledged(path).with_context(|| {
-            format!(
-                "failed to inspect verified Shell handoff acknowledgement at {}",
-                path.display()
-            )
-        })? {
-            return Ok(());
+        if let Some(status) =
+            read_receipt(ticket).context("failed to inspect verified Shell handoff receipt")?
+        {
+            return Ok(status);
         }
 
-        if elapsed() >= timeout {
-            bail!(
-                "timed out waiting for verified Shell to consume handoff after {} ms",
-                timeout.as_millis()
-            );
+        if deadline_reached() {
+            bail!("timed out waiting for verified Shell handoff receipt");
         }
         sleep(LAUNCH_POLL_INTERVAL);
     }
 }
 
-fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyResult<()> {
-    let spec = verified_launch_spec(current_platform(), artifact_path, handoff_path)?;
+fn launch_verified_artifact(
+    artifact_path: &Path,
+    ticket: &crate::shell_handoff::ShellHandoffTicket,
+    deadline: Instant,
+) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus> {
+    let spec = verified_launch_spec(current_platform(), artifact_path, &ticket.path)?;
     let mut process = Command::new(&spec.program)
         .args(&spec.args)
         .stdin(Stdio::null())
@@ -761,15 +865,34 @@ fn launch_verified_artifact(artifact_path: &Path, handoff_path: &Path) -> AnyRes
             )
         })?;
 
-    if current_platform() == "macos" {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    finish_spawned_launch(
+        current_platform(),
+        &mut process,
+        remaining.min(MACOS_LAUNCH_COMMAND_TIMEOUT),
+        || wait_for_shell_receipt(ticket, deadline),
+    )
+}
+
+fn finish_spawned_launch<P, R>(
+    platform: &str,
+    process: &mut P,
+    macos_command_timeout: Duration,
+    wait_for_receipt: R,
+) -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus>
+where
+    P: LaunchProcess,
+    R: FnOnce() -> AnyResult<crate::shell_handoff::ShellHandoffReceiptStatus>,
+{
+    if platform == "macos" {
         // `/usr/bin/open` is only a LaunchServices request. Its spawn result
         // does not say whether the request itself succeeded or whether the
         // Shell ever consumed the authenticated handoff.
-        wait_for_launch_success(&mut process)?;
-        wait_for_handoff_consumed(handoff_path)?;
+        wait_for_launch_success(process, macos_command_timeout)?;
     }
-
-    Ok(())
+    // Direct child exit, successful `/usr/bin/open`, and handoff disappearance
+    // are never binding admission. Only a nonce-bound owner-only receipt is.
+    wait_for_receipt()
 }
 
 fn build_state(config: &AppConfig) -> AnyResult<PresentationState> {
@@ -1980,7 +2103,22 @@ fn now_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
     use std::collections::BTreeMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    fn receipt_test_ticket() -> crate::shell_handoff::ShellHandoffTicket {
+        let root = std::env::temp_dir().join("tobkiri-receipt-test");
+        crate::shell_handoff::ShellHandoffTicket {
+            path: root.join(format!("handoff-{}.json", "H".repeat(40))),
+            receipt: crate::shell_handoff::ShellHandoffReceiptIdentity {
+                root,
+                handoff_nonce: "H".repeat(40),
+                receipt_nonce: "R".repeat(40),
+            },
+        }
+    }
 
     fn presentation_catalog_capability() -> serde_json::Value {
         serde_json::from_str(include_str!("../capabilities/presentation-catalog.json")).unwrap()
@@ -2982,17 +3120,101 @@ mod tests {
     }
 
     #[test]
-    fn injected_macos_handoff_without_ack_fails_closed() {
-        let error = wait_for_handoff_consumed_with(
-            Path::new("handoff-test.json"),
-            Duration::from_secs(1),
-            |_| Ok(false),
-            || Duration::from_secs(1),
-            |_| {},
+    fn handoff_disappearance_without_receipt_fails_closed() {
+        let ticket = receipt_test_ticket();
+        let error =
+            wait_for_shell_receipt_with(&ticket, |_| Ok(None), || true, |_| {}).unwrap_err();
+
+        assert!(error.to_string().contains("handoff receipt"));
+    }
+
+    #[test]
+    fn successful_child_or_duplicate_exit_is_not_a_receipt() {
+        let mut process = FakeLaunchProcess {
+            observations: vec![Some(true)],
+            ..Default::default()
+        };
+        let error = finish_spawned_launch("linux", &mut process, Duration::from_secs(1), || {
+            bail!("injected missing receipt")
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("missing receipt"));
+        assert_eq!(process.observations, vec![Some(true)]);
+    }
+
+    #[test]
+    fn rotation_revalidates_and_launches_with_a_fresh_attempt() {
+        let resolves = Cell::new(0);
+        let launches = RefCell::new(Vec::new());
+        let target = run_shell_rotation_sequence(
+            || {
+                resolves.set(resolves.get() + 1);
+                Ok("verified-target".to_string())
+            },
+            |left, right| left == right,
+            |_| {
+                let attempt = launches.borrow().len();
+                launches.borrow_mut().push(attempt);
+                Ok(if attempt == 0 {
+                    crate::shell_handoff::ShellHandoffReceiptStatus::RotationRequired
+                } else {
+                    crate::shell_handoff::ShellHandoffReceiptStatus::BindingAdmitted
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(target, "verified-target");
+        assert_eq!(resolves.get(), 2);
+        assert_eq!(*launches.borrow(), vec![0, 1]);
+    }
+
+    #[test]
+    fn rotation_target_drift_fails_closed_before_relaunch() {
+        let resolves = Cell::new(0);
+        let launches = Cell::new(0);
+        let error = run_shell_rotation_sequence(
+            || {
+                resolves.set(resolves.get() + 1);
+                Ok(resolves.get())
+            },
+            |left, right| left == right,
+            |_| {
+                launches.set(launches.get() + 1);
+                Ok(crate::shell_handoff::ShellHandoffReceiptStatus::RotationRequired)
+            },
         )
         .unwrap_err();
+        assert!(error.to_string().contains("changed during rotation"));
+        assert_eq!(launches.get(), 1);
+    }
 
-        assert!(error.to_string().contains("consume handoff"));
+    #[test]
+    fn presentation_launch_coordination_serializes_concurrent_callers() {
+        const CALLERS: usize = 8;
+        let barrier = Arc::new(Barrier::new(CALLERS));
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let mut threads = Vec::new();
+        for _ in 0..CALLERS {
+            let barrier = Arc::clone(&barrier);
+            let active = Arc::clone(&active);
+            let maximum = Arc::clone(&maximum);
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                with_presentation_launch_coordination(|| {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    maximum.fetch_max(current, Ordering::SeqCst);
+                    std::thread::yield_now();
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                })
+                .unwrap();
+            }));
+        }
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(maximum.load(Ordering::SeqCst), 1);
     }
 
     #[test]
