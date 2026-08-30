@@ -120,10 +120,12 @@ export function Dashboard() {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [registry, setRegistry] = useState<NamedProfileRegistry | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileActionError, setProfileActionError] = useState<string | null>(null);
   const [profileBusy, setProfileBusy] = useState<string | null>(null);
   const [newProfileId, setNewProfileId] = useState('');
   const [newProfileName, setNewProfileName] = useState('');
+  const [newProfileSourceId, setNewProfileSourceId] = useState('');
   const [showAddProfile, setShowAddProfile] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingProfileName, setEditingProfileName] = useState('');
@@ -158,9 +160,10 @@ export function Dashboard() {
   const refreshProfiles = async () => {
     try {
       setRegistry(await fetchNamedProfiles());
-      setProfileError(null);
+      setProfileLoadError(null);
+      setProfileActionError(null);
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : 'Named Profiles could not be loaded.');
+      setProfileLoadError(error instanceof Error ? error.message : 'Named Profiles could not be loaded.');
     }
   };
 
@@ -190,6 +193,16 @@ export function Dashboard() {
     return registry.profiles.find((entry) => isActiveExecutionProfile(registry, entry)) ?? null;
   }, [registry]);
   const browsingProfile = registry?.profiles.find((entry) => entry.profile_id === browsingProfileId) ?? null;
+  const profileError = profileLoadError ?? profileActionError;
+  const profileCatalogVerified = registry !== null && profileLoadError === null;
+  const sourceProfileOptions = useMemo(() => (
+    [...(registry?.profiles ?? [])].sort((left, right) => {
+      const displayNameOrder = namedProfileDisplayName(left).localeCompare(
+        namedProfileDisplayName(right),
+      );
+      return displayNameOrder || left.profile_id.localeCompare(right.profile_id);
+    })
+  ), [registry]);
 
   const commitProfileMutation = async (
     key: string,
@@ -197,14 +210,20 @@ export function Dashboard() {
     successMessage: string,
     throwOnError = false,
   ) => {
+    if (!profileCatalogVerified) {
+      const message = 'Profile catalog verification is required before changing Profiles.';
+      setProfileActionError(message);
+      addToast(message, 'error');
+      return false;
+    }
     setProfileBusy(key);
     try {
       setRegistry(await operation());
-      setProfileError(null);
+      setProfileActionError(null);
       addToast(successMessage, 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Profile mutation was rejected.';
-      setProfileError(message);
+      setProfileActionError(message);
       addToast(message, 'error');
       if (throwOnError) throw error;
       return false;
@@ -216,16 +235,24 @@ export function Dashboard() {
 
   const submitNewProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const profileId = newProfileId.trim();
-    const displayName = newProfileName.trim();
+    const form = event.currentTarget;
+    const profileId = (form.elements.namedItem('profile_id') as HTMLInputElement | null)?.value.trim()
+      ?? newProfileId.trim();
+    const displayName = (form.elements.namedItem('display_name') as HTMLInputElement | null)?.value.trim()
+      ?? newProfileName.trim();
     if (!registry) return;
     if (!profileId || !displayName) {
-      setProfileError('Enter a Profile ID and display name before creating a Profile.');
+      setProfileActionError('Enter a Profile ID and display name before creating a Profile.');
       return;
     }
-    const sourceProfileId = registry.active_profile_id ?? registry.profiles[0]?.profile_id;
+    const sourceProfileId = (form.elements.namedItem('source_profile_id') as HTMLSelectElement | null)?.value.trim()
+      ?? newProfileSourceId.trim();
     if (!sourceProfileId) {
-      setProfileError('Create a source Profile before adding another Profile.');
+      setProfileActionError('Choose a source Profile before adding another Profile.');
+      return;
+    }
+    if (!registry.profiles.some((entry) => entry.profile_id === sourceProfileId)) {
+      setProfileActionError('Choose an existing Profile as the source for this Profile.');
       return;
     }
     const created = await commitProfileMutation(
@@ -241,6 +268,7 @@ export function Dashboard() {
     if (!created) return;
     setNewProfileId('');
     setNewProfileName('');
+    setNewProfileSourceId('');
     setShowAddProfile(false);
   };
 
@@ -250,7 +278,8 @@ export function Dashboard() {
   ) => {
     event.preventDefault();
     if (!registry) return;
-    const displayName = editingProfileName.trim();
+    const displayName = (event.currentTarget.elements.namedItem('display_name') as HTMLInputElement | null)?.value.trim()
+      ?? editingProfileName.trim();
     if (!displayName) return;
     const updated = await commitProfileMutation(
       `edit:${entry.profile_id}`,
@@ -354,9 +383,12 @@ export function Dashboard() {
           </div>
           <div className="flex items-center gap-3">
             <Button
+              aria-label="Add Profile"
               aria-controls="add-profile-form"
               aria-expanded={showAddProfile}
+              disabled={!profileCatalogVerified}
               onClick={() => setShowAddProfile((shown) => !shown)}
+              title={profileCatalogVerified ? 'Add a new named Profile' : 'Profile catalog verification is unavailable'}
               type="button"
             >
               <Plus aria-hidden="true" className="h-4 w-4" /> Add Profile
@@ -415,16 +447,13 @@ export function Dashboard() {
           </div>
         )}
 
-        <section aria-label="Profile execution status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-border bg-bg-card px-4 py-3">
+        <div aria-label="Profile execution status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
           <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">Execution</span>
           {activeProfile ? (
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <Badge variant="success">Active execution</Badge>
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />
               <span className="truncate text-sm font-medium text-text-main">{namedProfileDisplayName(activeProfile)}</span>
               <span className="font-mono text-[11px] text-text-muted">{activeProfile.profile_id}</span>
-              <span className="font-mono text-[11px] text-text-muted" title={registry?.active_profile_revision ?? undefined}>
-                execution {registry?.active_profile_revision}
-              </span>
             </div>
           ) : (
             <Badge variant="warning">No active execution Profile</Badge>
@@ -437,7 +466,7 @@ export function Dashboard() {
               </span>
             </div>
           )}
-        </section>
+        </div>
 
         <section aria-labelledby="profiles-title">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -477,7 +506,7 @@ export function Dashboard() {
           {showAddProfile && (
             <form
               aria-describedby="add-profile-help"
-              className="mt-4 grid gap-3 rounded-lg border border-border bg-bg-card p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+              className="mt-4 grid gap-3 rounded-lg border border-border bg-bg-card p-4 sm:grid-cols-[1fr_1fr_1fr_auto] sm:items-end"
               id="add-profile-form"
               onSubmit={submitNewProfile}
             >
@@ -487,6 +516,7 @@ export function Dashboard() {
                   aria-label="New Profile ID"
                   className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm font-normal text-text-main outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
                   maxLength={80}
+                  name="profile_id"
                   onChange={(event) => setNewProfileId(event.target.value)}
                   pattern="[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*"
                   placeholder="profile-id"
@@ -500,15 +530,38 @@ export function Dashboard() {
                   aria-label="New Profile name"
                   className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm font-normal text-text-main outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
                   maxLength={120}
+                  name="display_name"
                   onChange={(event) => setNewProfileName(event.target.value)}
                   placeholder="Display name"
                   required
                   value={newProfileName}
                 />
               </label>
+              <label className="space-y-1.5 text-sm font-medium text-text-main">
+                <span>Source Profile <span aria-hidden="true" className="text-destructive">*</span></span>
+                <select
+                  aria-label="Source Profile"
+                  className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm font-normal text-text-main outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                  onChange={(event) => setNewProfileSourceId(event.target.value)}
+                  name="source_profile_id"
+                  required
+                  value={newProfileSourceId}
+                >
+                  <option disabled value="">Choose a source Profile</option>
+                  {sourceProfileOptions.map((entry) => (
+                    <option key={entry.profile_id} value={entry.profile_id}>
+                      {namedProfileDisplayName(entry)} ({entry.profile_id})
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="flex flex-col gap-2">
-                <span className="sr-only" id="add-profile-help">Create a named Profile from the active execution Profile.</span>
-                <Button disabled={!registry || profileBusy === 'create'} size="sm" type="submit">
+                <span className="sr-only" id="add-profile-help">Create a named Profile by explicitly choosing an existing source Profile.</span>
+                <Button
+                  disabled={!profileCatalogVerified || !newProfileSourceId || profileBusy === 'create'}
+                  size="sm"
+                  type="submit"
+                >
                   <Plus aria-hidden="true" className="h-3.5 w-3.5" /> Create
                 </Button>
               </div>
@@ -519,7 +572,20 @@ export function Dashboard() {
             <div aria-live="assertive" className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
               <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
               <span className="flex-1">{profileError}</span>
-              <Button onClick={() => void refreshProfiles()} size="sm" type="button" variant="ghost">Retry</Button>
+              <Button
+                onClick={() => {
+                  if (profileLoadError) {
+                    void refreshProfiles();
+                  } else {
+                    setProfileActionError(null);
+                  }
+                }}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                {profileLoadError ? 'Retry' : 'Dismiss'}
+              </Button>
             </div>
           )}
 
@@ -527,8 +593,25 @@ export function Dashboard() {
             {!registry && !profileError && (
               <div className="flex items-center justify-center py-8"><TobkiriLoadingMark /></div>
             )}
-            {registry && visibleProfiles.length === 0 && (
+            {registry && visibleProfiles.length === 0 && profileQuery && (
               <p className="py-8 text-center text-sm text-text-muted">No Profiles match this search.</p>
+            )}
+            {registry && visibleProfiles.length === 0 && !profileQuery && (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-bg-card px-6 py-10 text-center">
+                <h3 className="text-sm font-semibold text-text-main">No Profiles yet</h3>
+                <p className="mt-1 max-w-sm text-xs text-text-muted">
+                  Add a named Profile to begin browsing your own Profile catalog.
+                </p>
+                <Button
+                  aria-label="Create Profile"
+                  className="mt-4"
+                  disabled={!profileCatalogVerified}
+                  onClick={() => setShowAddProfile(true)}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" className="h-4 w-4" /> Add Profile
+                </Button>
+              </div>
             )}
             {registry && visibleProfiles.length > 0 && (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="profile-grid">
@@ -550,6 +633,7 @@ export function Dashboard() {
                       isBrowsing={browsingProfileId === entry.profile_id}
                       isBusy={busy}
                       key={entry.profile_id}
+                      mutationsAvailable={profileCatalogVerified}
                       onCancelEdit={() => {
                         setEditingProfileId(null);
                         setEditingProfileName('');

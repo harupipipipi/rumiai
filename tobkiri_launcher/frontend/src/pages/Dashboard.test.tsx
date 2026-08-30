@@ -173,6 +173,16 @@ async function settle(): Promise<void> {
   });
 }
 
+function changeControlValue(
+  dom: JSDOM,
+  control: HTMLInputElement | HTMLSelectElement,
+  value: string,
+): void {
+  control.value = value;
+  control.dispatchEvent(new dom.window.Event('input', {bubbles: true}));
+  control.dispatchEvent(new dom.window.Event('change', {bubbles: true}));
+}
+
 test('copyTextToClipboard copies the complete runtime error message', async () => {
   let copied = '';
   const success = await copyTextToClipboard('Kernel failed to start', {
@@ -246,6 +256,7 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         assert.ok(addProfile, `${scenario.name}: Add Profile should be visible`);
         await act(async () => { addProfile.click(); });
         assert.ok(container.querySelector('input[aria-label="New Profile ID"]'));
+        assert.ok(container.querySelector('select[aria-label="Source Profile"]'));
 
         assert.ok(container.querySelector('[data-testid="profile-grid"]'));
         assert.equal(container.querySelectorAll('[data-profile-card]').length, 2);
@@ -466,6 +477,201 @@ test('Home presents the deletion confirmation without deleting a Profile', async
       assert.equal(container.querySelector('[data-profile-card="research"]') !== null, true);
     } finally {
       await act(async () => useAppStore.getState().closeDialog());
+      await act(async () => root.unmount());
+      dom.window.close();
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    useAppStore.setState(previousState, true);
+  }
+});
+
+test('Home requires an explicit source Profile and does not use registry order for Add', async () => {
+  const previousState = useAppStore.getState();
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  const previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+  const requests: Array<{path: string; method: string; body: Record<string, unknown> | null}> = [];
+  const reordered = profileRegistry();
+  reordered.profiles = [...reordered.profiles].reverse();
+
+  try {
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input), 'http://localhost').pathname;
+      const method = init?.method ?? 'GET';
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
+      requests.push({path, method, body});
+      if (path === '/api/v4/profiles') return jsonResponse(reordered);
+      assert.equal(path, '/api/v4/profiles/create');
+      assert.equal(method, 'POST');
+      assert.equal(body?.source_profile_id, 'research');
+      return jsonResponse({
+        ...reordered,
+        generation: 2,
+        profiles: [...reordered.profiles, profileRecord('new-profile', 'New Profile', digest('9'))],
+      });
+    }) as typeof fetch;
+    useAppStore.setState({
+      isSetupDone: false,
+      runtimeReady: false,
+      runtimeStatus: 'starting',
+      runtimeError: null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: null,
+    });
+    const {dom, container, root} = createDashboardDom();
+    try {
+      await act(async () => {
+        root.render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      });
+      await settle();
+      await act(async () => {
+        buttonByLabel(container, 'Add Profile').click();
+      });
+
+      const source = container.querySelector<HTMLSelectElement>('select[aria-label="Source Profile"]');
+      assert.ok(source);
+      assert.equal(source.value, '');
+      assert.deepEqual(
+        [...source.options].map((option) => option.value),
+        ['', 'defaults', 'research'],
+      );
+      const createButton = [...container.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.includes('Create') && button.form?.id === 'add-profile-form');
+      assert.ok(createButton);
+
+      const profileIdInput = container.querySelector<HTMLInputElement>('input[aria-label="New Profile ID"]');
+      const profileNameInput = container.querySelector<HTMLInputElement>('input[aria-label="New Profile name"]');
+      assert.ok(profileIdInput);
+      assert.ok(profileNameInput);
+      assert.equal(createButton.disabled, true, 'source selection is required before create');
+      await act(async () => {
+        changeControlValue(dom, source, 'research');
+      });
+      assert.equal(source.value, 'research');
+      assert.equal(createButton.disabled, false);
+      await act(async () => {
+        changeControlValue(dom, profileIdInput, 'new-profile');
+      });
+      await act(async () => {
+        changeControlValue(dom, profileNameInput, 'New Profile');
+      });
+      assert.equal(profileIdInput.value, 'new-profile');
+      assert.equal(profileNameInput.value, 'New Profile');
+
+      await act(async () => {
+        createButton.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await settle();
+
+      assert.ok(requests.some((request) => request.path === '/api/v4/profiles/create'));
+      assert.ok(
+        container.querySelector('[data-profile-card="new-profile"]'),
+        `text=${container.textContent} requests=${JSON.stringify(requests)}`,
+      );
+      assert.equal(container.querySelector('#add-profile-form'), null);
+    } finally {
+      await act(async () => root.unmount());
+      dom.window.close();
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    useAppStore.setState(previousState, true);
+  }
+});
+
+test('Home keeps a verified catalog writable after a rejected Profile mutation', async () => {
+  const previousState = useAppStore.getState();
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  const previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+  let updateRequests = 0;
+  let updatePayload: Record<string, unknown> | null = null;
+
+  try {
+    globalThis.fetch = (async (input, init) => {
+      const path = new URL(String(input), 'http://localhost').pathname;
+      if (path === '/api/v4/profiles') return jsonResponse(profileRegistry());
+      assert.equal(path, '/api/v4/profiles/update');
+      assert.equal(init?.method, 'POST');
+      updateRequests += 1;
+      updatePayload = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : null;
+      return new Response(JSON.stringify({success: false, error: 'revision conflict'}), {
+        headers: {'Content-Type': 'application/json'},
+        status: 409,
+      });
+    }) as typeof fetch;
+    useAppStore.setState({
+      isSetupDone: true,
+      runtimeReady: false,
+      runtimeStatus: 'starting',
+      runtimeError: null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: null,
+    });
+    const {dom, container, root} = createDashboardDom();
+    try {
+      await act(async () => {
+        root.render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      });
+      await settle();
+      await act(async () => {
+        buttonByLabel(container, 'Open actions for Research Profile').click();
+      });
+      await act(async () => {
+        menuItemByText('Edit').click();
+      });
+
+      const nameInput = container.querySelector<HTMLInputElement>('input[aria-label="Display name for research"]');
+      assert.ok(nameInput);
+      await act(async () => {
+        changeControlValue(dom, nameInput, 'Research Renamed');
+      });
+      await act(async () => {
+        nameInput.closest('form')?.dispatchEvent(
+          new dom.window.Event('submit', {bubbles: true, cancelable: true}),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await settle();
+
+      assert.equal(updateRequests, 1);
+      assert.equal(updatePayload?.display_name, 'Research Renamed');
+      assert.match(container.textContent ?? '', /revision conflict/);
+      assert.equal(buttonByLabel(container, 'Add Profile').disabled, false);
+      assert.equal(
+        linkByLabel(container, 'Browse and review Research Profile').getAttribute('href'),
+        '/profile?profile_id=research',
+      );
+      await act(async () => {
+        buttonByLabel(container, 'Open actions for Research Profile').click();
+      });
+      assert.equal((menuItemByText('Duplicate') as HTMLButtonElement).disabled, false);
+      assert.equal((menuItemByText('Delete') as HTMLButtonElement).disabled, false);
+    } finally {
       await act(async () => root.unmount());
       dom.window.close();
     }

@@ -1,5 +1,15 @@
 import type {FormEvent} from 'react';
-import {Copy, Edit2, MoreHorizontal, Package, Rocket, Star, Trash2, AlertCircle, Box} from 'lucide-react';
+import {
+  AlertCircle,
+  Box,
+  Copy,
+  Edit2,
+  MoreHorizontal,
+  Package,
+  Rocket,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import {Link} from 'react-router';
 
 import {Badge} from '@/src/components/ui/Badge';
@@ -19,6 +29,7 @@ export interface ProfileCardProps {
   isActive: boolean;
   isBrowsing: boolean;
   isBusy: boolean;
+  mutationsAvailable: boolean;
   profile: NamedProfileRecord;
   profileView: NamedProfileView;
   runtimeVerified: boolean;
@@ -46,6 +57,7 @@ export function ProfileCard({
   isActive,
   isBrowsing,
   isBusy,
+  mutationsAvailable,
   profile,
   profileView,
   runtimeVerified,
@@ -70,6 +82,7 @@ export function ProfileCard({
           ? 'Launch is available in Tobkiri Launcher.'
           : null;
   const launchDisabled = Boolean(launchBlockedReason) || isBusy;
+  const mutationDisabled = !mutationsAvailable || isBusy;
 
   return (
     <Card
@@ -83,26 +96,29 @@ export function ProfileCard({
       data-profile-status={profileView.status}
     >
       <div className="flex flex-1 flex-col p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <h3 className="truncate text-sm font-semibold text-text-main" id={`profile-${profile.profile_id}-title`}>
-                {displayName}
-              </h3>
-              {isActive && (
-                <span
-                  aria-label="Active execution Profile"
-                  className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
-                  role="img"
-                />
-              )}
-            </div>
-            <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-text-muted">
-              <Box aria-hidden="true" className="h-3 w-3 shrink-0" />
-              <span title={profileView.basePackId ?? undefined}>{profileView.basePackId ?? 'Base Pack unavailable'}</span>
-            </p>
+        <div className="relative flex min-h-[112px] flex-col items-center text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
+            <Box aria-hidden="true" className="h-6 w-6" />
           </div>
-
+          <div className="mt-3 flex max-w-full items-center justify-center gap-2">
+            <h3 className="truncate text-base font-semibold text-text-main" id={`profile-${profile.profile_id}-title`}>
+              {displayName}
+            </h3>
+            {isActive && (
+              <span
+                aria-label="Active execution Profile"
+                className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
+                role="img"
+              />
+            )}
+          </div>
+          <p className="mt-1 flex max-w-full items-center justify-center gap-1.5 truncate text-xs text-text-muted">
+            <Package aria-hidden="true" className="h-3 w-3 shrink-0" />
+            <span title={profileView.basePackId ?? undefined}>
+              {profileView.basePackId ?? 'Base Pack unavailable'}
+            </span>
+          </p>
+          <div className="absolute right-0 top-0">
           <Popover>
             <PopoverTrigger
               aria-label={`Open actions for ${displayName}`}
@@ -114,7 +130,14 @@ export function ProfileCard({
             </PopoverTrigger>
             <PopoverContent align="right" className="w-48">
               <div className="flex flex-col gap-0.5 py-1">
-                <button className={actionButtonClass()} onClick={() => onEdit(profile)} role="menuitem" type="button">
+                <button
+                  className={actionButtonClass()}
+                  disabled={mutationDisabled}
+                  onClick={() => onEdit(profile)}
+                  role="menuitem"
+                  title={mutationsAvailable ? `Edit ${displayName}` : 'Profile catalog verification is unavailable'}
+                  type="button"
+                >
                   <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
                 </button>
                 {isActive ? (
@@ -148,7 +171,7 @@ export function ProfileCard({
                 )}
                 <button
                   className={actionButtonClass()}
-                  disabled={isBusy}
+                  disabled={mutationDisabled}
                   onClick={() => onDuplicate(profile)}
                   role="menuitem"
                   type="button"
@@ -159,7 +182,7 @@ export function ProfileCard({
                 <button
                   aria-label={`Delete ${displayName}`}
                   className={cn(actionButtonClass(), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20')}
-                  disabled={isActive || isBusy}
+                  disabled={isActive || mutationDisabled}
                   onClick={() => onDelete(profile)}
                   role="menuitem"
                   title={isActive ? 'Switch away before deleting this Profile' : 'Delete Profile'}
@@ -170,9 +193,10 @@ export function ProfileCard({
               </div>
             </PopoverContent>
           </Popover>
+          </div>
         </div>
 
-        <div className="mt-4 flex min-h-[54px] flex-wrap content-start gap-1.5">
+        <div className="mt-4 flex min-h-[54px] flex-wrap content-start justify-center gap-1.5">
           {isActive && <Badge variant="success" className="text-[10px]">Active execution</Badge>}
           {isBrowsing && <Badge variant="default" className="text-[10px]">Selected browsing</Badge>}
           {profileView.status === 'ready' ? (
@@ -202,6 +226,7 @@ export function ProfileCard({
               className="h-9 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-main outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
               id={`edit-profile-${profile.profile_id}`}
               maxLength={120}
+              name="display_name"
               onChange={(event) => onEditingNameChange(event.target.value)}
               required
               value={editingName}
@@ -213,7 +238,7 @@ export function ProfileCard({
           </form>
         )}
 
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <Link
               aria-label={`Browse and review ${displayName}`}
@@ -230,18 +255,31 @@ export function ProfileCard({
               <Package aria-hidden="true" className="h-3.5 w-3.5" /> Pack closure
             </Link>
           </div>
-          <Button
-            aria-label={`Launch ${displayName}`}
-            disabled={launchDisabled}
-            loading={isBusy && actionType === 'launch'}
-            onClick={() => onLaunch(profile)}
-            size="sm"
-            title={launchBlockedReason ?? `Launch ${displayName}`}
-            type="button"
-          >
-            <Rocket aria-hidden="true" className="h-3.5 w-3.5" />
-            {isBusy && actionType === 'launch' ? 'Launching…' : 'Launch'}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              aria-label={`Edit ${displayName}`}
+              disabled={mutationDisabled}
+              onClick={() => onEdit(profile)}
+              size="sm"
+              title={mutationsAvailable ? `Edit ${displayName}` : 'Profile catalog verification is unavailable'}
+              type="button"
+              variant="ghost"
+            >
+              <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
+            </Button>
+            <Button
+              aria-label={`Launch ${displayName}`}
+              disabled={launchDisabled}
+              loading={isBusy && actionType === 'launch'}
+              onClick={() => onLaunch(profile)}
+              size="sm"
+              title={launchBlockedReason ?? `Launch ${displayName}`}
+              type="button"
+            >
+              <Rocket aria-hidden="true" className="h-3.5 w-3.5" />
+              {isBusy && actionType === 'launch' ? 'Launching…' : 'Launch'}
+            </Button>
+          </div>
         </div>
       </div>
     </Card>
