@@ -970,6 +970,19 @@ def resolve_default_profile(
         if manifest["pack"]["id"] not in {base_id, shell_pack_id}
     ]
     profile["requested_edges"] = resolved_edges
+    from core_runtime.profile_content_projection import (
+        resolve_profile_projection,
+        selected_projection_roots,
+    )
+
+    profile["content_projections"] = sorted(
+        [
+            resolve_profile_projection(item)
+            for item in source.get("content_projections") or []
+        ],
+        key=lambda item: item["projection_id"],
+    )
+    selected_projection_roots(profile["content_projections"])
     profile["authority_references"] = references
     profile["profile_authority_snapshot_digest"] = snapshot_digest
     catalog_revision = canonical_digest(
@@ -1019,7 +1032,12 @@ def resolve_default_profile(
             ],
         }
     )
-    closure_digest = canonical_digest(effective_set)
+    closure_digest = canonical_digest(
+        {
+            "effective_set": effective_set,
+            "content_projections": profile["content_projections"],
+        }
+    )
     provenance_digest = canonical_digest(profile["provenance"])
     application = {
         "pack_id": application_ids[0],
@@ -1052,6 +1070,7 @@ def resolve_default_profile(
         },
         "application": application,
         "effective_set": effective_set,
+        "content_projections": profile["content_projections"],
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
         "closure_digest": closure_digest,
@@ -1083,6 +1102,7 @@ def resolve_default_profile(
         },
         "application": application,
         "effective_set": effective_set,
+        "content_projections": profile["content_projections"],
         "variant_pins": sorted(
             variant_pins.values(), key=lambda item: (item["pack_id"], item["variant_id"])
         ),
@@ -1968,7 +1988,15 @@ class ActivationStore:
             raise
         if (
             legacy_effective != successor.plan["effective_set"]
-            or canonical_digest(legacy_effective) != successor.plan["closure_digest"]
+            or canonical_digest(
+                {
+                    "effective_set": legacy_effective,
+                    "content_projections": successor.plan[
+                        "content_projections"
+                    ],
+                }
+            )
+            != successor.plan["closure_digest"]
             or lock["base"] != successor.lock["base"]
             or {key: plan["base"][key] for key in ("pack_id", "artifact_digest")}
             != {key: successor.plan["base"][key] for key in ("pack_id", "artifact_digest")}
@@ -2229,6 +2257,7 @@ class ActivationStore:
             "bundle_digest",
             "application",
             "effective_set",
+            "content_projections",
             "requested_edges_digest",
             "constraints_digest",
             "closure_digest",
@@ -2247,8 +2276,16 @@ class ActivationStore:
             raise ProfileResolutionDenied("Profile requested edge set is stale")
         if plan["provenance_digest"] != canonical_digest(profile["provenance"]):
             raise ProfileResolutionDenied("Profile provenance binding is stale")
-        if plan["closure_digest"] != canonical_digest(plan["effective_set"]):
+        if plan["closure_digest"] != canonical_digest(
+            {
+                "effective_set": plan["effective_set"],
+                "content_projections": plan["content_projections"],
+            }
+        ):
             raise ProfileResolutionDenied("Profile closure digest is stale")
+        from core_runtime.profile_content_projection import selected_projection_roots
+
+        selected_projection_roots(plan["content_projections"])
         effective_ids = [item["identity"] for item in plan["effective_set"]]
         if len(effective_ids) != len(set(effective_ids)):
             raise ProfileResolutionDenied("Profile closure contains duplicate artifacts")

@@ -2402,7 +2402,16 @@ class FrontendRegistry:
                 extension = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(extension, dict):
                     extension["_source"] = str(path)
-                    extension["source_pack_id"] = self._source_pack_id(path)
+                    projection_id = self._source_projection_id(path)
+                    if projection_id:
+                        extension["source_projection_id"] = projection_id
+                        extension["source_authority_id"] = projection_id
+                        extension["source_authority_kind"] = "ui_projection"
+                    else:
+                        pack_id = self._source_pack_id(path)
+                        extension["source_pack_id"] = pack_id
+                        extension["source_authority_id"] = pack_id
+                        extension["source_authority_kind"] = "pack"
                     extensions.append(extension)
                 else:
                     self._add_diagnostic("warning", "frontend_extension_not_object", f"{path} must contain a JSON object.", str(path))
@@ -2435,7 +2444,30 @@ class FrontendRegistry:
                 if not pack_root.is_dir() or self._v4_pack_id(pack_root) != pack_id:
                     continue
                 dirs.append(pack_root / "frontend_extensions")
+        from core_runtime.profile_content_projection import selected_projection_roots
+        from core_runtime.resolved_profile_scope import effective_profile_projections
+
+        for _projection_id, root in selected_projection_roots(
+            effective_profile_projections(), kind="ui_projection"
+        ):
+            dirs.append(root / "frontend_extensions")
         return dirs
+
+    @staticmethod
+    def _source_projection_id(path: Path) -> str:
+        from core_runtime.profile_content_projection import selected_projection_roots
+        from core_runtime.resolved_profile_scope import effective_profile_projections
+
+        resolved_path = path.resolve()
+        for projection_id, root in selected_projection_roots(
+            effective_profile_projections(), kind="ui_projection"
+        ):
+            try:
+                resolved_path.relative_to(root.resolve())
+                return projection_id
+            except ValueError:
+                continue
+        return ""
 
     def _ecosystem_root(self) -> Path:
         if self._v4_pack_id(self._pack_root) and self._pack_root.parent.name == "ecosystem":

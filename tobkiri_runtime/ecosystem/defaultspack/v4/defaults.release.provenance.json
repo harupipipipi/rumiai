@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.profile-release-provenance.v1",
   "profile_id": "defaults",
-  "profile_revision": "sha256:fbe0eb7fdd6e482b68c7de8ea07f07544f238b9618fbd3a59189e15c93e699fa",
+  "profile_revision": "sha256:dca8a590c874154720a45d3f23a457c31b11eee257a2c4b5f2dfd876638a903c",
   "profile_definition_digest": "sha256:4c9de762ae200b302f663f0ab4658b8e843be308466a5823852fb2e2c98f5632",
   "source_inputs": [
     {
@@ -634,11 +634,15 @@
     },
     {
       "path": "tobkiri_protocol/schemas/profile_artifact_lock_v1.schema.json",
-      "digest": "sha256:f8035fb3cbc6d10edd66a63935b1f6f1faa1c8d301464ebb57c16d1869647f00"
+      "digest": "sha256:b9ffec2d23ac0490466754a2c4b9978e82fc598818c90a7f84a9f084094711bc"
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_content_projection_v1.schema.json",
+      "digest": "sha256:420709af812c136ce5dff37d6449a3271c2a8f3d503fa979d33860e181027ca6"
     },
     {
       "path": "tobkiri_protocol/schemas/profile_intent_v1.schema.json",
-      "digest": "sha256:0d59900c2bc755fa004887d0a42e5440be66c0367b346ed9f95b7ce1ee17e646"
+      "digest": "sha256:a4358c1845050ac8c8fc215c2d28f83645dada8a788192b10b78932813f9e5c4"
     },
     {
       "path": "tobkiri_protocol/schemas/profile_lock_v4.schema.json",
@@ -646,7 +650,7 @@
     },
     {
       "path": "tobkiri_protocol/schemas/profile_lock_v5.schema.json",
-      "digest": "sha256:571fe5f18b269159c3336b0b8eb5daa9e16d8b2440bbbe495551a5b9c4cc47b9"
+      "digest": "sha256:0288649d4042c368f3533b9df1c75e5fbb47d7b1c34d3f07a3086ab71448e4ac"
     },
     {
       "path": "tobkiri_protocol/schemas/profile_release_provenance_v1.schema.json",
@@ -654,11 +658,11 @@
     },
     {
       "path": "tobkiri_protocol/schemas/profile_v4.schema.json",
-      "digest": "sha256:b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85"
+      "digest": "sha256:c98f0422edc4571c6ff306c851acc3052d37f9d016facae5346afbcf29da7888"
     },
     {
       "path": "tobkiri_protocol/schemas/profile_v5.schema.json",
-      "digest": "sha256:8b31667b1e6e5ba80a62b625ad560a1423b8fa31712791cfbed2520deb4299e8"
+      "digest": "sha256:55bfb92bfef12d88683bd75eeb942fcd4af8652555414bb2dcd83e7b868a8ddb"
     },
     {
       "path": "tobkiri_protocol/schemas/provenance_v1.schema.json",
@@ -682,7 +686,7 @@
     },
     {
       "path": "tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
-      "digest": "sha256:335d22467c2a13de341eb65f6fc47fc487d4f655cc064f0873989d3eef73c8b5"
+      "digest": "sha256:6bff1651f3902503ee755539189aa36ce5b2458026a0ea47c153f60a0fec1acf"
     },
     {
       "path": "tobkiri_protocol/schemas/shell_definition_v4.schema.json",
@@ -701,23 +705,23 @@
     "name": "tobkiri-profile-artifacts",
     "version": "1.0.0",
     "path": "tobkiri_runtime/scripts/generate_profile_artifacts.py",
-    "digest": "sha256:63affd61e0967dacb319cda66bbc4c86258b68ffbdfefe97221cbf17f77f050a"
+    "digest": "sha256:bfabfcb027892fd7aa5df771d8043e766a447b057727a7e6820ea7361d1c1b40"
   },
   "catalog": {
     "bundle_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
-    "bundle_digest": "sha256:06b94a7a65947a261d814c9974d3d86182d73de631530814bbe15d559ff0e3fe",
+    "bundle_digest": "sha256:094b9f887a7a4ca8a8f310f7a5a90a3f8a147c49f9f6d651fb173d5f1857b5b1",
     "catalog_revision": "sha256:58f74e544acf4f125ee19a820d6df8f4364e4d33eb48d51ca01e1b0179b794ff",
-    "closure_digest": "sha256:62678ac7fb00cce31b4ff2211aa656362f5f3ca376a292c25cf5ec95aa80281d"
+    "closure_digest": "sha256:ea2e473604123939d4ff2d1ed0dbcea0f82f59eb9a32dee3f43fa25e52d59528"
   },
   "outputs": [
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
-      "digest": "sha256:112669f09cbe1387394f26a70fe41efa73bd07adbc236d0dc17fc7023a3ee23b"
+      "digest": "sha256:d671e12ac9cd50a90e7dae1f7d4d3a5dd2f9195e08a72bca21ec9c7e507868af"
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
-      "digest": "sha256:42a21fdd88955ebad921ceda5727ddffe0134f8bbe8a93d9829ae29dc476e99b"
+      "digest": "sha256:e21dbfd76b1ce6d27ede3be61f592536cac1babd37fcd211b706fc4c36a18fa3"
     }
   ],
-  "release_digest": "sha256:603df9b3b90b300438fa6e6904b357a4b2505623a45a6fbcab9443e3d1c67164"
+  "release_digest": "sha256:46de4668194d69bcd267fbbafeafc9da23816dede1a13d3b1f27bab2d878f4dd"
 }

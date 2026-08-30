@@ -6,7 +6,7 @@
       "category": "widget",
       "description": "Knowledge results injected into conversations.",
       "tags": ["knowledge", "preview"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "info",
         "title": "Knowledge Context",
@@ -19,7 +19,7 @@
       "category": "widget",
       "description": "Generated files and attachments exposed through the artifact contract.",
       "tags": ["artifact", "preview", "export"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Artifacts",
@@ -33,7 +33,7 @@
       "category": "integration",
       "description": "Local, web, and Reddit sources rendered through a common source schema.",
       "tags": ["research", "web", "reddit"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Research Providers",
@@ -50,7 +50,7 @@
       "category": "capability",
       "description": "Browser sessions and approved desktop actions.",
       "tags": ["browser", "computer", "approval"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Browser / Computer",
@@ -72,7 +72,7 @@
       "category": "system",
       "description": "Agent schedule store and scheduler routes.",
       "tags": ["agent", "schedule"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Scheduled Tasks",
@@ -86,7 +86,7 @@
       "category": "widget",
       "description": "Channel and multi-agent collaboration entrypoint.",
       "tags": ["channel", "multi-agent", "collaboration"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Collaboration",
@@ -100,7 +100,7 @@
       "category": "integration",
       "description": "Conversation export and local share links.",
       "tags": ["share", "export"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "actions",
         "title": "Share / Export",
@@ -117,7 +117,7 @@
       "category": "system",
       "description": "Memory results injected into conversations.",
       "tags": ["memory", "preview"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "info",
         "title": "Memory Context",
@@ -130,7 +130,7 @@
       "category": "system",
       "description": "Recent request prompt, context, and tool usage.",
       "tags": ["debug", "inspect"],
-      "origin": {"kind": "pack", "path": "rumi_reference_ui_pack/frontend_extensions/default_reference.ui.json"},
+      "origin": {"kind": "ui_projection", "projection_id": "tobkiri.ui-projection.reference.v1", "path": "frontend_extensions/default_reference.ui.json"},
       "panel": {
         "kind": "info",
         "title": "Inspector",

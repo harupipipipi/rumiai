@@ -140,6 +140,7 @@ def _view_from_activation(captured: Any) -> V4ResolvedProfileView:
         effective_pack_set=effective,
         packs=packs,
         providers=providers,
+        projections=tuple(profile.get("content_projections") or ()),
     )
 
 
@@ -148,6 +149,13 @@ def effective_pack_ids() -> frozenset[str]:
 
     plan = persisted_resolved_profile()
     return frozenset(plan.effective_pack_set) if plan is not None else frozenset()
+
+
+def effective_profile_projections() -> tuple[Any, ...]:
+    """Return digest-bound content projections from the active Profile."""
+
+    plan = persisted_resolved_profile()
+    return tuple(plan.projections) if plan is not None else ()
 
 
 def require_effective_pack(pack_id: str) -> None:
@@ -169,6 +177,7 @@ __all__ = [
     "activate_resolved_profile",
     "active_resolved_profile",
     "effective_pack_ids",
+    "effective_profile_projections",
     "invalidate_persisted_resolved_profile",
     "persisted_resolved_profile",
     "require_effective_pack",

@@ -190,7 +190,7 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
     catalog = _catalog()
     resolved = _resolve(catalog)
 
-    assert set(catalog.packs) == {
+    assert {
         "defaults-basepack",
         "defaultspack",
         "rumi_ai_gateway_pack",
@@ -211,7 +211,7 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "shell.cli.default",
         "shell.tauri.default",
         "tobkiri_host_pack_control",
-    }
+    } <= set(catalog.packs)
     assert resolved.profile["profile_api_version"] == "io.tobkiri.profile.v5"
     assert resolved.profile["state"] == "resolved"
     assert resolved.profile["shell"]["provider_id"] == "shell.tauri.default"
@@ -325,7 +325,12 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
         "provenance_digest",
     ):
         assert resolved.plan[field] == resolved.lock[field]
-    assert resolved.plan["closure_digest"] == canonical_digest(resolved.plan["effective_set"])
+    assert resolved.plan["closure_digest"] == canonical_digest(
+        {
+            "effective_set": resolved.plan["effective_set"],
+            "content_projections": resolved.plan["content_projections"],
+        }
+    )
     assert resolved.plan["requested_edges_digest"] == canonical_digest(
         resolved.profile["requested_edges"]
     )

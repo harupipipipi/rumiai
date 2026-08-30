@@ -27,6 +27,10 @@ from tobkiri_protocol.profile_scope import (  # noqa: E402
 )
 from tobkiri_protocol.provenance import normative_generated_provenance  # noqa: E402
 from tobkiri_protocol.validation import SCHEMA_DIR, validate_document  # noqa: E402
+from core_runtime.profile_content_projection import (  # noqa: E402
+    resolve_intent_projection,
+    selected_projection_roots,
+)
 
 
 GENERATOR_NAME = "tobkiri-profile-artifacts"
@@ -324,7 +328,13 @@ def _compile_profile(
     catalog: ProfileCatalog,
     intent: Mapping[str, Any],
     compatibility_path: Path,
-) -> tuple[dict[str, Any], list[str], dict[str, str], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any],
+    list[str],
+    dict[str, str],
+    list[dict[str, Any]],
+    dict[str, str],
+]:
     selected, requested_roles = _resolve_closure(catalog, intent)
     profile: dict[str, Any] = {}
     for key, value in intent.items():
@@ -365,6 +375,18 @@ def _compile_profile(
         }
         pins[(pin["pack_id"], pin["variant_id"])] = pin
     profile["requested_edges"] = resolved_edges
+    projections = []
+    projection_inputs: dict[str, str] = {}
+    for source in intent.get("content_projections") or []:
+        resolved, files = resolve_intent_projection(source)
+        projections.append(resolved)
+        root = ROOT / resolved["artifact_root"]
+        for relative, digest in files.items():
+            projection_inputs[_relative(root / relative)] = digest
+    profile["content_projections"] = sorted(
+        projections, key=lambda item: item["projection_id"]
+    )
+    selected_projection_roots(profile["content_projections"])
     provenance = _compatibility_provenance(profile, compatibility_path)
     with_provenance: dict[str, Any] = {}
     for key, value in profile.items():
@@ -378,6 +400,7 @@ def _compile_profile(
         selected,
         requested_roles,
         sorted(pins.values(), key=lambda item: (item["pack_id"], item["variant_id"])),
+        projection_inputs,
     )
 
 
@@ -455,7 +478,12 @@ def _compile_lock(
     )
     profile_revision = canonical_digest(profile)
     definition_digest = canonical_digest(intent)
-    closure_digest = canonical_digest(effective_set)
+    closure_digest = canonical_digest(
+        {
+            "effective_set": effective_set,
+            "content_projections": profile["content_projections"],
+        }
+    )
     requested_edges_digest = canonical_digest(profile["requested_edges"])
     lock = {
         "lock_api_version": "io.tobkiri.profile-artifact-lock.v1",
@@ -475,6 +503,10 @@ def _compile_lock(
         "shell": shell,
         "application": application,
         "effective_set": effective_set,
+        "content_projections": list(profile["content_projections"]),
+        "content_projection_digest": canonical_digest(
+            profile["content_projections"]
+        ),
         "variant_pins": pins,
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
@@ -497,9 +529,11 @@ def _compile_release_provenance(
     lock_path: Path,
     lock_raw: bytes,
     lock: Mapping[str, Any],
+    projection_inputs: Mapping[str, str],
 ) -> dict[str, Any]:
     inputs = dict(catalog.input_digests)
     inputs[_relative(intent_path)] = _sha256(intent_raw)
+    inputs.update(projection_inputs)
     document = {
         "schema": "io.tobkiri.profile-release-provenance.v1",
         "profile_id": lock["profile_id"],
@@ -548,7 +582,9 @@ def render(
     catalog = ProfileCatalog(bundle_root, compatibility_path)
     intent_raw = intent_path.read_bytes()
     intent = validate_document(intent_raw, "profile_intent")
-    profile, selected, _, pins = _compile_profile(catalog, intent, compatibility_path)
+    profile, selected, _, pins, projection_inputs = _compile_profile(
+        catalog, intent, compatibility_path
+    )
     compatibility_raw = _pretty(profile)
     bundle_lock = catalog.bundle_lock_with(compatibility_raw)
     bundle_lock_raw = _pretty(bundle_lock)
@@ -564,6 +600,7 @@ def render(
         lock_path,
         lock_raw,
         lock,
+        projection_inputs,
     )
     return {
         compatibility_path: compatibility_raw,
@@ -680,7 +717,12 @@ def _validate_staged_release(
         raise ValueError("staged compatibility Profile bundle digest is stale")
     if lock["profile_revision"] != canonical_digest(profile):
         raise ValueError("staged Profile revision is stale")
-    if lock["closure_digest"] != canonical_digest(lock["effective_set"]):
+    if lock["closure_digest"] != canonical_digest(
+        {
+            "effective_set": lock["effective_set"],
+            "content_projections": lock["content_projections"],
+        }
+    ):
         raise ValueError("staged Profile closure digest is stale")
     if lock["lock_digest"] != canonical_digest(
         {key: value for key, value in lock.items() if key != "lock_digest"}

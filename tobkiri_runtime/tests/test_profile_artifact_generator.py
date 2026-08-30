@@ -103,7 +103,12 @@ def test_checked_in_profile_artifacts_are_deterministic_and_schema_valid() -> No
     assert lock["profile_revision"] == canonical_digest(compatibility)
     assert lock["activation_authority"] == "unbound"
     assert lock["profile_definition_digest"] == canonical_digest(intent)
-    assert lock["closure_digest"] == canonical_digest(lock["effective_set"])
+    assert lock["closure_digest"] == canonical_digest(
+        {
+            "effective_set": lock["effective_set"],
+            "content_projections": lock["content_projections"],
+        }
+    )
     assert lock["lock_digest"] == canonical_digest(
         {key: value for key, value in lock.items() if key != "lock_digest"}
     )

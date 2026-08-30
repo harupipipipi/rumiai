@@ -170,6 +170,7 @@ def host_profile_catalog(
         )
     definitions.migrate_legacy_successors(bundled)
     definitions.repair_legacy_display_names()
+    definitions.migrate_retired_pack_projections()
     # Defaults is an install/bootstrap template, not a prerequisite Profile.
     # Once any live definition exists, preserve that collection exactly and
     # never inject a special execution identity into it.

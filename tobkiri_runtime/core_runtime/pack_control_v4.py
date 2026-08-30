@@ -1933,6 +1933,19 @@ def _panel_session_root(authority_session_id: str) -> str:
 
 
 def _read_control_state(profile_id: str) -> dict[str, Any]:
+    value = _read_control_envelope(profile_id)
+    if not value:
+        return {}
+    value = _migrate_control_envelope(profile_id, value)
+    installed = dict(value["installed"])
+    if any(pack_id not in load_pack_catalog() for pack_id in installed):
+        raise PackControlDigestMismatch("Pack control state contains an unknown Pack")
+    return installed
+
+
+def _read_control_envelope(profile_id: str) -> dict[str, Any]:
+    """Read the complete Profile-scoped control envelope without projecting it."""
+
     try:
         store = _persistence_store()
         relative = _control_state_relative(profile_id)
@@ -1945,16 +1958,59 @@ def _read_control_state(profile_id: str) -> dict[str, Any]:
         value.get("installed"), Mapping
     ):
         raise PackControlDigestMismatch("Pack control state is invalid")
-    installed = dict(value["installed"])
-    if any(pack_id not in load_pack_catalog() for pack_id in installed):
-        raise PackControlDigestMismatch("Pack control state contains an unknown Pack")
-    return installed
+    return dict(value)
+
+
+def _migrate_control_envelope(
+    profile_id: str, envelope: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Commit the legacy Pack-state migration as one atomic replacement."""
+
+    from .profile_definition_store_v4 import ProfileDefinitionStore
+    from .profile_projection_migration import (
+        RETIREMENTS,
+        migrate_pack_control_envelope,
+    )
+
+    profile = ProfileDefinitionStore(_user_data_root()).get_profile(profile_id)
+    if profile is None:
+        return dict(envelope)
+    projections = profile.profile.get("content_projections") or []
+    enabled = {
+        str(item.get("source_legacy_pack_id") or "")
+        for item in projections
+        if isinstance(item, Mapping)
+    }
+    approval_digests: dict[str, str] = {}
+    for retirement in RETIREMENTS:
+        legacy_id = retirement.legacy_pack_id
+        try:
+            store = _approval_store(profile_id)
+            relative = _approval_relative(profile_id, legacy_id)
+            if store.exists(relative):
+                approval_digests[legacy_id] = "sha256:" + hashlib.sha256(
+                    store.read_bytes(relative)
+                ).hexdigest()
+        except (OSError, SecurePersistenceError):
+            continue
+    migrated, receipt = migrate_pack_control_envelope(
+        envelope,
+        profile_id=profile_id,
+        profile_revision=profile.profile_revision,
+        enabled_pack_ids=enabled,
+        approval_digests=approval_digests,
+    )
+    if receipt is not None and migrated != envelope:
+        _atomic_json(_control_state_relative(profile_id), migrated)
+    return dict(migrated)
 
 
 def _write_control_state(profile_id: str, installed: Mapping[str, Any]) -> None:
+    envelope = _read_control_envelope(profile_id)
     _atomic_json(
         _control_state_relative(profile_id),
         {
+            **envelope,
             "version": "io.tobkiri.pack-control-state.v4",
             "profile_id": profile_id,
             "installed": dict(installed),

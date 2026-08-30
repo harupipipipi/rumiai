@@ -4,10 +4,10 @@
   "resolution_scope": "source_release",
   "activation_authority": "unbound",
   "profile_id": "defaults",
-  "profile_revision": "sha256:fbe0eb7fdd6e482b68c7de8ea07f07544f238b9618fbd3a59189e15c93e699fa",
+  "profile_revision": "sha256:dca8a590c874154720a45d3f23a457c31b11eee257a2c4b5f2dfd876638a903c",
   "profile_definition_digest": "sha256:4c9de762ae200b302f663f0ab4658b8e843be308466a5823852fb2e2c98f5632",
   "catalog_revision": "sha256:58f74e544acf4f125ee19a820d6df8f4364e4d33eb48d51ca01e1b0179b794ff",
-  "bundle_digest": "sha256:06b94a7a65947a261d814c9974d3d86182d73de631530814bbe15d559ff0e3fe",
+  "bundle_digest": "sha256:094b9f887a7a4ca8a8f310f7a5a90a3f8a147c49f9f6d651fb173d5f1857b5b1",
   "base": {
     "pack_id": "defaults-basepack",
     "artifact_digest": "sha256:82894dea351dc4b6be97bc625db30c144dfd3bde8245708b275b1c5c37833077",
@@ -121,6 +121,8 @@
       "artifact_digest": "sha256:0e83fef1d62ae54f14e254215b004684921686df15b281546ff6fc1c1437a5b3"
     }
   ],
+  "content_projections": [],
+  "content_projection_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
   "variant_pins": [
     {
       "pack_id": "defaultspack",
@@ -341,7 +343,7 @@
   ],
   "requested_edges_digest": "sha256:3d481c7106c181e9b9491ebe2a4e1899ef95ade6bc18397e54d4e84539d6872a",
   "constraints_digest": "sha256:c80daf90d104f02f8ea65c8c24bf87d5ac897d89392578ee43df424c0a30ac62",
-  "closure_digest": "sha256:62678ac7fb00cce31b4ff2211aa656362f5f3ca376a292c25cf5ec95aa80281d",
-  "provenance_digest": "sha256:f28bdf0f5a71d46e18074c1c17a5fd33fdfc904d7692c0cbf87a4098e1d952f9",
-  "lock_digest": "sha256:ab5ae824d1f732b572c94a664762deddc2271dec96faffd7afe9d734c74d4b5c"
+  "closure_digest": "sha256:ea2e473604123939d4ff2d1ed0dbcea0f82f59eb9a32dee3f43fa25e52d59528",
+  "provenance_digest": "sha256:58064ce558623d770b1cd5c4b225958b3a647fcb964aabc74b0f77096734c0fe",
+  "lock_digest": "sha256:f4edc4ac7399c7e58f31fc3a827ee4258304a9703a1614c6016b2a1f4aa3de97"
 }

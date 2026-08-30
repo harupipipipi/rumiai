@@ -398,6 +398,80 @@ class ProfileDefinitionStore:
             self._write_state(state)
             return len(repaired)
 
+    def migrate_retired_pack_projections(self) -> int:
+        """Atomically append neutral projection successors for retired Packs."""
+
+        from .profile_projection_migration import (
+            COMPATIBILITY_RELEASE,
+            MIGRATION_ID,
+            REMOVE_NO_EARLIER_THAN_RELEASE,
+            SUNSET_AT,
+            migrate_profile_document,
+        )
+
+        with self._locked():
+            state = self._read_state()
+            prepared: list[
+                tuple[dict[str, Any], dict[str, Any], tuple[str, ...], str]
+            ] = []
+            for entry in state["profiles"]:
+                if entry["tombstone"]:
+                    continue
+                current = entry["revisions"][-1]
+                profile = current.get("profile")
+                if not isinstance(profile, Mapping):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "live Profile revision document is invalid"
+                    )
+                migrated, legacy_ids = migrate_profile_document(profile)
+                if legacy_ids:
+                    prepared.append(
+                        (
+                            entry,
+                            migrated,
+                            legacy_ids,
+                            str(current["profile_revision"]),
+                        )
+                    )
+            if not prepared:
+                return 0
+
+            now = self._now()
+            receipts: list[dict[str, Any]] = []
+            for entry, migrated, legacy_ids, prior_revision in prepared:
+                pre_digest = canonical_digest(entry["revisions"][-1]["profile"])
+                _append_profile_successor(entry, migrated, now=now)
+                receipts.append(
+                    {
+                        "migration_id": MIGRATION_ID,
+                        "profile_id": entry["profile_id"],
+                        "profile_revision": entry["current_revision"],
+                        "prior_profile_revision": prior_revision,
+                        "migrated_pack_ids": list(legacy_ids),
+                        "migrated_count": len(legacy_ids),
+                        "pre_state_digest": pre_digest,
+                        "post_state_digest": canonical_digest(migrated),
+                        "rollback_digest": pre_digest,
+                    }
+                )
+            legacy = copy.deepcopy(dict(state["legacy"]))
+            migrations = copy.deepcopy(dict(legacy.get("projection_migrations") or {}))
+            migrations[MIGRATION_ID] = {
+                "migration_id": MIGRATION_ID,
+                "compatibility_release": COMPATIBILITY_RELEASE,
+                "remove_no_earlier_than_release": REMOVE_NO_EARLIER_THAN_RELEASE,
+                "sunset_at": SUNSET_AT,
+                "profile_count": len(receipts),
+                "migrated_count": sum(item["migrated_count"] for item in receipts),
+                "receipts": receipts,
+            }
+            legacy["projection_migrations"] = migrations
+            state["legacy"] = legacy
+            state["generation"] += len(prepared)
+            state["updated_at"] = now
+            self._write_state(state)
+            return len(prepared)
+
     def update_profile(
         self,
         profile_id: str,
