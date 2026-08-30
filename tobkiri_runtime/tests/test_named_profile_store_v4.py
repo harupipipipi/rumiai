@@ -478,7 +478,7 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
         profile_id = str(source["profile_id"])
         stored = definitions.get_profile(profile_id)
         assert stored is not None
-        assert stored.profile["profile_api_version"] == "io.tobkiri.profile.v4"
+        assert stored.profile["profile_api_version"] == "io.tobkiri.profile.v5"
         assert stored.profile["profile_id"] == profile_id
         assert stored.profile["display_name"] == source["display_name"]["ja"]
         assert stored.profile["state"] == "needs_resolution"

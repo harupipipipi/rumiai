@@ -29,7 +29,7 @@ def build_legacy_profile_successor(
     source_path: str,
     repository_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Build one non-authorizing, catalog-resolvable v4 successor.
+    """Build one non-authorizing successor for the canonical v4 surface.
 
     The packaged Defaults Profile is deliberately not used as a template.
     Legacy selectors are translated through a closed alias table and then
@@ -99,7 +99,7 @@ def build_legacy_profile_successor(
     )
     successor.update(
         {
-            "profile_api_version": "io.tobkiri.profile.v4",
+            "profile_api_version": "io.tobkiri.profile.v5",
             "profile_id": profile_id,
             "state": "needs_resolution",
             "mode": "interactive",
@@ -114,6 +114,7 @@ def build_legacy_profile_successor(
                 "provider_id": str(shell["provider_id"]),
                 "pack_id": str(shell["pack_id"]),
                 "artifact_digest": None,
+                "executable_artifact_digest": None,
                 "definition_revision": None,
                 "contract_id": str(shell["contract_id"]),
                 "platform": str(variant["platform"]),
