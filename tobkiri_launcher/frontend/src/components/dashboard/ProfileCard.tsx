@@ -32,7 +32,9 @@ export interface ProfileCardProps {
   mutationsAvailable: boolean;
   profile: NamedProfileRecord;
   profileView: NamedProfileView;
-  runtimeVerified: boolean;
+  profileCeremonyAvailable: boolean;
+  activeProfileReady: boolean;
+  launchReady: boolean;
   desktopShellAvailable: boolean;
   actionType?: string | null;
   onCancelEdit: () => void;
@@ -60,7 +62,9 @@ export function ProfileCard({
   mutationsAvailable,
   profile,
   profileView,
-  runtimeVerified,
+  profileCeremonyAvailable,
+  activeProfileReady,
+  launchReady,
   desktopShellAvailable,
   actionType,
   onCancelEdit,
@@ -76,11 +80,13 @@ export function ProfileCard({
     ? 'Activate this Profile before launching it.'
     : profileView.status === 'error'
       ? profileView.statusDescription ?? 'Resolve this Profile before launching it.'
-      : !runtimeVerified
-        ? 'Complete Setup verification before launching.'
-        : !desktopShellAvailable
-          ? 'Launch is available in Tobkiri Launcher.'
-          : null;
+      : !activeProfileReady
+        ? 'The active execution Profile is not ready.'
+        : !launchReady
+          ? 'Launch is unavailable until runtime readiness is confirmed.'
+          : !desktopShellAvailable
+            ? 'Launch is available in Tobkiri Launcher.'
+            : null;
   const launchDisabled = Boolean(launchBlockedReason) || isBusy;
   const mutationDisabled = !mutationsAvailable || isBusy;
 
@@ -119,80 +125,80 @@ export function ProfileCard({
             </span>
           </p>
           <div className="absolute right-0 top-0">
-          <Popover>
-            <PopoverTrigger
-              aria-label={`Open actions for ${displayName}`}
-              className="rounded-md p-2 text-text-muted transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
-              title={`Open actions for ${displayName}`}
-            >
-              <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
-              <span className="sr-only">Profile actions</span>
-            </PopoverTrigger>
-            <PopoverContent align="right" className="w-48">
-              <div className="flex flex-col gap-0.5 py-1">
-                <button
-                  className={actionButtonClass()}
-                  disabled={mutationDisabled}
-                  onClick={() => onEdit(profile)}
-                  role="menuitem"
-                  title={mutationsAvailable ? `Edit ${displayName}` : 'Profile catalog verification is unavailable'}
-                  type="button"
-                >
-                  <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
-                </button>
-                {isActive ? (
+            <Popover>
+              <PopoverTrigger
+                aria-label={`Open actions for ${displayName}`}
+                className="rounded-md p-2 text-text-muted transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+                title={`Open actions for ${displayName}`}
+              >
+                <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
+                <span className="sr-only">Profile actions</span>
+              </PopoverTrigger>
+              <PopoverContent align="right" className="w-48">
+                <div className="flex flex-col gap-0.5 py-1">
                   <button
-                    aria-disabled="true"
-                    className={cn(actionButtonClass(), 'cursor-not-allowed text-text-muted opacity-60')}
-                    disabled
+                    className={actionButtonClass()}
+                    disabled={mutationDisabled}
+                    onClick={() => onEdit(profile)}
+                    role="menuitem"
+                    title={mutationsAvailable ? `Edit ${displayName}` : 'Profile catalog verification is unavailable'}
+                    type="button"
+                  >
+                    <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
+                  </button>
+                  {isActive ? (
+                    <button
+                      aria-disabled="true"
+                      className={cn(actionButtonClass(), 'cursor-not-allowed text-text-muted opacity-60')}
+                      disabled
+                      role="menuitem"
+                      type="button"
+                    >
+                      <Star aria-hidden="true" className="h-3.5 w-3.5 fill-accent text-accent" /> Active
+                    </button>
+                  ) : (
+                    <Link
+                      aria-disabled={!profileCeremonyAvailable}
+                      aria-label={`Activate ${displayName}`}
+                      className={cn(
+                        actionButtonClass(),
+                        !profileCeremonyAvailable && 'cursor-not-allowed text-text-muted opacity-60',
+                      )}
+                      onClick={(event) => {
+                        if (!profileCeremonyAvailable) event.preventDefault();
+                      }}
+                      role="menuitem"
+                      tabIndex={profileCeremonyAvailable ? undefined : -1}
+                      title={profileCeremonyAvailable ? 'Open v4 activation ceremony' : 'Profile ceremony is unavailable'}
+                      to={activationHref}
+                    >
+                      <Star aria-hidden="true" className="h-3.5 w-3.5" /> Set Active
+                    </Link>
+                  )}
+                  <button
+                    className={actionButtonClass()}
+                    disabled={mutationDisabled}
+                    onClick={() => onDuplicate(profile)}
                     role="menuitem"
                     type="button"
                   >
-                    <Star aria-hidden="true" className="h-3.5 w-3.5 fill-accent text-accent" /> Active
+                    <Copy aria-hidden="true" className="h-3.5 w-3.5" /> Duplicate
                   </button>
-                ) : (
-                  <Link
-                    aria-disabled={!runtimeVerified}
-                    aria-label={`Activate ${displayName}`}
-                    className={cn(
-                      actionButtonClass(),
-                      !runtimeVerified && 'cursor-not-allowed text-text-muted opacity-60',
-                    )}
-                    onClick={(event) => {
-                      if (!runtimeVerified) event.preventDefault();
-                    }}
+                  <div aria-hidden="true" className="my-1 border-t border-border" />
+                  <button
+                    aria-label={`Delete ${displayName}`}
+                    className={cn(actionButtonClass(), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20')}
+                    disabled={isActive || mutationDisabled}
+                    onClick={() => onDelete(profile)}
                     role="menuitem"
-                    tabIndex={runtimeVerified ? undefined : -1}
-                    title={runtimeVerified ? 'Open v4 activation ceremony' : 'Complete Setup verification before activating'}
-                    to={activationHref}
+                    title={isActive ? 'Switch away before deleting this Profile' : 'Delete Profile'}
+                    type="button"
                   >
-                    <Star aria-hidden="true" className="h-3.5 w-3.5" /> Set Active
-                  </Link>
-                )}
-                <button
-                  className={actionButtonClass()}
-                  disabled={mutationDisabled}
-                  onClick={() => onDuplicate(profile)}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Copy aria-hidden="true" className="h-3.5 w-3.5" /> Duplicate
-                </button>
-                <div aria-hidden="true" className="my-1 border-t border-border" />
-                <button
-                  aria-label={`Delete ${displayName}`}
-                  className={cn(actionButtonClass(), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20')}
-                  disabled={isActive || mutationDisabled}
-                  onClick={() => onDelete(profile)}
-                  role="menuitem"
-                  title={isActive ? 'Switch away before deleting this Profile' : 'Delete Profile'}
-                  type="button"
-                >
-                  <Trash2 aria-hidden="true" className="h-3.5 w-3.5" /> Delete
-                </button>
-              </div>
-            </PopoverContent>
-          </Popover>
+                    <Trash2 aria-hidden="true" className="h-3.5 w-3.5" /> Delete
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         </div>
 

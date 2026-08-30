@@ -237,6 +237,10 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         runtimeError: scenario.name === 'disconnected' ? 'runtime disconnected' : null,
         runtimeDisconnected: scenario.runtimeDisconnected,
         lastRuntimeHealthyAt: null,
+        hostCatalogVerified: true,
+        profileCeremonyAvailable: scenario.name !== 'disconnected',
+        activeProfileReady: false,
+        launchReady: false,
       });
       const {dom, container, root} = createDashboardDom();
       try {
@@ -282,8 +286,14 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         await act(async () => { buttonByLabel(container, 'Open actions for Research Profile').click(); });
         const activate = menuItemByText('Set Active') as HTMLAnchorElement;
         assert.equal(activate.getAttribute('aria-label'), 'Activate Research Profile');
-        assert.equal(activate.getAttribute('aria-disabled'), 'true', scenario.name);
-        assert.equal(activate.getAttribute('tabindex'), '-1', scenario.name);
+        if (scenario.name === 'disconnected') {
+          assert.equal(activate.getAttribute('aria-disabled'), 'true', scenario.name);
+          assert.equal(activate.getAttribute('tabindex'), '-1', scenario.name);
+        } else {
+          assert.notEqual(activate.getAttribute('aria-disabled'), 'true', scenario.name);
+          assert.notEqual(activate.getAttribute('tabindex'), '-1', scenario.name);
+          assert.equal(activate.getAttribute('href'), '/profile?profile_id=research#profile-ceremony');
+        }
         assert.match(activate.textContent ?? '', /Set Active/);
         const researchDelete = menuItemByText('Delete') as HTMLButtonElement;
         assert.equal(researchDelete.disabled, false);
@@ -309,7 +319,7 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
   }
 });
 
-test('Home exposes the fresh legacy catalog with no active execution during setup verification', async () => {
+test('Home exposes a fresh active-none catalog without privileging Defaults', async () => {
   const previousState = useAppStore.getState();
   const previousFetch = globalThis.fetch;
   const previousWindow = globalThis.window;
@@ -331,6 +341,10 @@ test('Home exposes the fresh legacy catalog with no active execution during setu
       runtimeError: null,
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: null,
+      hostCatalogVerified: true,
+      profileCeremonyAvailable: true,
+      activeProfileReady: false,
+      launchReady: false,
     });
     const {dom, container, root} = createDashboardDom();
     try {
@@ -373,9 +387,9 @@ test('Home exposes the fresh legacy catalog with no active execution during setu
       });
       const activate = menuItemByText('Set Active') as HTMLAnchorElement;
       assert.equal(activate.getAttribute('href'), '/profile?profile_id=new-custom-profile#profile-ceremony');
-      assert.equal(activate.getAttribute('aria-disabled'), 'true');
-      assert.equal(activate.getAttribute('tabindex'), '-1');
-      assert.match(activate.getAttribute('title') ?? '', /Setup verification/);
+      assert.notEqual(activate.getAttribute('aria-disabled'), 'true');
+      assert.notEqual(activate.getAttribute('tabindex'), '-1');
+      assert.equal(buttonByLabel(container, 'Launch New custom profile').disabled, true);
     } finally {
       await act(async () => root.unmount());
       dom.window.close();
@@ -411,6 +425,10 @@ test('Home keeps browsing selection separate from active execution', async () =>
       runtimeError: null,
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: null,
+      hostCatalogVerified: true,
+      profileCeremonyAvailable: true,
+      activeProfileReady: false,
+      launchReady: false,
     });
     const {dom, container, root} = createDashboardDom();
     try {
@@ -461,6 +479,10 @@ test('Home presents the deletion confirmation without deleting a Profile', async
       runtimeError: null,
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: null,
+      hostCatalogVerified: true,
+      profileCeremonyAvailable: true,
+      activeProfileReady: false,
+      launchReady: false,
     });
     const {dom, container, root} = createDashboardDom();
     try {
@@ -528,6 +550,10 @@ test('Home requires an explicit source Profile and does not use registry order f
       runtimeError: null,
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: null,
+      hostCatalogVerified: true,
+      profileCeremonyAvailable: true,
+      activeProfileReady: false,
+      launchReady: false,
     });
     const {dom, container, root} = createDashboardDom();
     try {
@@ -631,6 +657,10 @@ test('Home keeps a verified catalog writable after a rejected Profile mutation',
       runtimeError: null,
       runtimeDisconnected: false,
       lastRuntimeHealthyAt: null,
+      hostCatalogVerified: true,
+      profileCeremonyAvailable: true,
+      activeProfileReady: false,
+      launchReady: false,
     });
     const {dom, container, root} = createDashboardDom();
     try {

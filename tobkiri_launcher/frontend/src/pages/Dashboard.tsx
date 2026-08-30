@@ -29,7 +29,6 @@ import {
   type NamedProfileRegistry,
 } from '@/src/lib/api';
 import {panelRoutes} from '@/src/lib/routes';
-import {resolveSetupVerificationState} from '@/src/lib/setupVerification';
 import {
   buildNamedProfileView,
   filterAndSortNamedProfiles,
@@ -102,17 +101,13 @@ function sortModeFromParam(value: string | null): NamedProfileSortMode {
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
-  const isSetupDone = useAppStore((state) => state.isSetupDone);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
-  const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
-  const runtimeVerified = resolveSetupVerificationState({
-    isSetupDone,
-    runtimeReady,
-    runtimeStatus,
-    runtimeDisconnected,
-  }) === 'verified';
+  const hostCatalogVerified = useAppStore((state) => state.hostCatalogVerified);
+  const profileCeremonyAvailable = useAppStore((state) => state.profileCeremonyAvailable);
+  const activeProfileReady = useAppStore((state) => state.activeProfileReady);
+  const launchReady = useAppStore((state) => state.launchReady);
   const desktopShellAvailable = isDesktopShellAvailable();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -194,7 +189,9 @@ export function Dashboard() {
   }, [registry]);
   const browsingProfile = registry?.profiles.find((entry) => entry.profile_id === browsingProfileId) ?? null;
   const profileError = profileLoadError ?? profileActionError;
-  const profileCatalogVerified = registry !== null && profileLoadError === null;
+  const profileCatalogVerified = hostCatalogVerified
+    && registry !== null
+    && profileLoadError === null;
   const sourceProfileOptions = useMemo(() => (
     [...(registry?.profiles ?? [])].sort((left, right) => {
       const displayNameOrder = namedProfileDisplayName(left).localeCompare(
@@ -343,7 +340,8 @@ export function Dashboard() {
     if (!registry || !isActiveExecutionProfile(registry, entry)) return;
     const profileView = buildNamedProfileView(entry);
     if (
-      !runtimeVerified
+      !activeProfileReady
+      || !launchReady
       || !desktopShellAvailable
       || profileView.status !== 'ready'
     ) return;
@@ -649,7 +647,9 @@ export function Dashboard() {
                       onSubmitEdit={(event, profile) => void submitProfileName(event, profile)}
                       profile={entry}
                       profileView={profileView}
-                      runtimeVerified={runtimeVerified}
+                      profileCeremonyAvailable={profileCeremonyAvailable}
+                      activeProfileReady={activeProfileReady}
+                      launchReady={launchReady}
                     />
                   );
                 })}
