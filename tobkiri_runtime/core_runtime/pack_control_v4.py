@@ -195,6 +195,24 @@ class HostProfileControlSession:
     def plan_digest(self) -> str:
         return self._catalog_digest
 
+    @property
+    def profile_id(self) -> str:
+        """Return the empty identity used while no Profile is active."""
+
+        return ""
+
+    @property
+    def profile_revision(self) -> str:
+        """Return the empty revision used while no Profile is active."""
+
+        return ""
+
+    @property
+    def activation_id(self) -> str:
+        """Return the empty activation used while no Profile is active."""
+
+        return ""
+
     def assert_current(self) -> None:
         """Fence the session to the same catalog and an empty active pointer."""
 
@@ -243,7 +261,7 @@ class HostProfileControlSession:
         operation_id: str,
         payload: Mapping[str, Any],
         *,
-        version_range: str = ">=4,<5",
+        version_range: str | None = ">=4,<5",
     ) -> Mapping[str, Any]:
         """Invoke one Host-owned Profile ceremony operation."""
 
@@ -1704,6 +1722,8 @@ def activate_resolved_profile_pack_set(
         and not predecessor_is_expected
         and not pointer_is_candidate
     ):
+        if predecessor is None:
+            raise PackControlStaleRevision("reviewed Profile predecessor is absent")
         if (
             predecessor.profile_id == profile_id
             and hmac.compare_digest(
@@ -1729,6 +1749,7 @@ def activate_resolved_profile_pack_set(
             catalog=catalog,
         )
         active_pointer = workspace / "activation" / "active.json"
+        activation: Mapping[str, Any]
         if active_pointer.is_file():
             active = store.load_active_snapshot()
             if pointer_is_candidate:

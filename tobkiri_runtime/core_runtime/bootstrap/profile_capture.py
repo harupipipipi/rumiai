@@ -701,9 +701,14 @@ def repair_legacy_active_profile_pointer(
         or legacy_pointer.get("version") != 1
     ):
         raise ProfileResolutionDenied("legacy active Profile marker is invalid")
+    legacy_id_value = legacy_pointer.get("active_profile_id")
+    if not isinstance(legacy_id_value, str):
+        raise ProfileResolutionDenied(
+            "legacy active Profile marker identity is invalid"
+        )
     try:
         legacy_id = validate_canonical_id(
-            legacy_pointer.get("active_profile_id"),
+            legacy_id_value,
             field="active_profile_id",
         )
     except Exception as error:

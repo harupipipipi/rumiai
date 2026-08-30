@@ -1095,7 +1095,7 @@ def capture_production_dispatch(
 
     profile_id = str(profile["profile_id"])
     activation_id = str(active.activation["activation_id"])
-    ceilings: dict[tuple[str, str, str, str, str, str], AuthorityCeilings] = {}
+    ceilings: dict[tuple[str, ...], AuthorityCeilings] = {}
     edge_specs: list[
         tuple[
             Mapping[str, Any],
@@ -1526,6 +1526,8 @@ def capture_production_dispatch(
             "value",
             None,
         )
+        if not isinstance(outer_target, str):
+            raise AuthorityDenied("PackVM capability bridge target identity is invalid")
         outer_edge = next(
             (
                 edge

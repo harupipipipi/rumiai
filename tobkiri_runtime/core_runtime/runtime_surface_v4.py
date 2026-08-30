@@ -448,15 +448,17 @@ class RuntimeProfileChangeService:
                         user_data_root=self._user_data_root,
                     )
             else:
-                resolved = resolve_profile_pack_set(
-                    pack_ids,
-                    **(
-                        {}
-                        if self._bundle_root is None
-                        else {"bundle_root": self._bundle_root}
-                    ),
-                    user_data_root=self._user_data_root,
-                )
+                if self._bundle_root is None:
+                    resolved = resolve_profile_pack_set(
+                        pack_ids,
+                        user_data_root=self._user_data_root,
+                    )
+                else:
+                    resolved = resolve_profile_pack_set(
+                        pack_ids,
+                        bundle_root=self._bundle_root,
+                        user_data_root=self._user_data_root,
+                    )
         except Exception as error:
             raise _map_change_error(error) from error
         execution_profile_id = None if current is None else str(current["profile_id"])
@@ -1530,10 +1532,17 @@ class RuntimeSurfaceService:
                 RuntimeSurfaceErrorCode.INVALID_REQUEST,
                 "requested browsing Profile is unavailable",
             ) from error
+        profiles = projection.get("profiles")
+        if not isinstance(profiles, list):
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                "requested browsing Profile is unavailable",
+            )
+        profile_entries = [item for item in profiles if isinstance(item, Mapping)]
         entry = next(
             (
                 item
-                for item in projection["profiles"]
+                for item in profile_entries
                 if item["profile_id"] == selected_profile_id
             ),
             None,
@@ -1659,16 +1668,17 @@ class RuntimeSurfaceService:
                 for operation_id in contract["operations"]:
                     operation_name = str(operation_id)
                     function_id = functions[0] if len(functions) == 1 else ""
-                    edge = next(
+                    edge: Mapping[str, Any] = next(
                         (
                             item
                             for item in definition.get("requested_edges", [])
-                            if item.get("contract_id") == contract_id
+                            if isinstance(item, Mapping)
+                            and item.get("contract_id") == contract_id
                             and item.get("operation_id") == operation_name
                         ),
                         {},
                     )
-                    row = {
+                    row: dict[str, object] = {
                         "pack_id": pack_id,
                         "owner_pack_id": pack_id,
                         "contract_id": contract_id,

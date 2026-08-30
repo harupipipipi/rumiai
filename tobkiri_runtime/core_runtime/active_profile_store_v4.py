@@ -635,12 +635,20 @@ class ActiveProfileStore:
             raise ActiveProfileStoreIntegrityError(
                 "activation snapshot digest does not match active pointer"
             )
-        envelope = snapshot.get("envelope") if isinstance(snapshot.get("envelope"), Mapping) else snapshot
+        raw_envelope = snapshot.get("envelope")
+        envelope: Mapping[str, Any] = (
+            raw_envelope if isinstance(raw_envelope, Mapping) else snapshot
+        )
         profile = envelope.get("profile")
         lock = envelope.get("lock")
         plan = envelope.get("plan")
         activation = envelope.get("activation")
-        if not all(isinstance(value, Mapping) for value in (profile, lock, plan, activation)):
+        if (
+            not isinstance(profile, Mapping)
+            or not isinstance(lock, Mapping)
+            or not isinstance(plan, Mapping)
+            or not isinstance(activation, Mapping)
+        ):
             raise ActiveProfileStoreIntegrityError("activation snapshot records are incomplete")
         expected = (
             pointer.profile_id,

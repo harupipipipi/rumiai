@@ -265,8 +265,11 @@ def frontend_contract_map_artifact(
         raise _unavailable_map("Frontend Contract Map artifact is not unique")
     artifact = matches[0]
     path = _canonical_artifact_path(artifact.get("path"))
+    artifact_digest = artifact.get("digest")
+    if not isinstance(artifact_digest, str):
+        raise _invalid_map("Frontend Contract Map artifact digest is invalid")
     try:
-        validate_artifact_digest(artifact.get("digest"), field="artifact.digest")
+        validate_artifact_digest(artifact_digest, field="artifact.digest")
     except ProtocolError as error:
         raise _invalid_map(
             "Frontend Contract Map artifact digest is invalid"
@@ -345,15 +348,18 @@ def _application_map_identity(
         if document_path != artifact_path:
             raise _stale_map("Frontend Contract Map artifact path is stale")
     if "artifact_digest" in document:
-        try:
-            validate_artifact_digest(
-                document.get("artifact_digest"), field="artifact_digest"
+        document_digest = document.get("artifact_digest")
+        if not isinstance(document_digest, str):
+            raise _invalid_map(
+                "Frontend Contract Map artifact digest is invalid"
             )
+        try:
+            validate_artifact_digest(document_digest, field="artifact_digest")
         except ProtocolError as error:
             raise _invalid_map(
                 "Frontend Contract Map artifact digest is invalid"
             ) from error
-        if document.get("artifact_digest") != artifact_digest:
+        if document_digest != artifact_digest:
             raise _stale_map("Frontend Contract Map artifact digest is stale")
     identity_present = bool(_MAP_IDENTITY_FIELDS.intersection(document))
     if identity_present:
@@ -394,20 +400,22 @@ def _map_context(
     activation_id: str | None,
     plan_digest: str | None,
 ) -> dict[str, str]:
-    provided = {
+    raw_provided = {
         "profile_id": profile_id,
         "profile_revision": profile_revision,
         "activation_id": activation_id,
         "plan_digest": plan_digest,
     }
-    if any(value is not None for value in provided.values()):
-        if any(value is None for value in provided.values()):
+    provided: dict[str, str] = {}
+    if any(value is not None for value in raw_provided.values()):
+        if any(value is None for value in raw_provided.values()):
             raise _invalid_map(
                 "Frontend Contract Map activation identity is incomplete"
             )
         provided = {
             field: _validate_context_value(field, value)
-            for field, value in provided.items()
+            for field, value in raw_provided.items()
+            if value is not None
         }
     document_context = {
         field: document.get(field) for field in _MAP_CONTEXT_FIELDS if field in document

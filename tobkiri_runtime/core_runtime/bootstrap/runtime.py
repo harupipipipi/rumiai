@@ -130,7 +130,9 @@ class Kernel:
             user_data = runtime_user_data_root()
             _prepare_desktop_api_token(user_data)
             bundle_root = _bundle_root()
-            dispatch_session = None
+            dispatch_session: (
+                V4DispatchSession | HostProfileControlSession | None
+            ) = None
             contract_bindings: tuple[FrontendContractBinding, ...] = (
                 host_profile_control_bindings()
             )

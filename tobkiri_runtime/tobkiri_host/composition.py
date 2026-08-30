@@ -305,7 +305,14 @@ class HostV4Composition:
         normalized_ceilings: dict[AuthorityEdgeKey, AuthorityCeilings] = {}
         for raw_key, ceilings in authority_ceilings.items():
             if len(raw_key) == 6:
-                edge_key = tuple(str(item) for item in raw_key)
+                edge_key: AuthorityEdgeKey = (
+                    str(raw_key[0]),
+                    str(raw_key[1]),
+                    str(raw_key[2]),
+                    str(raw_key[3]),
+                    str(raw_key[4]),
+                    str(raw_key[5]),
+                )
                 if edge_key[:2] != (profile_id, activation_id):
                     raise ResolutionError(
                         "authority ceiling belongs to another Profile activation"
