@@ -946,16 +946,20 @@ def resolve_default_profile(
         "definition_revision": base_definition["definition_revision"],
         "resolution": "verified",
     }
-    profile["shell"] = {
+    resolved_shell = {
         "provider_id": provider_id,
         "pack_id": shell_pack_id,
         "artifact_digest": shell_manifest["pack"]["artifact_digest"],
-        "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_revision": shell_definition["definition_revision"],
         "contract_id": "app.shell.v1",
         "platform": shell_request["platform"],
         "architecture": shell_request["architecture"],
     }
+    if source.get("profile_api_version") == "io.tobkiri.profile.v5":
+        resolved_shell["executable_artifact_digest"] = selected_variant[
+            "entrypoint_digest"
+        ]
+    profile["shell"] = resolved_shell
     profile["packs"] = [
         {
             "pack_id": manifest["pack"]["id"],
