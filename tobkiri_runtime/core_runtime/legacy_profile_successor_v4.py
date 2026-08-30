@@ -93,7 +93,7 @@ def build_legacy_profile_successor(
         {
             "pack_id": pack_id,
             "artifact_digest": None,
-            "role": _pack_role(packs[pack_id]),
+            "role": "provider",
         }
         for pack_id in selected_pack_ids
     ]
@@ -370,15 +370,6 @@ def _matching_applications(
         if actual == [expected]:
             matches.append(str(pack_id))
     return matches
-
-
-def _pack_role(manifest: Mapping[str, Any]) -> str:
-    kind = str(manifest.get("pack", {}).get("kind") or "")
-    if kind == "application":
-        return "application"
-    if kind in {"normal_sandbox", "host_extension", "shell"}:
-        return "provider"
-    return "backend"
 
 
 __all__ = [
