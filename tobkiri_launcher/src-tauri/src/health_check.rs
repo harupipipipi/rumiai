@@ -137,51 +137,26 @@ fn fetch_authenticated_health(port: u16, bootstrap_secret: &str) -> Result<Optio
 
 /// Capture the exact active execution identity from an authenticated runtime.
 ///
-/// Newer runtimes may project the tuple directly on /health. The canonical
-/// fallback uses the existing one-time panel bootstrap and the committed
-/// profile.read contract, so this function never trusts a client-supplied
-/// profile ID or a launcher-side Defaults constant.
+/// Newer runtimes may project the tuple directly on authenticated `/health`.
+/// The compatibility fallback uses the signed Application contract namespace,
+/// so the Launcher never supplies a product-specific contract constant.
 pub(crate) fn authenticated_runtime_identity(
     port: u16,
     bootstrap_secret: &str,
+    contract_namespace: &str,
 ) -> Result<ExecutionProfileIdentity> {
     let health = fetch_authenticated_health(port, bootstrap_secret)?
         .context("authenticated runtime health is unavailable")?;
     if let Some(identity) = identity_from_health(&health)? {
         return Ok(identity);
     }
+    validate_contract_namespace(contract_namespace)?;
 
-    let code = crate::request_panel_bootstrap_code_with_retry(port, bootstrap_secret)
-        .context("failed to issue a profile identity bootstrap code")?;
     let origin = format!("http://127.0.0.1:{port}");
-    let exchange = health_client()
-        .post(format!("{origin}/api/panel/auth/exchange"))
-        .header("Origin", &origin)
-        .json(&PanelExchangeRequest { code })
-        .send()
-        .context("profile identity panel exchange failed")?;
-    if !exchange.status().is_success() {
-        bail!(
-            "profile identity panel exchange returned {}",
-            exchange.status()
-        );
-    }
-    let cookie = exchange
-        .headers()
-        .get_all(reqwest::header::SET_COOKIE)
-        .iter()
-        .find_map(|value| {
-            let value = value.to_str().ok()?;
-            let (name, rest) = value.split_once('=')?;
-            (name.trim() == "rumi_panel_session")
-                .then(|| rest.split(';').next().unwrap_or_default().trim())
-        })
-        .filter(|value| !value.is_empty())
-        .context("profile identity panel exchange did not return a session cookie")?;
-
+    let cookie = exchange_panel_session(port, bootstrap_secret)?;
     let profile = health_client()
         .get(format!(
-            "{origin}/api/contracts/defaultspack/GET%20%2Fapi%2Fruntime-surface%2Fprofile"
+            "{origin}/api/contracts/{contract_namespace}/GET%20%2Fapi%2Fruntime-surface%2Fprofile"
         ))
         .header(
             reqwest::header::COOKIE,
@@ -202,15 +177,83 @@ pub(crate) fn authenticated_runtime_identity(
     if !envelope.success {
         bail!("canonical runtime profile read was rejected");
     }
-    let data = envelope
-        .data
-        .context("canonical runtime profile response has no data")?;
-    identity_from_runtime_surface(&data)
+    identity_from_runtime_surface(
+        &envelope
+            .data
+            .context("canonical runtime profile response has no data")?,
+    )
 }
 
 #[derive(Debug, Serialize)]
 struct PanelExchangeRequest {
     code: String,
+}
+
+fn exchange_panel_session(port: u16, bootstrap_secret: &str) -> Result<String> {
+    let code = crate::request_panel_bootstrap_code_with_retry(port, bootstrap_secret)
+        .context("failed to issue a profile identity bootstrap code")?;
+    let origin = format!("http://127.0.0.1:{port}");
+    let exchange = health_client()
+        .post(format!("{origin}/api/panel/auth/exchange"))
+        .header("Origin", &origin)
+        .json(&PanelExchangeRequest { code })
+        .send()
+        .context("profile identity panel exchange failed")?;
+    if !exchange.status().is_success() {
+        bail!(
+            "profile identity panel exchange returned {}",
+            exchange.status()
+        );
+    }
+    exchange
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .find_map(|value| {
+            let value = value.to_str().ok()?;
+            let (name, rest) = value.split_once('=')?;
+            (name.trim() == "rumi_panel_session")
+                .then(|| rest.split(';').next().unwrap_or_default().trim().to_owned())
+        })
+        .filter(|value| !value.is_empty())
+        .context("profile identity panel exchange did not return a session cookie")
+}
+
+fn validate_contract_namespace(value: &str) -> Result<()> {
+    let mut parts = value.split(['.', '_', '-']);
+    let first = parts.next().unwrap_or_default();
+    if value.len() > 128
+        || first.is_empty()
+        || !first.as_bytes()[0].is_ascii_lowercase()
+        || !first
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        || parts.any(|part| {
+            part.is_empty()
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+    {
+        bail!("signed Application contract namespace is invalid");
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_application_route(route: &str) -> Result<()> {
+    if route.is_empty()
+        || route.len() > 2048
+        || !route.starts_with('/')
+        || route.starts_with("//")
+        || route.contains(|character| matches!(character, '\\' | '?' | '#' | '%'))
+        || route.bytes().any(|byte| byte.is_ascii_control())
+        || route
+            .split('/')
+            .any(|segment| matches!(segment, "." | ".."))
+    {
+        bail!("active Application launch route is not a safe same-origin path");
+    }
+    Ok(())
 }
 
 fn identity_from_health(payload: &HealthPayload) -> Result<Option<ExecutionProfileIdentity>> {
@@ -374,6 +417,36 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_health_identity_requires_all_four_bindings() {
+        let payload = HealthPayload {
+            panel_ready: Some(true),
+            runtime_ready: Some(true),
+            desktop_challenge_response: None,
+            profile_id: Some("profile-a".into()),
+            profile_revision: Some(format!("sha256:{}", "a".repeat(64))),
+            activation_id: Some("activation:profile-a-2026".into()),
+            plan_digest: Some(format!("sha256:{}", "b".repeat(64))),
+        };
+        let identity = identity_from_health(&payload).unwrap().unwrap();
+        assert_eq!(identity.profile_id, "profile-a");
+        assert_eq!(identity.activation_id, "activation:profile-a-2026");
+    }
+
+    #[test]
+    fn authenticated_health_identity_rejects_missing_activation_binding() {
+        let payload = HealthPayload {
+            panel_ready: Some(true),
+            runtime_ready: Some(true),
+            desktop_challenge_response: None,
+            profile_id: Some("profile-a".into()),
+            profile_revision: Some(format!("sha256:{}", "a".repeat(64))),
+            activation_id: None,
+            plan_digest: Some(format!("sha256:{}", "b".repeat(64))),
+        };
+        assert!(identity_from_health(&payload).is_err());
+    }
+
+    #[test]
     fn runtime_surface_identity_requires_all_four_bindings() {
         let data = serde_json::json!({
             "profile_id": "profile-a",
@@ -396,5 +469,13 @@ mod tests {
             "plan_digest": format!("sha256:{}", "b".repeat(64))
         });
         assert!(identity_from_runtime_surface(&data).is_err());
+    }
+
+    #[test]
+    fn signed_contract_namespace_rejects_path_injection() {
+        assert!(validate_contract_namespace("fixture.application-2").is_ok());
+        assert!(validate_contract_namespace("../escape").is_err());
+        assert!(validate_contract_namespace("fixture/application").is_err());
+        assert!(validate_contract_namespace("Fixture.application").is_err());
     }
 }

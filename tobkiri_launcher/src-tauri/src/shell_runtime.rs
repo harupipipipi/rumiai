@@ -1,7 +1,7 @@
-//! Presentation-only runtime for the verified `shell.tauri.default` artifact.
+//! Presentation-only runtime for a verified Profile-selected Shell artifact.
 //!
 //! This process deliberately does not start the Launcher Host Broker, Kernel,
-//! Defaultspack guardian, tray, or any Host command surface. It only consumes a
+//! Application guardian, tray, or any Host command surface. It only consumes a
 //! one-shot authenticated runtime-profile handoff and presents that loopback
 //! origin in its WebView.
 
@@ -18,44 +18,57 @@ use crate::shell_handoff::{
     consume_shell_handoff, handoff_path_from_os_args, handoff_path_from_strings,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ShellRuntimeBinding {
     runtime_port: u16,
     identity: crate::host_contract::ExecutionProfileIdentity,
+    catalog_revision: String,
+    artifact: crate::shell_handoff::ShellArtifactIdentity,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ShellRuntimeState {
+    binding: Option<ShellRuntimeBinding>,
+    allowed_runtime_ports: Vec<u16>,
+}
+
+impl ShellRuntimeState {
+    fn accept_handoff(
+        &mut self,
+        handoff: &crate::shell_handoff::ValidatedShellHandoff,
+    ) -> Result<()> {
+        let proposed = ShellRuntimeBinding {
+            runtime_port: handoff.runtime_port,
+            identity: handoff.identity.clone(),
+            catalog_revision: handoff.catalog_revision.clone(),
+            artifact: handoff.artifact.clone(),
+        };
+        if let Some(current) = self.binding.as_ref() {
+            if current != &proposed {
+                return Err(anyhow!(
+                    "Shell runtime identity binding changed during handoff"
+                ));
+            }
+            return Ok(());
+        }
+
+        self.allowed_runtime_ports = vec![handoff.runtime_port];
+        self.binding = Some(proposed);
+        Ok(())
+    }
 }
 
 fn apply_handoff(
     app: &AppHandle,
     path: &Path,
-    allowed_runtime_ports: &Arc<Mutex<Vec<u16>>>,
-    runtime_binding: &Arc<Mutex<Option<ShellRuntimeBinding>>>,
+    runtime_state: &Arc<Mutex<ShellRuntimeState>>,
 ) -> Result<()> {
     let handoff = consume_shell_handoff(path)?;
     {
-        let mut ports = allowed_runtime_ports
+        let mut state = runtime_state
             .lock()
-            .map_err(|error| anyhow!("Shell navigation policy lock is poisoned: {error}"))?;
-        ports.clear();
-        ports.push(handoff.runtime_port);
-    }
-    {
-        let mut binding = runtime_binding
-            .lock()
-            .map_err(|error| anyhow!("Shell identity binding lock is poisoned: {error}"))?;
-        *binding = Some(ShellRuntimeBinding {
-            runtime_port: handoff.runtime_port,
-            identity: handoff.identity.clone(),
-        });
-        let current = binding
-            .as_ref()
-            .context("Shell identity binding was not retained")?;
-        if current.runtime_port != handoff.runtime_port
-            || !current.identity.matches(&handoff.identity)
-        {
-            return Err(anyhow!(
-                "Shell runtime identity binding changed during handoff"
-            ));
-        }
+            .map_err(|error| anyhow!("Shell runtime state lock is poisoned: {error}"))?;
+        state.accept_handoff(&handoff)?;
     }
 
     let window = app
@@ -84,24 +97,16 @@ fn reject_initial_handoff(app: &AppHandle, error: &anyhow::Error) {
 }
 
 pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
-    let allowed_runtime_ports = Arc::new(Mutex::new(Vec::<u16>::new()));
-    let runtime_binding = Arc::new(Mutex::new(None::<ShellRuntimeBinding>));
-    let ports_for_navigation = Arc::clone(&allowed_runtime_ports);
-    let ports_for_forwarded_handoff = Arc::clone(&allowed_runtime_ports);
-    let binding_for_forwarded_handoff = Arc::clone(&runtime_binding);
+    let runtime_state = Arc::new(Mutex::new(ShellRuntimeState::default()));
+    let state_for_navigation = Arc::clone(&runtime_state);
+    let state_for_forwarded_handoff = Arc::clone(&runtime_state);
     let initial_args = std::env::args_os().collect::<Vec<OsString>>();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
             move |app, args, _cwd| {
-                let result = handoff_path_from_strings(&args).and_then(|path| {
-                    apply_handoff(
-                        app,
-                        &path,
-                        &ports_for_forwarded_handoff,
-                        &binding_for_forwarded_handoff,
-                    )
-                });
+                let result = handoff_path_from_strings(&args)
+                    .and_then(|path| apply_handoff(app, &path, &state_for_forwarded_handoff));
                 if let Err(error) = result {
                     warn!("Forwarded Tobkiri Shell handoff rejected: {error:#}");
                 }
@@ -110,9 +115,9 @@ pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("shell-nav-guard")
                 .on_navigation(move |_webview, url| {
-                    let allowed_ports = ports_for_navigation
+                    let allowed_ports = state_for_navigation
                         .lock()
-                        .map(|ports| ports.clone())
+                        .map(|state| state.allowed_runtime_ports.clone())
                         .unwrap_or_default();
                     navigation_is_allowed(
                         url.scheme(),
@@ -124,14 +129,9 @@ pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
                 .build(),
         )
         .setup(move |app| {
-            match handoff_path_from_os_args(initial_args.clone()).and_then(|path| {
-                apply_handoff(
-                    app.handle(),
-                    &path,
-                    &allowed_runtime_ports,
-                    &runtime_binding,
-                )
-            }) {
+            match handoff_path_from_os_args(initial_args.clone())
+                .and_then(|path| apply_handoff(app.handle(), &path, &runtime_state))
+            {
                 Ok(()) => {}
                 Err(error) => reject_initial_handoff(app.handle(), &error),
             }
@@ -168,4 +168,84 @@ pub(crate) fn run(context: tauri::Context<tauri::Wry>) {
         #[cfg(not(target_os = "macos"))]
         let _ = (app_handle, event);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell_handoff::{ShellArtifactIdentity, ValidatedShellHandoff};
+    use tauri::Url;
+
+    fn handoff() -> ValidatedShellHandoff {
+        ValidatedShellHandoff {
+            runtime_url: Url::parse("http://127.0.0.1:8766/?code=fixture").unwrap(),
+            runtime_port: 8766,
+            identity: crate::host_contract::ExecutionProfileIdentity::new(
+                "profile-a",
+                format!("sha256:{}", "a".repeat(64)),
+                "activation:profile-a-2026",
+                format!("sha256:{}", "b".repeat(64)),
+            )
+            .unwrap(),
+            catalog_revision: format!("sha256:{}", "c".repeat(64)),
+            artifact: ShellArtifactIdentity {
+                provider_id: "fixture.shell".into(),
+                artifact_id: "fixture.shell.macos-arm64".into(),
+                artifact_digest: format!("sha256:{}", "d".repeat(64)),
+                entrypoint_digest: format!("sha256:{}", "e".repeat(64)),
+            },
+        }
+    }
+
+    fn assert_mismatch_preserves_state(mutate: impl FnOnce(&mut ValidatedShellHandoff)) {
+        let initial = handoff();
+        let mut state = ShellRuntimeState::default();
+        state.accept_handoff(&initial).unwrap();
+        let before = state.clone();
+        let mut forwarded = handoff();
+        mutate(&mut forwarded);
+
+        assert!(state.accept_handoff(&forwarded).is_err());
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn identical_forwarded_handoff_preserves_binding_and_ports() {
+        let handoff = handoff();
+        let mut state = ShellRuntimeState::default();
+        state.accept_handoff(&handoff).unwrap();
+        let before = state.clone();
+
+        state.accept_handoff(&handoff).unwrap();
+
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn forwarded_activation_mismatch_preserves_binding_and_ports() {
+        assert_mismatch_preserves_state(|handoff| {
+            handoff.identity.activation_id = "activation:profile-a-2027".into();
+        });
+    }
+
+    #[test]
+    fn forwarded_catalog_mismatch_preserves_binding_and_ports() {
+        assert_mismatch_preserves_state(|handoff| {
+            handoff.catalog_revision = format!("sha256:{}", "f".repeat(64));
+        });
+    }
+
+    #[test]
+    fn forwarded_artifact_digest_mismatch_preserves_binding_and_ports() {
+        assert_mismatch_preserves_state(|handoff| {
+            handoff.artifact.artifact_digest = format!("sha256:{}", "f".repeat(64));
+        });
+    }
+
+    #[test]
+    fn forwarded_port_mismatch_preserves_binding_and_ports() {
+        assert_mismatch_preserves_state(|handoff| {
+            handoff.runtime_port = 9876;
+        });
+    }
 }

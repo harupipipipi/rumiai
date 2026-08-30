@@ -262,6 +262,25 @@ pub struct PresentationCatalog {
     pub release_binding: Option<PresentationReleaseBinding>,
 }
 
+impl PresentationCatalog {
+    /// Interpret the existing v4 default-profile fields strictly as bootstrap
+    /// compatibility metadata. Active launch authority always comes from the
+    /// verified Activation and ResolvedPlan.
+    pub(crate) fn bootstrap_profile_identity(&self) -> AnyResult<(&str, &str, &str)> {
+        if self.default_profile_id.trim().is_empty()
+            || self.default_profile_source.trim().is_empty()
+            || !is_sha256_digest(&self.default_profile_digest)
+        {
+            bail!("presentation catalog bootstrap Profile metadata is invalid");
+        }
+        Ok((
+            &self.default_profile_id,
+            &self.default_profile_source,
+            &self.default_profile_digest,
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PresentationReleaseBinding {
     pub schema: String,
@@ -430,8 +449,22 @@ pub async fn launch_selected_presentation(
     })?;
     launch_result.map_err(|error| {
         error!("selected presentation launch blocked: {error:#}");
-        "selected presentation could not be launched".to_string()
+        presentation_launch_error_wire(&error)
     })
+}
+
+fn presentation_launch_error_wire(error: &anyhow::Error) -> String {
+    if error
+        .downcast_ref::<crate::defaultspack_authority::ProfileReresolutionRequired>()
+        .is_some()
+    {
+        return serde_json::json!({
+            "code": crate::defaultspack_authority::ProfileReresolutionRequired::CODE,
+            "action": crate::defaultspack_authority::ProfileReresolutionRequired::ACTION,
+        })
+        .to_string();
+    }
+    "selected presentation could not be launched".to_string()
 }
 
 fn select_presentation_impl(
@@ -452,46 +485,62 @@ pub(crate) fn launch_selected_presentation_impl(
     app: &AppHandle,
     config: &AppConfig,
 ) -> AnyResult<PresentationLaunchResponse> {
-    let state = build_state(config)?;
-    let selection = state
-        .selection
-        .as_ref()
-        .context("no Base Pack and Shell selection has been saved")?;
-    if state.materialization.status != "materialized" {
-        bail!(
-            "selected presentation launch is blocked: {}",
-            state
-                .materialization
-                .reason
-                .as_deref()
-                .unwrap_or("materialization did not complete")
-        );
+    let authority = crate::defaultspack_authority::resolve(config)
+        .context("active Application authority could not be resolved")?;
+    let execution_identity = authority.execution_identity()?;
+    let launch_contribution = authority.runtime_launch_contribution()?;
+    let catalog = load_catalog(config)?;
+    let catalog_revision = catalog_revision(&catalog)?;
+    if authority.catalog_revision != catalog_revision {
+        bail!("active ResolvedPlan uses a stale presentation catalog");
     }
-
-    let shell = state
-        .catalog
+    let selection = PresentationSelection {
+        base_pack_id: authority.base_pack_id.clone(),
+        shell_provider_id: authority.shell_provider_id.clone(),
+    };
+    validate_selection(&catalog, &selection)?;
+    let shell = catalog
         .shell_providers
         .iter()
-        .find(|candidate| candidate.provider_id == selection.shell_provider_id)
-        .context("selected Shell Provider is no longer in the verified catalog")?;
-    let artifact = shell
-        .artifact
-        .as_ref()
-        .context("selected Shell Provider has no platform artifact")?;
-    validate_production_artifact(artifact)?;
-    let artifact_path = artifact_path(config, artifact)?;
-    let catalog_revision = catalog_revision(&state.catalog)?;
+        .find(|candidate| candidate.provider_id == authority.shell_provider_id)
+        .context("active Profile Shell Provider is not in the verified catalog")?;
+    let variant = shell
+        .artifact_variants
+        .iter()
+        .find(|variant| variant.artifact_id == authority.launch.artifact_id)
+        .context("active Profile Shell artifact handle is not in the verified catalog")?;
+    if variant.sha256.as_deref() != Some(authority.launch.artifact_digest.as_str())
+        || variant.entrypoint_sha256.as_deref() != Some(authority.launch.entrypoint_digest.as_str())
+        || variant.sha256.as_deref() != Some(launch_contribution.artifact_digest.as_str())
+        || variant.artifact_ref != launch_contribution.relative_path
+        || variant.entrypoint != launch_contribution.entrypoint
+    {
+        bail!("active Profile Shell artifact handle differs from its signed catalog");
+    }
+    let artifact = resolve_artifact(config, shell)?;
+    if artifact.artifact_id != authority.launch.artifact_id
+        || artifact.sha256.as_deref() != Some(authority.launch.artifact_digest.as_str())
+    {
+        bail!("materialized Shell differs from the active ResolvedPlan artifact handle");
+    }
+    validate_production_artifact(&artifact)?;
+    let artifact_path = artifact_path(config, &artifact)?;
 
     // Runtime readiness and local authentication are resolved only after the
     // exact verified Shell artifact has passed pre-admission. The authenticated
     // URL never crosses argv or the environment; only an owner-only one-shot
     // handoff path is passed to the presentation process.
     let prepared_runtime =
-        crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config)?;
-    if let Some(selection_identity) = state.execution_identity.as_ref() {
-        if !selection_identity.matches(&prepared_runtime.identity) {
-            bail!("selected presentation identity is stale; active execution Profile changed");
-        }
+        crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config, "/")?;
+    if !execution_identity.matches(&prepared_runtime.identity)
+        || prepared_runtime.catalog_revision != catalog_revision
+        || prepared_runtime.base_pack_id != selection.base_pack_id
+        || prepared_runtime.shell.provider_id != shell.provider_id
+        || prepared_runtime.shell.artifact_id != artifact.artifact_id
+        || prepared_runtime.shell.artifact_digest != artifact.sha256.as_deref().unwrap_or_default()
+        || prepared_runtime.shell.entrypoint_digest != authority.launch.entrypoint_digest
+    {
+        bail!("active Application or Shell binding changed during launch");
     }
     // A selection is a durable artifact preference until an active runtime is
     // captured. Persisting the exact identity here makes a restart or a second
@@ -499,8 +548,8 @@ pub(crate) fn launch_selected_presentation_impl(
     // the packaged bootstrap Profile.
     write_selection_with_identity(
         config,
-        &state.catalog,
-        selection,
+        &catalog,
+        &selection,
         Some(&prepared_runtime.identity),
     )?;
     let handoff_path = crate::shell_handoff::create_shell_handoff(
@@ -510,6 +559,8 @@ pub(crate) fn launch_selected_presentation_impl(
             catalog_revision: &catalog_revision,
             provider_id: &shell.provider_id,
             artifact_id: &artifact.artifact_id,
+            artifact_digest: &prepared_runtime.shell.artifact_digest,
+            entrypoint_digest: &prepared_runtime.shell.entrypoint_digest,
         },
         &prepared_runtime.url,
     )?;
@@ -2984,6 +3035,29 @@ mod tests {
         catalog.shell_providers[0].artifact_variants.push(duplicate);
         let error = validate_catalog_integrity(&catalog).unwrap_err();
         assert!(error.to_string().contains("invalid production variant"));
+    }
+
+    #[test]
+    fn presentation_launch_preserves_reresolution_code_and_action() {
+        let error = Err::<(), _>(crate::defaultspack_authority::ProfileReresolutionRequired)
+            .context("active Application authority could not be resolved")
+            .unwrap_err();
+        let wire: serde_json::Value =
+            serde_json::from_str(&presentation_launch_error_wire(&error)).unwrap();
+        assert_eq!(
+            wire["code"],
+            crate::defaultspack_authority::ProfileReresolutionRequired::CODE
+        );
+        assert_eq!(
+            wire["action"],
+            crate::defaultspack_authority::ProfileReresolutionRequired::ACTION
+        );
+
+        let malformed = anyhow::anyhow!("active ResolvedPlan launch selector is malformed");
+        assert_eq!(
+            presentation_launch_error_wire(&malformed),
+            "selected presentation could not be launched"
+        );
     }
 
     #[test]

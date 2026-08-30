@@ -20,13 +20,13 @@ use tauri::Url;
 use crate::config::AppConfig;
 use crate::host_contract::ExecutionProfileIdentity;
 
+/// Bundle identifier used only to select the presentation-only Shell runtime.
 pub(crate) const SHELL_BUNDLE_IDENTIFIER: &str = "io.tobkiri.shell.tauri";
-pub(crate) const SHELL_PROVIDER_ID: &str = "shell.tauri.default";
 pub(crate) const HANDOFF_ARGUMENT: &str = "--tobkiri-shell-handoff";
 const LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher";
 const CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher.ci-e2e";
 const MACOS_ARTIFACT_POLICY: &str = env!("TOBKIRI_MACOS_ARTIFACT_POLICY");
-const HANDOFF_SCHEMA: &str = "io.tobkiri.shell-handoff.v2";
+const HANDOFF_SCHEMA: &str = "io.tobkiri.shell-handoff.v3";
 const LOCAL_AUTH_PROTOCOL: &str = "io.tobkiri.local-auth.v1";
 const LOCAL_AUTH_AUDIENCE: &str = "runtime-profile";
 const HANDOFF_DIRECTORY: &str = "shell_handoff";
@@ -49,6 +49,8 @@ struct ShellHandoffPayload {
     catalog_revision: String,
     provider_id: String,
     artifact_id: String,
+    artifact_digest: String,
+    entrypoint_digest: String,
     runtime_url: String,
     created_at: u64,
     expires_at: u64,
@@ -60,6 +62,21 @@ pub(crate) struct ValidatedShellHandoff {
     pub runtime_port: u16,
     pub identity: ExecutionProfileIdentity,
     pub catalog_revision: String,
+    pub artifact: ShellArtifactIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShellArtifactIdentity {
+    pub provider_id: String,
+    pub artifact_id: String,
+    pub artifact_digest: String,
+    pub entrypoint_digest: String,
+}
+
+impl ShellArtifactIdentity {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
+        self == other
+    }
 }
 
 pub(crate) struct ShellHandoffBinding<'a> {
@@ -67,6 +84,8 @@ pub(crate) struct ShellHandoffBinding<'a> {
     pub catalog_revision: &'a str,
     pub provider_id: &'a str,
     pub artifact_id: &'a str,
+    pub artifact_digest: &'a str,
+    pub entrypoint_digest: &'a str,
 }
 
 pub(crate) fn create_shell_handoff(
@@ -91,6 +110,8 @@ pub(crate) fn create_shell_handoff(
         catalog_revision: binding.catalog_revision.to_string(),
         provider_id: binding.provider_id.to_string(),
         artifact_id: binding.artifact_id.to_string(),
+        artifact_digest: binding.artifact_digest.to_string(),
+        entrypoint_digest: binding.entrypoint_digest.to_string(),
         runtime_url: runtime_url.to_string(),
         created_at: now,
         expires_at: now.saturating_add(HANDOFF_TTL_SECONDS),
@@ -289,7 +310,6 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
     if payload.schema != HANDOFF_SCHEMA
         || payload.protocol != LOCAL_AUTH_PROTOCOL
         || payload.audience != LOCAL_AUTH_AUDIENCE
-        || payload.provider_id != SHELL_PROVIDER_ID
     {
         bail!("Shell handoff identity is invalid");
     }
@@ -301,9 +321,13 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
     )
     .context("Shell handoff execution Profile identity is invalid")?;
     validate_sha256(&payload.catalog_revision, "catalog revision")?;
-    if payload.artifact_id != expected_shell_artifact_id()? {
+    if !valid_artifact_identifier(&payload.provider_id)
+        || !valid_artifact_identifier(&payload.artifact_id)
+    {
         bail!("Shell handoff artifact identity is invalid");
     }
+    validate_sha256(&payload.artifact_digest, "artifact digest")?;
+    validate_sha256(&payload.entrypoint_digest, "entrypoint digest")?;
     if payload.nonce.len() != 40
         || !payload
             .nonce
@@ -327,11 +351,12 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
         || runtime_url.host_str() != Some("127.0.0.1")
         || runtime_url.username() != ""
         || runtime_url.password().is_some()
-        || runtime_url.path() != "/chat"
         || runtime_url.fragment().is_some()
     {
         bail!("Shell runtime URL is outside the authenticated loopback contract");
     }
+    crate::health_check::validate_application_route(runtime_url.path())
+        .context("Shell runtime URL has an unsafe Application route")?;
     let runtime_port = runtime_url
         .port()
         .context("Shell runtime URL must use an explicit loopback port")?;
@@ -356,7 +381,21 @@ fn validate_payload(payload: &ShellHandoffPayload, now: u64) -> Result<Validated
         runtime_port,
         identity,
         catalog_revision: payload.catalog_revision.clone(),
+        artifact: ShellArtifactIdentity {
+            provider_id: payload.provider_id.clone(),
+            artifact_id: payload.artifact_id.clone(),
+            artifact_digest: payload.artifact_digest.clone(),
+            entrypoint_digest: payload.entrypoint_digest.clone(),
+        },
     })
+}
+
+fn valid_artifact_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
 }
 
 fn validate_sha256(value: &str, label: &str) -> Result<()> {
@@ -371,16 +410,6 @@ fn validate_sha256(value: &str, label: &str) -> Result<()> {
         bail!("Shell handoff {label} is invalid");
     }
     Ok(())
-}
-
-fn expected_shell_artifact_id() -> Result<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => Ok("shell.tauri.default.macos-arm64"),
-        ("macos", "x86_64") => Ok("shell.tauri.default.macos-x86_64"),
-        ("windows", "x86_64") => Ok("shell.tauri.default.windows-x86_64"),
-        ("linux", "x86_64") => Ok("shell.tauri.default.linux-x86_64"),
-        _ => bail!("Tobkiri Shell has no production artifact for this host"),
-    }
 }
 
 #[cfg(any(windows, test))]
@@ -990,25 +1019,29 @@ mod tests {
             activation_id: "activation:profile-a-2026".into(),
             plan_digest: format!("sha256:{}", "c".repeat(64)),
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
-            provider_id: SHELL_PROVIDER_ID.into(),
-            artifact_id: expected_shell_artifact_id().unwrap().into(),
-            runtime_url: format!("http://127.0.0.1:8766/chat?code={}", "c".repeat(64)),
+            provider_id: "fixture.shell".into(),
+            artifact_id: "fixture.shell.macos-arm64".into(),
+            artifact_digest: format!("sha256:{}", "d".repeat(64)),
+            entrypoint_digest: format!("sha256:{}", "e".repeat(64)),
+            runtime_url: format!("http://127.0.0.1:8766/?code={}", "c".repeat(64)),
             created_at: now,
             expires_at: now + 60,
             nonce: "A".repeat(40),
         };
         assert!(validate_payload(&base, now).is_ok());
         let mut wrong_provider = serde_json::to_value(&base).unwrap();
-        wrong_provider["provider_id"] = serde_json::Value::String("wrong.shell".into());
+        wrong_provider["provider_id"] = serde_json::Value::String("../wrong.shell".into());
         assert!(validate_payload(&serde_json::from_value(wrong_provider).unwrap(), now).is_err());
         let mut external = serde_json::to_value(&base).unwrap();
-        external["runtime_url"] =
-            serde_json::Value::String(format!("https://example.com/chat?code={}", "c".repeat(64)));
+        external["runtime_url"] = serde_json::Value::String(format!(
+            "https://example.com/workspace?code={}",
+            "c".repeat(64)
+        ));
         assert!(validate_payload(&serde_json::from_value(external).unwrap(), now).is_err());
         for invalid_url in [
-            "http://127.0.0.1:8766/chat#rumi_local_auth=legacy-token".to_string(),
-            "http://127.0.0.1:8766/chat?code=short".to_string(),
-            format!("http://127.0.0.1:8766/chat?code={}&extra=1", "c".repeat(64)),
+            "http://127.0.0.1:8766/#rumi_local_auth=legacy-token".to_string(),
+            "http://127.0.0.1:8766/?code=short".to_string(),
+            format!("http://127.0.0.1:8766/?code={}&extra=1", "c".repeat(64)),
         ] {
             let mut invalid = serde_json::to_value(&base).unwrap();
             invalid["runtime_url"] = serde_json::Value::String(invalid_url);
@@ -1061,9 +1094,11 @@ mod tests {
             activation_id: "activation:profile-a-2026".into(),
             plan_digest: format!("sha256:{}", "c".repeat(64)),
             catalog_revision: format!("sha256:{}", "b".repeat(64)),
-            provider_id: SHELL_PROVIDER_ID.into(),
-            artifact_id: expected_shell_artifact_id().unwrap().into(),
-            runtime_url: format!("http://127.0.0.1:8766/chat?code={}", "c".repeat(64)),
+            provider_id: "fixture.shell".into(),
+            artifact_id: "fixture.shell.macos-arm64".into(),
+            artifact_digest: format!("sha256:{}", "d".repeat(64)),
+            entrypoint_digest: format!("sha256:{}", "e".repeat(64)),
+            runtime_url: format!("http://127.0.0.1:8766/?code={}", "c".repeat(64)),
             created_at: now,
             expires_at: now + HANDOFF_TTL_SECONDS,
             nonce: "C".repeat(40),

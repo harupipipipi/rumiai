@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
+use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -86,6 +87,78 @@ pub(crate) struct ApplicationAuthority {
     pub base_pack_id: String,
     pub shell_provider_id: String,
     pub application_id: String,
+    pub launch_contribution: Option<RuntimeLaunchContribution>,
+}
+
+/// Canonical Application launch selector carried by the active ResolvedPlan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeLaunchContribution {
+    pub provider_id: String,
+    pub contract_id: String,
+    pub operation_id: String,
+    pub platform: String,
+    pub architecture: String,
+    pub artifact_digest: String,
+    pub relative_path: String,
+    pub entrypoint: String,
+}
+
+/// Recoverable compatibility state for an activation created before the
+/// ResolvedPlan launch selector became available.
+#[derive(Debug)]
+pub(crate) struct ProfileReresolutionRequired;
+
+impl fmt::Display for ProfileReresolutionRequired {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(
+            "active ResolvedPlan has no Application launch contribution; profile reactivation or re-resolution is required",
+        )
+    }
+}
+
+impl std::error::Error for ProfileReresolutionRequired {}
+
+impl ProfileReresolutionRequired {
+    pub(crate) const CODE: &'static str = "PROFILE_RERESOLUTION_REQUIRED";
+    pub(crate) const ACTION: &'static str = "reactivate_or_reresolve_profile";
+}
+
+impl ApplicationAuthority {
+    /// Return the activation identity that is permitted to execute this
+    /// Application.  A signed bootstrap Profile is useful for setup and safe
+    /// repair, but it is deliberately not a normal launch authority.
+    pub(crate) fn execution_identity(
+        &self,
+    ) -> Result<crate::host_contract::ExecutionProfileIdentity> {
+        let profile_revision = self
+            .profile_revision
+            .as_deref()
+            .context("Application launch requires an active Profile revision")?;
+        let activation_id = self
+            .activation_id
+            .as_deref()
+            .context("Application launch requires an active activation")?;
+        let plan_digest = self
+            .plan_digest
+            .as_deref()
+            .context("Application launch requires a verified ResolvedPlan")?;
+        if self.profile_digest != profile_revision {
+            bail!("active Profile revision differs from the selected Profile bytes");
+        }
+        crate::host_contract::ExecutionProfileIdentity::new(
+            &self.profile_id,
+            profile_revision,
+            activation_id,
+            plan_digest,
+        )
+        .context("Application launch execution identity is invalid")
+    }
+
+    pub(crate) fn runtime_launch_contribution(&self) -> Result<&RuntimeLaunchContribution> {
+        self.launch_contribution
+            .as_ref()
+            .context("active ResolvedPlan has no Application launch contribution")
+    }
 }
 
 /// Compatibility alias for callers that still use the old guardian vocabulary.
@@ -96,9 +169,12 @@ pub(crate) type GuardianAuthority = ApplicationAuthority;
 pub(crate) struct ApplicationLaunch {
     pub entrypoint: PathBuf,
     pub argv: Vec<OsString>,
+    pub artifact_id: String,
     pub artifact_digest: String,
+    pub entrypoint_digest: String,
     pub function_id: String,
     pub provider_id: String,
+    pub contract_namespace: String,
 }
 
 /// Compatibility alias for the pre-generic Launcher composition root.
@@ -196,7 +272,8 @@ impl SignedApplicationResolver {
         let catalog = crate::presentation::load_catalog(config)
             .context("signed presentation catalog authority was rejected")?;
         let app_root = canonical_directory(&config.app_dir, "packaged application root")?;
-        let bundle_root = packaged_bundle_root(&app_root, &catalog.default_profile_source)?;
+        let (_, bootstrap_profile_source, _) = catalog.bootstrap_profile_identity()?;
+        let bundle_root = packaged_bundle_root(&app_root, bootstrap_profile_source)?;
         verify_symlink_free_tree(&bundle_root, &bundle_root)?;
         let bundle_lock = verify_bundle_lock(&bundle_root)?;
         let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
@@ -211,6 +288,7 @@ impl SignedApplicationResolver {
             &app_root,
             &application_pack,
             selected_variant,
+            selected.launch_contribution.as_ref(),
             &selected.application_pack_id,
             selected.application_artifact_digest.as_deref(),
         )?;
@@ -238,6 +316,7 @@ impl SignedApplicationResolver {
             base_pack_id: selected.base_pack_id,
             shell_provider_id: selected.shell_provider_id,
             application_id: selected.application_pack_id,
+            launch_contribution: selected.launch_contribution,
         })
     }
 }
@@ -268,6 +347,7 @@ struct SelectedProfileAuthority {
     shell_pack_id: String,
     application_pack_id: String,
     application_artifact_digest: Option<String>,
+    launch_contribution: Option<RuntimeLaunchContribution>,
     pack_ids: BTreeSet<String>,
 }
 
@@ -578,6 +658,8 @@ fn select_profile_authority(
     // a compatibility adapter for a fresh install only; it derives every
     // identity from the catalog/profile bytes and never substitutes a
     // Defaultspack or Tauri identifier.
+    let (bootstrap_profile_id, _, bootstrap_profile_digest) =
+        catalog.bootstrap_profile_identity()?;
     let profile_path = bundle_lock
         .authority_roles
         .iter()
@@ -586,7 +668,7 @@ fn select_profile_authority(
                 && bundle_lock
                     .authority_digests
                     .get(*path)
-                    .is_some_and(|digest| digest == &catalog.default_profile_digest)
+                    .is_some_and(|digest| digest == bootstrap_profile_digest)
         })
         .map(|(path, _)| path)
         .context("signed catalog Profile is absent from the Pack bundle")?;
@@ -598,8 +680,8 @@ fn select_profile_authority(
         profile,
         None,
         None,
-        catalog.default_profile_id.clone(),
-        catalog.default_profile_digest.clone(),
+        bootstrap_profile_id.to_owned(),
+        bootstrap_profile_digest.to_owned(),
         None,
         None,
         None,
@@ -701,7 +783,11 @@ fn selected_profile_from_documents(
     if pack_ids.len() != packs.len() {
         bail!("selected Profile contains duplicate or incomplete Pack identities");
     }
-    let mut selected = SelectedProfileAuthority {
+    let launch_contribution = plan
+        .as_ref()
+        .map(runtime_launch_contribution_from_plan)
+        .transpose()?;
+    let selected = SelectedProfileAuthority {
         profile,
         lock,
         plan,
@@ -715,6 +801,7 @@ fn selected_profile_from_documents(
         shell_pack_id,
         application_pack_id,
         application_artifact_digest,
+        launch_contribution,
         lock_digest,
         pack_ids,
     };
@@ -726,6 +813,66 @@ fn selected_profile_from_documents(
         validate_plan_graph(&selected, plan)?;
     }
     Ok(selected)
+}
+
+fn runtime_launch_contribution_from_plan(plan: &Value) -> Result<RuntimeLaunchContribution> {
+    let Some(raw_contribution) = plan.get("launch_contribution") else {
+        return Err(ProfileReresolutionRequired.into());
+    };
+    if raw_contribution.is_null() {
+        return Err(ProfileReresolutionRequired.into());
+    }
+    let contribution = raw_contribution
+        .as_object()
+        .context("active ResolvedPlan launch_contribution is malformed")?;
+    let required = [
+        "provider_id",
+        "contract_id",
+        "operation_id",
+        "platform",
+        "architecture",
+        "artifact_digest",
+        "relative_path",
+        "entrypoint",
+    ];
+    if contribution.len() != required.len()
+        || required
+            .iter()
+            .any(|field| !contribution.contains_key(*field))
+    {
+        bail!("active ResolvedPlan launch_contribution shape is invalid");
+    }
+    let field = |name: &str| -> Result<String> {
+        contribution
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+            .with_context(|| format!("launch_contribution {name} is invalid"))
+    };
+    let selector = RuntimeLaunchContribution {
+        provider_id: field("provider_id")?,
+        contract_id: field("contract_id")?,
+        operation_id: field("operation_id")?,
+        platform: field("platform")?,
+        architecture: field("architecture")?,
+        artifact_digest: field("artifact_digest")?,
+        relative_path: field("relative_path")?,
+        entrypoint: field("entrypoint")?,
+    };
+    if !valid_identifier(&selector.provider_id)
+        || !valid_contract_id(&selector.contract_id)
+        || !valid_identifier(&selector.operation_id)
+        || !valid_digest(&selector.artifact_digest)
+    {
+        bail!("active ResolvedPlan launch_contribution identity is invalid");
+    }
+    let artifact_path = safe_relative(&selector.relative_path)?;
+    let entrypoint_path = safe_relative(&selector.entrypoint)?;
+    if !entrypoint_path.starts_with(&artifact_path) {
+        bail!("active ResolvedPlan launch entrypoint escapes its artifact");
+    }
+    Ok(selector)
 }
 
 fn ensure_profile_selection_is_known(
@@ -841,6 +988,22 @@ fn validate_plan_graph(selected: &SelectedProfileAuthority, plan: &Value) -> Res
     {
         bail!("ResolvedPlan Application artifact digest differs from the Profile");
     }
+    let shell_artifact_digest = value_str(plan, "/shell/artifact_digest")
+        .context("ResolvedPlan Shell digest is missing")?;
+    if !valid_digest(shell_artifact_digest)
+        || value_str(&selected.profile, "/shell/artifact_digest") != Some(shell_artifact_digest)
+    {
+        bail!("ResolvedPlan Shell artifact digest differs from the Profile");
+    }
+    let launch = selected
+        .launch_contribution
+        .as_ref()
+        .context("active ResolvedPlan launch contribution is unavailable")?;
+    if value_str(&selected.profile, "/shell/platform") != Some(launch.platform.as_str())
+        || value_str(&selected.profile, "/shell/architecture") != Some(launch.architecture.as_str())
+    {
+        bail!("ResolvedPlan launch contribution targets a different Profile Shell");
+    }
     Ok(())
 }
 
@@ -950,6 +1113,7 @@ fn validate_application_pack(
     pack_root: &Path,
     pack: &Value,
     selected_variant: &crate::presentation::ArtifactVariant,
+    launch_contribution: Option<&RuntimeLaunchContribution>,
     expected_application_id: &str,
     expected_artifact_digest: Option<&str>,
 ) -> Result<ApplicationLaunch> {
@@ -998,6 +1162,18 @@ fn validate_application_pack(
     {
         bail!("application Pack launch identity is invalid");
     }
+    if let Some(selector) = launch_contribution {
+        if selector.provider_id != value_str(&providers[0], "/provider_id").unwrap_or_default()
+            || selector.contract_id
+                != value_str(&providers[0], "/contract_reference").unwrap_or_default()
+            || selector.operation_id
+                != value_str(&operations[0], "/operation_id").unwrap_or_default()
+            || selector.platform != selected_variant.platform
+            || selector.architecture != selected_variant.architecture
+        {
+            bail!("Application Pack differs from the active launch contribution");
+        }
+    }
 
     let executable_index = artifacts
         .iter()
@@ -1035,6 +1211,11 @@ fn validate_application_pack(
     {
         bail!("application Pack artifact identity is invalid");
     }
+    if let Some(selector) = launch_contribution {
+        if selector.artifact_digest != artifact_digest {
+            bail!("Application artifact digest differs from the active launch contribution");
+        }
+    }
     #[cfg(not(test))]
     if selected_variant.sha256.as_deref() != Some(artifact_digest)
         || selected_variant.entrypoint_sha256.as_deref() != Some(entrypoint_digest)
@@ -1068,6 +1249,11 @@ fn validate_application_pack(
         value_str(executable, "/entrypoint").context("application Pack entrypoint is missing")?;
     if artifact_path != selected_variant.artifact_ref || entrypoint != selected_variant.entrypoint {
         bail!("application Pack does not identify the selected Shell artifact");
+    }
+    if let Some(selector) = launch_contribution {
+        if selector.relative_path != artifact_path || selector.entrypoint != entrypoint {
+            bail!("Application path differs from the active launch contribution");
+        }
     }
     let argv = executable
         .get("argv")
@@ -1122,8 +1308,39 @@ fn validate_application_pack(
     }
     let contract_map: Value = serde_json::from_slice(&contract_map_bytes)
         .context("application Pack frontend contract map is malformed")?;
-    if value_str(&contract_map, "/schema") != Some("io.tobkiri.frontend-contract-map.v4")
-        || value_str(&contract_map, "/pack_id").map_or(true, |pack_id| !valid_identifier(pack_id))
+    let contract_map_pack_id = application_contract_namespace(
+        &contract_map,
+        expected_application_id,
+        contract_map_path,
+        contract_map_digest,
+    )?;
+
+    Ok(ApplicationLaunch {
+        entrypoint: canonical,
+        argv: Vec::new(),
+        artifact_id: selected_variant.artifact_id.clone(),
+        artifact_digest: artifact_digest.to_string(),
+        entrypoint_digest: entrypoint_digest.to_string(),
+        function_id: value_str(&functions[0], "/id")
+            .expect("application function identity was checked")
+            .to_owned(),
+        provider_id: value_str(&providers[0], "/provider_id")
+            .expect("application provider identity was checked")
+            .to_owned(),
+        contract_namespace: contract_map_pack_id.to_owned(),
+    })
+}
+
+fn application_contract_namespace<'a>(
+    contract_map: &'a Value,
+    expected_application_id: &str,
+    artifact_path: &str,
+    artifact_digest: &str,
+) -> Result<&'a str> {
+    let pack_id = value_str(contract_map, "/pack_id")
+        .context("application Pack frontend route namespace is missing")?;
+    if value_str(contract_map, "/schema") != Some("io.tobkiri.frontend-contract-map.v4")
+        || !valid_identifier(pack_id)
         || contract_map
             .get("routes")
             .and_then(Value::as_array)
@@ -1131,18 +1348,56 @@ fn validate_application_pack(
     {
         bail!("application Pack frontend contract map identity is invalid");
     }
+    if let Some(declared_path) = value_str(contract_map, "/artifact_path") {
+        if safe_relative(declared_path)? != safe_relative(artifact_path)? {
+            bail!("application Pack frontend contract map artifact path is stale");
+        }
+    } else if contract_map.get("artifact_path").is_some() {
+        bail!("application Pack frontend contract map artifact path is invalid");
+    }
+    if let Some(declared_digest) = value_str(contract_map, "/artifact_digest") {
+        if !valid_digest(declared_digest) || declared_digest != artifact_digest {
+            bail!("application Pack frontend contract map artifact digest is stale");
+        }
+    } else if contract_map.get("artifact_digest").is_some() {
+        bail!("application Pack frontend contract map artifact digest is invalid");
+    }
 
-    Ok(ApplicationLaunch {
-        entrypoint: canonical,
-        argv: Vec::new(),
-        artifact_digest: artifact_digest.to_string(),
-        function_id: value_str(&functions[0], "/id")
-            .expect("application function identity was checked")
-            .to_owned(),
-        provider_id: value_str(&providers[0], "/provider_id")
-            .expect("application provider identity was checked")
-            .to_owned(),
-    })
+    let owner_present = contract_map.get("owner").is_some();
+    let application_present = contract_map.get("application_id").is_some();
+    if owner_present || application_present {
+        let owner = value_str(contract_map, "/owner")
+            .filter(|value| valid_identifier(value))
+            .context("application Pack frontend contract map owner is invalid")?;
+        let application_id = value_str(contract_map, "/application_id")
+            .filter(|value| valid_identifier(value))
+            .context("application Pack frontend contract map Application is invalid")?;
+        if pack_id != expected_application_id
+            || owner != expected_application_id
+            || application_id != expected_application_id
+        {
+            bail!("application Pack frontend contract map belongs to another Application");
+        }
+        return Ok(pack_id);
+    }
+
+    let artifact = safe_relative(artifact_path)?;
+    let path_namespace = if artifact.components().count() > 1 {
+        artifact
+            .components()
+            .next()
+            .and_then(|component| match component {
+                Component::Normal(value) => value.to_str(),
+                _ => None,
+            })
+            .context("application Pack frontend contract map path has no namespace")?
+    } else {
+        expected_application_id
+    };
+    if pack_id != expected_application_id && pack_id != path_namespace {
+        bail!("application Pack frontend contract map belongs to another Application");
+    }
+    Ok(pack_id)
 }
 
 fn contains_string(value: &Value, pointer: &str, expected: &str) -> bool {
@@ -1697,6 +1952,22 @@ fn validate_profile<'a>(
         .collect::<Vec<_>>();
     if variants.len() != 1 {
         bail!("selected Profile has no unique packaged Shell variant");
+    }
+    if selected.plan.is_some() {
+        let executable_digest = value_str(profile, "/shell/executable_artifact_digest")
+            .context("active Profile Shell executable digest is missing")?;
+        let launch = selected
+            .launch_contribution
+            .as_ref()
+            .context("active Profile has no runtime launch contribution")?;
+        if !valid_digest(executable_digest)
+            || variants[0].entrypoint_sha256.as_deref() != Some(executable_digest)
+            || variants[0].sha256.as_deref() != Some(launch.artifact_digest.as_str())
+            || variants[0].artifact_ref != launch.relative_path
+            || variants[0].entrypoint != launch.entrypoint
+        {
+            bail!("active Profile Shell differs from its signed executable artifact");
+        }
     }
     Ok(variants[0])
 }
@@ -3057,6 +3328,130 @@ mod tests {
             },
             "packs": [{"pack_id": application_id, "role": "application"}]
         })
+    }
+
+    fn runtime_launch_plan() -> Value {
+        serde_json::json!({
+            "launch_contribution": {
+                "provider_id": "application.fixture",
+                "contract_id": "application.fixture.v1",
+                "operation_id": "launch",
+                "platform": "linux",
+                "architecture": "x86_64",
+                "artifact_digest": format!("sha256:{}", "a".repeat(64)),
+                "relative_path": "Fixture.AppImage",
+                "entrypoint": "Fixture.AppImage"
+            }
+        })
+    }
+
+    #[test]
+    fn runtime_launch_selector_accepts_only_the_exact_plan_shape() {
+        let selector = runtime_launch_contribution_from_plan(&runtime_launch_plan()).unwrap();
+        assert_eq!(selector.provider_id, "application.fixture");
+        assert_eq!(selector.contract_id, "application.fixture.v1");
+        assert_eq!(selector.relative_path, "Fixture.AppImage");
+
+        let mut extra = runtime_launch_plan();
+        extra["launch_contribution"]["route"] = Value::String("/forbidden-in-selector".into());
+        assert!(runtime_launch_contribution_from_plan(&extra).is_err());
+
+        let mut escaped = runtime_launch_plan();
+        escaped["launch_contribution"]["entrypoint"] = Value::String("../outside".into());
+        assert!(runtime_launch_contribution_from_plan(&escaped).is_err());
+
+        let absent = runtime_launch_contribution_from_plan(&serde_json::json!({})).unwrap_err();
+        assert!(absent
+            .downcast_ref::<ProfileReresolutionRequired>()
+            .is_some());
+        assert!(absent.to_string().contains("reactivation or re-resolution"));
+
+        let null = runtime_launch_contribution_from_plan(&serde_json::json!({
+            "launch_contribution": null
+        }))
+        .unwrap_err();
+        assert!(null.downcast_ref::<ProfileReresolutionRequired>().is_some());
+        assert_eq!(
+            ProfileReresolutionRequired::CODE,
+            "PROFILE_RERESOLUTION_REQUIRED"
+        );
+        assert_eq!(
+            ProfileReresolutionRequired::ACTION,
+            "reactivate_or_reresolve_profile"
+        );
+
+        let malformed = runtime_launch_contribution_from_plan(&serde_json::json!({
+            "launch_contribution": "not-an-object"
+        }))
+        .unwrap_err();
+        assert!(malformed
+            .downcast_ref::<ProfileReresolutionRequired>()
+            .is_none());
+        assert!(malformed.to_string().contains("malformed"));
+    }
+
+    #[test]
+    fn rich_contract_map_identity_is_bound_to_the_selected_application() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let mut map = serde_json::json!({
+            "schema": "io.tobkiri.frontend-contract-map.v4",
+            "pack_id": "application.fixture",
+            "owner": "application.fixture",
+            "application_id": "application.fixture",
+            "artifact_path": "application.fixture/frontend_contract_map.v4.json",
+            "artifact_digest": digest,
+            "routes": []
+        });
+        assert_eq!(
+            application_contract_namespace(
+                &map,
+                "application.fixture",
+                "application.fixture/frontend_contract_map.v4.json",
+                map["artifact_digest"].as_str().unwrap(),
+            )
+            .unwrap(),
+            "application.fixture"
+        );
+
+        map["owner"] = Value::String("application.foreign".into());
+        let error = application_contract_namespace(
+            &map,
+            "application.fixture",
+            "application.fixture/frontend_contract_map.v4.json",
+            map["artifact_digest"].as_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("another Application"));
+    }
+
+    #[test]
+    fn legacy_contract_map_namespace_must_match_its_signed_artifact_path() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let mut map = serde_json::json!({
+            "schema": "io.tobkiri.frontend-contract-map.v4",
+            "pack_id": "legacy.surface",
+            "routes": []
+        });
+        assert_eq!(
+            application_contract_namespace(
+                &map,
+                "application.fixture",
+                "legacy.surface/frontend_contract_map.v4.json",
+                &digest,
+            )
+            .unwrap(),
+            "legacy.surface"
+        );
+
+        map["pack_id"] = Value::String("forged.surface".into());
+        let error = application_contract_namespace(
+            &map,
+            "application.fixture",
+            "legacy.surface/frontend_contract_map.v4.json",
+            &digest,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("another Application"));
     }
 
     #[test]
