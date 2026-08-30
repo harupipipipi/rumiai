@@ -1166,7 +1166,12 @@ def _required_profile_pack_ids(
     *,
     active_snapshot: ActiveDefaultProfile | None = None,
 ) -> frozenset[str]:
-    """Return the immutable Pack closure declared by one registry Profile."""
+    """Return the static Pack closure declared by one registry Profile.
+
+    The active snapshot may also contain approved optional Packs. Those Packs
+    remain subject to their mutable approval records, so they must not become
+    baseline Packs merely because they are present in the active effective set.
+    """
 
     if active_snapshot is not None:
         active_profile_id = str(active_snapshot.resolved.profile["profile_id"])
@@ -1174,16 +1179,6 @@ def _required_profile_pack_ids(
             raise PackControlDigestMismatch(
                 "active Profile does not match the lifecycle binding"
             )
-        effective_set = active_snapshot.resolved.lock.get("effective_set")
-        if not isinstance(effective_set, list) or any(
-            not isinstance(item, Mapping) or not item.get("identity")
-            for item in effective_set
-        ):
-            raise PackControlDigestMismatch(
-                "active Profile effective Pack closure is invalid"
-            )
-        return frozenset(str(item["identity"]) for item in effective_set)
-
     from .bootstrap.profile_capture import host_profile_catalog
 
     catalog = host_profile_catalog()
