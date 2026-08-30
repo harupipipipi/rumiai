@@ -111,6 +111,8 @@ def _binding() -> FrontendContractBinding:
                 allowed_payload_keys=frozenset({"value"}),
             ),
         ),
+        application_id="test.application",
+        route_namespace="defaultspack",
     )
 
 

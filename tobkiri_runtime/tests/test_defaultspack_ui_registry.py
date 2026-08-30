@@ -1941,7 +1941,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         _assert_v4_ui_boundary()
 
         class CapturedHost:
-            _api_route_exact = {
+            _contract_routes = {
                 ("GET", "/api/ui/catalog"): {},
                 ("GET", "/api/ui/settings"): {},
                 ("PUT", "/api/ui/settings"): {},

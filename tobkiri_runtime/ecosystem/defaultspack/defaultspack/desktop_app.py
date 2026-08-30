@@ -337,6 +337,67 @@ def _active_application_manifest(
     return application
 
 
+def _active_profile_contract_context(active: Any) -> dict[str, str]:
+    """Return the exact Profile and activation identity for frontend routes."""
+
+    from tobkiri_protocol.canonical import canonical_digest
+
+    resolved = getattr(active, "resolved", None)
+    profile = getattr(resolved, "profile", None)
+    lock = getattr(resolved, "lock", None)
+    plan = getattr(resolved, "plan", None)
+    activation = getattr(active, "activation", None)
+    if not all(
+        isinstance(value, Mapping)
+        for value in (profile, lock, plan, activation)
+    ):
+        raise RuntimeError("active Profile identity is incomplete")
+
+    profile_id = profile.get("profile_id")
+    profile_revision = plan.get("profile_revision")
+    activation_id = activation.get("activation_id")
+    plan_digest = plan.get("plan_digest")
+    lock_digest = lock.get("lock_digest")
+    if not all(
+        isinstance(value, str) and value.strip()
+        for value in (
+            profile_id,
+            profile_revision,
+            activation_id,
+            plan_digest,
+            lock_digest,
+        )
+    ):
+        raise RuntimeError("active Profile identity is invalid")
+    if (
+        activation.get("state") != "active"
+        or canonical_digest(profile) != profile_revision
+        or plan.get("profile_id") != profile_id
+        or lock.get("profile_id") != profile_id
+        or lock.get("profile_revision") != profile_revision
+        or lock.get("plan_digest") != plan_digest
+        or activation.get("profile_id") != profile_id
+        or activation.get("profile_revision") != profile_revision
+        or activation.get("plan_digest") != plan_digest
+        or activation.get("lock_digest") != lock_digest
+    ):
+        raise RuntimeError("active Profile identity is stale")
+    if canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    ) != plan_digest:
+        raise RuntimeError("active ResolvedPlan digest is stale")
+    if canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    ) != lock_digest:
+        raise RuntimeError("active ProfileLock digest is stale")
+    return {
+        "profile_id": profile_id,
+        "profile_revision": profile_revision,
+        "activation_id": activation_id,
+        "plan_digest": plan_digest,
+    }
+
+
 def _restore_active_profile_contracts(packvm_lifecycle: Any):
     """Capture the active Profile and verify its Application contract map."""
 
@@ -350,6 +411,7 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
     from core_runtime.di_container import get_container
     from core_runtime.frontend_contract_routes import (
         load_frontend_contract_bindings,
+        resolve_frontend_contract_map_path,
     )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
     from tobkiri_host.runtime import install_dispatch_session
@@ -359,9 +421,13 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
     active = capture_active_profile()
     catalog = BundledCatalog.load(bundle_root)
     application = _active_application_manifest(catalog, active)
+    context = _active_profile_contract_context(active)
+    map_path = resolve_frontend_contract_map_path(application, _pack_root())
     bindings = load_frontend_contract_bindings(
-        Path(__file__).with_name("frontend_contract_map.v4.json"),
+        map_path,
         application,
+        artifact_root=_pack_root(),
+        **context,
     )
     session = capture_production_dispatch(
         active,

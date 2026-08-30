@@ -13,8 +13,7 @@ pytestmark = pytest.mark.contract
 
 
 class _FakeHost:
-    _api_route_exact = {("GET", "/api/ui/catalog"): {}}
-    _api_route_patterns = ()
+    _contract_routes = {("GET", "/api/ui/catalog"): {}}
 
 
 def _operation(method: str, target: str) -> str:
@@ -66,7 +65,10 @@ def test_contract_operation_fails_closed_for_escape_recursion_and_unknown_route(
 
 def test_contract_operation_has_no_family_prefix_fallback() -> None:
     class _EmptyHost:
-        _api_route_exact = {}
+        _contract_routes = {}
+        _api_route_exact = {
+            ("POST", "/api/authority/requests/forged/approve"): {},
+        }
         _api_route_patterns = ()
 
     with pytest.raises(ContractRouteError) as exc_info:
@@ -96,8 +98,7 @@ def test_contract_operation_rejects_nested_traversal_ambiguous_query_and_fragmen
 
 def test_encoded_identifier_is_left_for_normal_route_matching() -> None:
     class _PatternHost:
-        _api_route_exact = {}
-        _api_route_patterns = (("GET", __import__("re").compile(r"^/api/company/[^/]+$"), (), {}),)
+        _contract_routes = {("GET", "/api/company/operations%2Fcompany"): {}}
 
     resolved = resolve_contract_route(
         _PatternHost(),

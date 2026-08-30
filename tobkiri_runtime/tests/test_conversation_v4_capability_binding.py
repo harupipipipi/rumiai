@@ -97,6 +97,10 @@ def _load_conversation_target() -> FrontendContractTarget:
     bindings = load_frontend_contract_bindings(
         MAP_PATH,
         {
+            "pack": {
+                "id": "runtime.tauri.application.default",
+                "kind": "application",
+            },
             "artifacts": [
                 {
                     "path": "defaultspack/frontend_contract_map.v4.json",
@@ -201,12 +205,24 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         path="/api/ui/capability/invoke",
         presentation="capability_result",
         targets=(conversation, catalog),
+        application_id="runtime.tauri.application.default",
+        route_namespace="defaultspack",
+        profile_id=_CapturedConversationSession.profile_id,
+        profile_revision=_CapturedConversationSession.profile_revision,
+        activation_id=_CapturedConversationSession.activation_id,
+        plan_digest=_CapturedConversationSession.plan_digest,
     )
     catalog_binding = FrontendContractBinding(
         method="GET",
         path="/api/ui/catalog",
         presentation="dynamic_pack_catalog",
         targets=(catalog,),
+        application_id="runtime.tauri.application.default",
+        route_namespace="defaultspack",
+        profile_id=_CapturedConversationSession.profile_id,
+        profile_revision=_CapturedConversationSession.profile_revision,
+        activation_id=_CapturedConversationSession.activation_id,
+        plan_digest=_CapturedConversationSession.plan_digest,
     )
     session = _CapturedConversationSession((conversation, catalog))
     server = PackAPIServer(
@@ -427,12 +443,24 @@ def test_unready_conversation_is_omitted_without_blocking_packapi_start(
                 path="/api/ui/capability/invoke",
                 presentation="capability_result",
                 targets=(conversation, catalog),
+                application_id="runtime.tauri.application.default",
+                route_namespace="defaultspack",
+                profile_id=_CapturedConversationSession.profile_id,
+                profile_revision=_CapturedConversationSession.profile_revision,
+                activation_id=_CapturedConversationSession.activation_id,
+                plan_digest=_CapturedConversationSession.plan_digest,
             ),
             FrontendContractBinding(
                 method="GET",
                 path="/api/ui/catalog",
                 presentation="dynamic_pack_catalog",
                 targets=(catalog,),
+                application_id="runtime.tauri.application.default",
+                route_namespace="defaultspack",
+                profile_id=_CapturedConversationSession.profile_id,
+                profile_revision=_CapturedConversationSession.profile_revision,
+                activation_id=_CapturedConversationSession.activation_id,
+                plan_digest=_CapturedConversationSession.plan_digest,
             ),
         ),
         host_contract=host_contract_for_session(session),
