@@ -19,6 +19,11 @@ from domain.frontend.command_protocol import (  # noqa: E402
     CommandProtocolSchemaError,
     validate_protocol_document,
 )
+from tests.conformance_support.command_protocol_activation import (  # noqa: E402
+    command_protocol_binding_findings,
+    load_current_signed_application_bindings,
+    route_pattern_exposes_command_protocol,
+)
 from transport.registry import (  # noqa: E402
     canonical_http_route_specs,
 )
@@ -651,11 +656,13 @@ def test_windows_host_process_gets_required_curated_environment(
 
 
 def test_command_protocol_routes_are_not_legacy_transport_routes() -> None:
-    specs = canonical_http_route_specs()
-    protocol_specs = [
-        item for item in specs if item.pattern.startswith("/api/command-protocol/v1/")
-    ]
-    assert protocol_specs == []
+    legacy_specs = canonical_http_route_specs(include_always_available=True)
+    bindings = load_current_signed_application_bindings()
+
+    assert not any(
+        route_pattern_exposes_command_protocol(spec.pattern) for spec in legacy_specs
+    )
+    assert command_protocol_binding_findings(bindings) == []
 
 
 def test_invocation_id_is_idempotent_and_conflict_safe(

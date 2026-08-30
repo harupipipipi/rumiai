@@ -31,6 +31,10 @@ from core_runtime.frontend_contract_routes import (
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from tests.conformance_support.command_protocol_activation import (
+    COMMAND_PROTOCOL_HTTP_CASES,
+    file_snapshot,
+)
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.errors import BackendUnavailableError
 from tests.conformance_support.host_contract import host_contract
@@ -181,6 +185,93 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         server.stop()
         session.broker.close()
         authority.close()
+
+
+def test_command_protocol_paths_are_inert_in_captured_production_http(
+    production_server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unpublished Command Protocol aliases cannot reach any mutable boundary."""
+
+    server, session, authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    audit_count = len(authority.audit_events())
+    journal = server._operation_journal
+    assert journal is not None
+    settings_path = (
+        Path(os.environ["RUMI_USER_DATA"])
+        / "defaultspack"
+        / "shared"
+        / "frontend_settings.json"
+    )
+    event_store_path = settings_path.with_name("command_invocation_events.sqlite3")
+    offline_queue_path = settings_path.with_name("command_offline_queue.sqlite3")
+    state_paths = (
+        journal.path,
+        event_store_path,
+        offline_queue_path,
+        settings_path,
+    )
+    state_before = {path: file_snapshot(path) for path in state_paths}
+    assert state_before[journal.path] is None
+    assert state_before[event_store_path] is None
+    assert state_before[offline_queue_path] is None
+
+    broker_invocations: list[str] = []
+    broker_submissions: list[str] = []
+    journal_writes: list[str] = []
+
+    def unexpected_broker_invocation(*_args, **_kwargs) -> dict[str, object]:
+        broker_invocations.append("invoke")
+        return {"state": "error", "code": "TEST_BROKER_BLOCKED"}
+
+    def unexpected_broker_submission(*_args, **_kwargs):
+        broker_submissions.append("submit")
+        raise AssertionError("Command Protocol reached Broker submission")
+
+    monkeypatch.setattr(session.broker, "invoke", unexpected_broker_invocation)
+    monkeypatch.setattr(
+        session.broker._executor,
+        "submit",
+        unexpected_broker_submission,
+    )
+
+    for method_name in ("renew_session", "begin_operation", "finish_operation"):
+        monkeypatch.setattr(
+            journal,
+            method_name,
+            lambda *_args, _name=method_name, **_kwargs: journal_writes.append(_name),
+        )
+
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+    for method, path, body in COMMAND_PROTOCOL_HTTP_CASES:
+        status, payload, _ = _request(
+            server,
+            method,
+            path,
+            body=body,
+            headers={
+                **headers,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert status == 404, (path, payload)
+        assert payload["success"] is False
+        assert payload["error"] == "Not found"
+
+    assert broker_invocations == []
+    assert broker_submissions == []
+    assert journal_writes == []
+    assert {path: file_snapshot(path) for path in state_paths} == state_before
+    assert file_snapshot(journal.path) is None
+    assert file_snapshot(event_store_path) is None
+    assert file_snapshot(offline_queue_path) is None
+    assert len(authority.audit_events()) == audit_count
+    assert session.broker._executor._work_queue.empty()
 
 
 def test_named_profile_registry_crud_http_preserves_active_pointer_and_history(

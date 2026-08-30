@@ -20,10 +20,20 @@ import sys
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
+from pathlib import PurePosixPath
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
 
+from tests.conformance_support.command_protocol_activation import (
+    command_protocol_binding_findings,
+    is_conservative_command_protocol_alias,
+    load_captured_application_bindings,
+    load_current_signed_application_bindings,
+    route_pattern_exposes_command_protocol,
+)
+from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import load_schema, validate_file
 
 
@@ -2509,6 +2519,31 @@ def _source_identity(path: Path) -> str:
     return source_manifest_identity(value) if isinstance(value, Mapping) else ""
 
 
+def _frontend_command_protocol_findings() -> list[dict[str, Any]]:
+    """Keep Command Protocol absent from the production-selected signed map."""
+
+    try:
+        bindings = load_current_signed_application_bindings()
+    except (OSError, RuntimeError, ValueError) as error:
+        return [
+            _finding(
+                PACK_API_SOURCE,
+                1,
+                "signed_application_route_map_unavailable",
+                error=str(error),
+            )
+        ]
+    return [
+        _finding(
+            PACK_API_SOURCE,
+            1,
+            "uncaptured_command_protocol_route_published",
+            **finding,
+        )
+        for finding in command_protocol_binding_findings(bindings)
+    ]
+
+
 def _audit_snapshot() -> dict[str, Any]:
     """Collect deterministic current-tree evidence with no baseline or skip."""
     pack_dirs = _production_pack_dirs()
@@ -2525,6 +2560,7 @@ def _audit_snapshot() -> dict[str, Any]:
     double_authority = _double_authority_findings()
     launcher = _launcher_safety_findings()
     projection = _offline_projection_findings()
+    command_protocol = _frontend_command_protocol_findings()
     head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     source_sets = _authority_source_sets()
     gates = {
@@ -2541,6 +2577,7 @@ def _audit_snapshot() -> dict[str, Any]:
         "double_authority": double_authority,
         "launcher_safety": launcher,
         "offline_projection": projection,
+        "command_protocol_activation": command_protocol,
     }
     return {
         "schema": "io.tobkiri.quality.complete-v4-migration.v2",
@@ -2591,6 +2628,166 @@ def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
     )
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
     _assert_zero("declaration/disk/runtime alignment", _declaration_disk_runtime_findings())
+
+
+def test_signed_frontend_maps_do_not_activate_uncaptured_command_protocol() -> None:
+    """Command Protocol stays dark until it has capture-bound replay authority."""
+
+    aliases = (
+        "/api/command-protocol/v1",
+        "/API//COMMAND-PROTOCOL/V1/invoke",
+        "/api/%63ommand-protocol/v1/invoke",
+        "/api/command-protocol%2fv1/resume",
+        "/api/%2563ommand-protocol/v1/offline",
+    )
+    assert all(is_conservative_command_protocol_alias(path) for path in aliases)
+    assert route_pattern_exposes_command_protocol("/api/{path}")
+    assert route_pattern_exposes_command_protocol(
+        "/api/command-protocol/{version}"
+    )
+    assert route_pattern_exposes_command_protocol("/api/{protocol}/v1")
+    assert not is_conservative_command_protocol_alias(
+        "/api/files/%25252525252541"
+    )
+    _assert_zero(
+        "uncaptured Command Protocol frontend publication",
+        _frontend_command_protocol_findings(),
+    )
+
+
+def _application_capture_fixture(
+    root: Path,
+    *,
+    relative_map_path: PurePosixPath,
+    route: str,
+    schema: str = "io.tobkiri.frontend-contract-map.v4",
+    additional_route_map: PurePosixPath | None = None,
+) -> tuple[SimpleNamespace, SimpleNamespace]:
+    """Create a digest-bound Application/catalog capture for route-map policy."""
+
+    application_id = "application.gate-fixture"
+    document = {
+        "schema": schema,
+        "pack_id": application_id,
+        "routes": [
+            {
+                "method": "POST",
+                "path": route,
+                "presentation": "broker_result",
+                "targets": [
+                    {
+                        "contribution_id": "fixture.route",
+                        "contract_id": "fixture.contract.v1",
+                        "operation_id": "fixture.invoke",
+                        "provider_id": "fixture.provider",
+                        "function_id": "fixture.provider",
+                        "allowed_payload_keys": [],
+                    }
+                ],
+            }
+        ],
+    }
+    raw = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
+    map_path = root.joinpath(*relative_map_path.parts)
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    map_path.write_bytes(raw)
+    application_digest = "sha256:" + "a" * 64
+    executable_digest = "sha256:" + "b" * 64
+    manifest = {
+        "pack": {
+            "id": application_id,
+            "kind": "application",
+            "artifact_digest": application_digest,
+        },
+        "artifacts": [
+            {
+                "path": relative_map_path.as_posix(),
+                "kind": "asset",
+                "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            },
+            {
+                "path": "fixture-executable",
+                "kind": "executable",
+                "entrypoint_digest": executable_digest,
+            },
+        ],
+    }
+    if additional_route_map is not None:
+        unknown_document = {
+            **document,
+            "schema": "io.tobkiri.frontend-contract-map.v5",
+            "routes": [{**document["routes"][0], "path": "/api/command-protocol/v1/invoke"}],
+        }
+        unknown_raw = json.dumps(
+            unknown_document,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        unknown_path = root.joinpath(*additional_route_map.parts)
+        unknown_path.parent.mkdir(parents=True, exist_ok=True)
+        unknown_path.write_bytes(unknown_raw)
+        manifest["artifacts"].append(
+            {
+                "path": additional_route_map.as_posix(),
+                "kind": "asset",
+                "digest": "sha256:" + hashlib.sha256(unknown_raw).hexdigest(),
+            }
+        )
+    application_binding = {
+        "pack_id": application_id,
+        "artifact_digest": application_digest,
+        "executable_artifact_digest": executable_digest,
+        "definition_digest": canonical_digest(manifest),
+    }
+    active = SimpleNamespace(
+        resolved=SimpleNamespace(
+            plan={
+                "application": application_binding,
+                "effective_set": [
+                    {
+                        "identity": application_id,
+                        "role": "pack",
+                        "artifact_digest": application_digest,
+                    }
+                ],
+            },
+            lock={"application": application_binding},
+        )
+    )
+    return SimpleNamespace(packs={application_id: manifest}), active
+
+
+def test_application_route_map_policy_rejects_renamed_v5_signed_map(
+    tmp_path: Path,
+) -> None:
+    """Startup selection accepts its current type and rejects renamed successors."""
+
+    current_binding = load_current_signed_application_bindings()[0]
+    current_relative = PurePosixPath(str(current_binding.artifact_path))
+    good_catalog, good_active = _application_capture_fixture(
+        tmp_path / "good",
+        relative_map_path=current_relative,
+        route="/api/fixture/health",
+    )
+    assert load_captured_application_bindings(
+        good_catalog,
+        good_active,
+        tmp_path / "good",
+    )
+
+    renamed = current_relative.with_name("frontend_contract_routes.v5.json")
+    bad_catalog, bad_active = _application_capture_fixture(
+        tmp_path / "bad",
+        relative_map_path=current_relative,
+        route="/api/fixture/health",
+        additional_route_map=renamed,
+    )
+    with pytest.raises(RuntimeError, match="unknown signed Application route-map"):
+        load_captured_application_bindings(
+            bad_catalog,
+            bad_active,
+            tmp_path / "bad",
+        )
 
 
 def test_authority_and_resolved_plan_scope_is_exact() -> None:
