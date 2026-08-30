@@ -15,6 +15,12 @@ _LEGACY_PACK_ALIASES = {
     "rumi.defaultspack": "defaults-basepack",
     "rumi_defaultspack": "defaults-basepack",
 }
+_LEGACY_CONTRACT_PROVIDERS = {
+    # The generic adapter is the legacy defaultspack provider.  The other
+    # implementation of this contract is the explicit human-handoff Pack and
+    # must never be guessed for a migrated startup Profile.
+    "tobkiri.service.ai.provider.generate.v1": "rumi_provider_adapters_pack",
+}
 
 
 class LegacyProfileSuccessorError(ValueError):
@@ -76,6 +82,7 @@ def build_legacy_profile_successor(
     foundational_id = _foundational_provider(packs)
     if foundational_id not in selected_pack_ids:
         selected_pack_ids.append(foundational_id)
+    _add_required_contract_providers(selected_pack_ids, packs)
 
     shell, variant, application_id = _verified_presentation(
         base=base,
@@ -193,6 +200,104 @@ def _foundational_provider(
             "locked catalog does not contain one foundational conversation provider"
         )
     return candidates[0]
+
+
+def _add_required_contract_providers(
+    selected: list[str],
+    packs: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Complete non-optional contract dependencies from locked manifests."""
+
+    providers: dict[str, list[str]] = {}
+    for pack_id, manifest in packs.items():
+        for contract in manifest.get("contracts") or []:
+            if isinstance(contract, Mapping) and isinstance(
+                contract.get("contract_id"), str
+            ):
+                providers.setdefault(str(contract["contract_id"]), []).append(
+                    str(pack_id)
+                )
+    while True:
+        effective_ids = _pack_dependency_closure(selected, packs)
+        provided = {
+            str(contract["contract_id"])
+            for pack_id in effective_ids
+            for contract in packs[pack_id].get("contracts") or []
+            if isinstance(contract, Mapping) and contract.get("contract_id")
+        }
+        missing: list[str] = []
+        for pack_id in effective_ids:
+            requirements = packs[pack_id].get("requirements")
+            if not isinstance(requirements, Mapping):
+                raise LegacyProfileSuccessorError(
+                    f"locked Pack requirements are invalid: {pack_id}"
+                )
+            for dependency in requirements.get("contract_dependencies") or []:
+                if (
+                    isinstance(dependency, Mapping)
+                    and dependency.get("optional") is False
+                    and dependency.get("contract_id") not in provided
+                ):
+                    contract_id = str(dependency.get("contract_id") or "")
+                    if contract_id and contract_id not in missing:
+                        missing.append(contract_id)
+        if not missing:
+            return
+        changed = False
+        for contract_id in missing:
+            candidates = providers.get(contract_id, [])
+            preferred = _LEGACY_CONTRACT_PROVIDERS.get(contract_id)
+            if preferred is not None:
+                if preferred not in candidates:
+                    raise LegacyProfileSuccessorError(
+                        f"legacy contract provider is absent: {contract_id}"
+                    )
+                provider_id = preferred
+            elif len(candidates) == 1:
+                provider_id = candidates[0]
+            else:
+                raise LegacyProfileSuccessorError(
+                    f"legacy contract provider is ambiguous: {contract_id}"
+                )
+            if provider_id not in selected:
+                selected.append(provider_id)
+                changed = True
+        if not changed:
+            raise LegacyProfileSuccessorError(
+                "legacy contract closure could not make progress"
+            )
+
+
+def _pack_dependency_closure(
+    selected: list[str],
+    packs: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    """Return selected Packs plus their exact manifest dependencies."""
+
+    closure = list(selected)
+    pending = list(selected)
+    while pending:
+        pack_id = pending.pop(0)
+        manifest = packs.get(pack_id)
+        requirements = manifest.get("requirements") if isinstance(manifest, Mapping) else None
+        if not isinstance(requirements, Mapping):
+            raise LegacyProfileSuccessorError(
+                f"locked Pack requirements are invalid: {pack_id}"
+            )
+        dependencies = requirements.get("pack_dependencies")
+        if not isinstance(dependencies, Mapping):
+            raise LegacyProfileSuccessorError(
+                f"locked Pack dependency inventory is invalid: {pack_id}"
+            )
+        for dependency_id in sorted(str(item) for item in dependencies):
+            if dependency_id not in packs:
+                raise LegacyProfileSuccessorError(
+                    f"locked Pack dependency is absent: {dependency_id}"
+                )
+            if dependency_id not in closure:
+                closure.append(dependency_id)
+                pending.append(dependency_id)
+    return closure
 
 
 def _verified_presentation(

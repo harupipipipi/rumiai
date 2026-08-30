@@ -482,9 +482,13 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
         assert stored.profile["profile_id"] == profile_id
         assert stored.profile["display_name"] == source["display_name"]["ja"]
         assert stored.profile["state"] == "needs_resolution"
-        assert [
+        migrated_pack_ids = [
             item["pack_id"] for item in stored.profile["packs"]
-        ] == ["defaultspack", "runtime.tauri.application.default"]
+        ]
+        assert migrated_pack_ids[0] == "defaultspack"
+        assert migrated_pack_ids[-1] == "runtime.tauri.application.default"
+        assert "rumi_ai_gateway_pack" in migrated_pack_ids
+        assert "rumi_provider_adapters_pack" in migrated_pack_ids
         assert stored.profile["authority_references"] == []
         assert stored.profile["profile_authority_snapshot_digest"] is None
         validate_document(stored.profile, "profile")
