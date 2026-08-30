@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator
 
 from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
+    host_profile_catalog,
     prepare_default_profile_confirmation,
     runtime_user_data_root,
 )
@@ -42,9 +43,22 @@ def _approve_profile_process(
     candidate_digest: str,
     session_id: str,
     results: multiprocessing.queues.Queue,
+    bundle_root: str | None = None,
 ) -> None:
     try:
-        approved = RuntimeProfileChangeService().approve(
+        service = RuntimeProfileChangeService(
+            bundle_root=Path(bundle_root) if bundle_root is not None else None,
+            surface_service=(
+                RuntimeSurfaceService(
+                    catalog_loader=lambda: host_profile_catalog(
+                        bundle_root=Path(bundle_root)
+                    )
+                )
+                if bundle_root is not None
+                else None
+            ),
+        )
+        approved = service.approve(
             {
                 "candidate_id": candidate_id,
                 "candidate_digest": candidate_digest,
@@ -605,7 +619,7 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
     read_service = _service(active_runtime)
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     activated: list[object] = []
 
@@ -644,7 +658,14 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
     real_commit = runtime_surface._commit_authority_profile_approval
     approval_attempts = [0]
 
-    def commit_with_temporary_denial(candidate, *, session_id, approval_id, decided_at):
+    def commit_with_temporary_denial(
+        candidate,
+        *,
+        session_id,
+        approval_id,
+        decided_at,
+        user_data_root,
+    ):
         approval_attempts[0] += 1
         if approval_attempts[0] == 1:
             raise RuntimeSurfaceError(
@@ -656,6 +677,7 @@ def test_profile_ceremony_is_ordered_digest_bound_and_one_shot(
             session_id=session_id,
             approval_id=approval_id,
             decided_at=decided_at,
+            user_data_root=user_data_root,
         )
 
     monkeypatch.setattr(
@@ -706,7 +728,7 @@ def test_profile_activation_rejects_wrong_credentials_without_consuming_approval
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
@@ -759,7 +781,7 @@ def test_profile_activation_reauthenticates_immutable_authority_record(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
     resolved = ceremony.resolve(
@@ -809,7 +831,7 @@ def test_profile_ceremony_rejects_cross_session_and_expired_review(
     read_service = _service(active_runtime)
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     ceremony = RuntimeProfileChangeService(
         ttl_seconds=1,
@@ -870,7 +892,7 @@ def test_profile_activation_rejects_expired_durable_approval(
     now = [0.0]
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     ceremony = RuntimeProfileChangeService(
         ttl_seconds=1,
@@ -918,7 +940,7 @@ def test_profile_activation_concurrent_retry_returns_one_durable_result(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.activate_resolved_profile_pack_set",
@@ -970,7 +992,7 @@ def test_profile_ceremony_continues_across_restart_at_every_stage(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     activations: list[object] = []
 
@@ -1031,7 +1053,7 @@ def test_profile_activation_recovers_commit_before_receipt_across_restart(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
     resolved = ceremony.resolve(
@@ -1141,7 +1163,7 @@ def test_profile_approval_response_loss_retries_exact_authority_receipt(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
     surface = _service(active_runtime)
     ceremony = RuntimeProfileChangeService(surface_service=surface)
@@ -1205,9 +1227,14 @@ def test_profile_approval_is_idempotent_across_processes(
 ) -> None:
     monkeypatch.setattr(
         "core_runtime.pack_control_v4.resolve_profile_pack_set",
-        lambda _pack_ids: active_runtime.resolved,
+        lambda _pack_ids, **_bindings: active_runtime.resolved,
     )
-    ceremony = RuntimeProfileChangeService(surface_service=_service(active_runtime))
+    ceremony = RuntimeProfileChangeService(
+        surface_service=RuntimeSurfaceService(
+            snapshot_loader=lambda: active_runtime,
+            catalog_loader=host_profile_catalog,
+        )
+    )
     resolved = ceremony.resolve(
         {
             "profile_id": "defaults",
@@ -1235,6 +1262,7 @@ def test_profile_approval_is_idempotent_across_processes(
                 str(reviewed["candidate_digest"]),
                 "session-process-approval",
                 results,
+                str(_bundle_root()),
             ),
         )
         for _index in range(2)
@@ -1246,7 +1274,7 @@ def test_profile_approval_is_idempotent_across_processes(
         assert process.exitcode == 0
     outcomes = [results.get(timeout=2), results.get(timeout=2)]
 
-    assert {item[0] for item in outcomes} == {"approved"}
+    assert {item[0] for item in outcomes} == {"approved"}, outcomes
     assert len({item[1:] for item in outcomes}) == 1
     approval_id = outcomes[0][1]
     with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:

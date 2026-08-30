@@ -17,7 +17,6 @@ import re
 from typing import Any, Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
 
-
 DEFAULT_CONTRACT_PACK_ID = "defaultspack"
 CONTRACT_ROUTE_PREFIX = "/api/contracts/defaultspack/"
 _PACK_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
@@ -65,6 +64,91 @@ class FrontendContractBinding:
     targets: tuple[FrontendContractTarget, ...]
 
 
+HOST_PROFILE_CONTROL_OPERATIONS = frozenset(
+    {
+        "profile.catalog.read",
+        "profile.change.resolve",
+        "profile.change.review",
+        "profile.change.approve",
+        "profile.change.activate",
+        "operation.status.read",
+    }
+)
+
+
+def host_profile_control_bindings(
+    bindings: tuple[FrontendContractBinding, ...] | None = None,
+) -> tuple[FrontendContractBinding, ...]:
+    """Return protocol-owned Profile routes safe before Profile activation.
+
+    The optional argument is ignored for source compatibility.  These Host
+    routes must never inherit identity or availability from an Application
+    Pack's frontend map.
+    """
+
+    del bindings
+    routes = (
+        ("GET", "/api/runtime-surface/profiles", "profile.catalog.read", ()),
+        (
+            "GET",
+            "/api/runtime-surface/operation-status",
+            "operation.status.read",
+            ("request_id",),
+        ),
+        (
+            "POST",
+            "/api/runtime-surface/profile-change/resolve",
+            "profile.change.resolve",
+            (
+                "profile_id",
+                "expected_profile_revision",
+                "expected_plan_digest",
+                "desired_pack_ids",
+                "profile_definition_digest",
+                "profile_catalog_digest",
+                "bundle_lock_digest",
+            ),
+        ),
+        (
+            "POST",
+            "/api/runtime-surface/profile-change/review",
+            "profile.change.review",
+            ("candidate_id", "candidate_digest"),
+        ),
+        (
+            "POST",
+            "/api/runtime-surface/profile-change/approve",
+            "profile.change.approve",
+            ("candidate_id", "candidate_digest"),
+        ),
+        (
+            "POST",
+            "/api/runtime-surface/profile-change/activate",
+            "profile.change.activate",
+            ("approval_id", "approval_digest"),
+        ),
+    )
+    return tuple(
+        FrontendContractBinding(
+            method=method,
+            path=path,
+            presentation="broker_result",
+            targets=(
+                FrontendContractTarget(
+                    contribution_id=f"host.profile-control.{operation_id}",
+                    contract_id="tobkiri.host.control-presentation.v4",
+                    operation_id=operation_id,
+                    provider_id="tobkiri.host.control-presentation",
+                    function_id="tobkiri.host.control-presentation",
+                    allowed_payload_keys=frozenset(allowed),
+                    owner_pack_id="host",
+                ),
+            ),
+        )
+        for method, path, operation_id, allowed in routes
+    )
+
+
 def load_frontend_contract_bindings(
     map_path: Path,
     application_manifest: Mapping[str, Any],
@@ -88,7 +172,9 @@ def load_frontend_contract_bindings(
     raw = map_path.read_bytes()
     actual_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
     if actual_digest != expected_artifact.get("digest"):
-        raise ContractRouteError("CONTRACT_MAP_STALE", "Frontend contract map digest changed", 500)
+        raise ContractRouteError(
+            "CONTRACT_MAP_STALE", "Frontend contract map digest changed", 500
+        )
     try:
         document = json.loads(raw)
     except (OSError, json.JSONDecodeError) as error:
@@ -124,7 +210,9 @@ def load_frontend_contract_bindings(
             )
         targets: list[FrontendContractTarget] = []
         if not isinstance(route["targets"], list) or not route["targets"]:
-            raise ContractRouteError("CONTRACT_MAP_INVALID", "Frontend route has no targets", 500)
+            raise ContractRouteError(
+                "CONTRACT_MAP_INVALID", "Frontend route has no targets", 500
+            )
         for target in route["targets"]:
             if not isinstance(target, dict) or set(target) != {
                 "contribution_id",
@@ -242,7 +330,11 @@ def _registered_target(
             )
             if requires_approval:
                 approval_check = getattr(server, "_contract_approval_check", None)
-                approved = bool(approval_check(method, path)) if callable(approval_check) else False
+                approved = (
+                    bool(approval_check(method, path))
+                    if callable(approval_check)
+                    else False
+                )
                 if not approved:
                     raise ContractRouteError(
                         "CONTRACT_APPROVAL_REQUIRED",
@@ -292,7 +384,9 @@ def resolve_contract_route(
         return None
     token = str(request_path)[len(prefix) :]
     if not token or "/" in token:
-        raise ContractRouteError("CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400)
+        raise ContractRouteError(
+            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
+        )
     try:
         decoded = unquote(token)
     except Exception as exc:  # pragma: no cover - urllib is defensive here
@@ -300,7 +394,9 @@ def resolve_contract_route(
             "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
         ) from exc
     if " " not in decoded:
-        raise ContractRouteError("CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400)
+        raise ContractRouteError(
+            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
+        )
     encoded_method, encoded_target = decoded.split(" ", 1)
     operation_method = encoded_method.upper().strip()
     request_method = str(method or "").upper().strip()
@@ -315,10 +411,14 @@ def resolve_contract_route(
 
     parsed = urlsplit(encoded_target)
     if parsed.scheme or parsed.netloc or parsed.fragment:
-        raise ContractRouteError("CONTRACT_PATH_INVALID", "Invalid contract target path", 400)
+        raise ContractRouteError(
+            "CONTRACT_PATH_INVALID", "Invalid contract target path", 400
+        )
     target_path = parsed.path
     if not _safe_target_path(target_path):
-        raise ContractRouteError("CONTRACT_PATH_INVALID", "Invalid contract target path", 400)
+        raise ContractRouteError(
+            "CONTRACT_PATH_INVALID", "Invalid contract target path", 400
+        )
     if not _registered_target(
         server,
         operation_method,
@@ -330,7 +430,9 @@ def resolve_contract_route(
         )
     parsed_query = parse_qs(parsed.query, keep_blank_values=True)
     if any(len(values) != 1 for values in parsed_query.values()):
-        raise ContractRouteError("CONTRACT_QUERY_INVALID", "Invalid contract target query", 400)
+        raise ContractRouteError(
+            "CONTRACT_QUERY_INVALID", "Invalid contract target query", 400
+        )
     query = {key: values[0] for key, values in parsed_query.items() if values}
     return ResolvedContractRoute(operation_method, target_path, query)
 

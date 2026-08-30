@@ -558,6 +558,11 @@ export interface HealthResponseData {
   runtime_ready: boolean;
   runtime_status: RuntimeStatus;
   runtime_error: string | null;
+  host_catalog_verified: boolean;
+  profile_ceremony_available: boolean;
+  active_profile_ready: boolean;
+  launch_ready: boolean;
+  defaults_bootstrap_required: boolean;
 }
 
 export interface WindowRuntimeSnapshot {

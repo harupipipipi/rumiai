@@ -170,11 +170,15 @@ def host_profile_catalog(
         )
     definitions.migrate_legacy_successors(bundled)
     definitions.repair_legacy_display_names()
-    try:
-        definitions.bootstrap_defaults(bundled.profiles["defaults"])
-    except ProfileDefinitionStoreConflict:
-        if definitions.get_profile("defaults") is None:
-            raise
+    # Defaults is an install/bootstrap template, not a prerequisite Profile.
+    # Once any live definition exists, preserve that collection exactly and
+    # never inject a special execution identity into it.
+    if definitions.bootstrap_state().get("state") == "empty":
+        try:
+            definitions.bootstrap_defaults(bundled.profiles["defaults"])
+        except ProfileDefinitionStoreConflict:
+            if definitions.bootstrap_state().get("state") == "empty":
+                raise
     profiles = {
         item.profile_id: dict(item.profile)
         for item in definitions.list_profiles()

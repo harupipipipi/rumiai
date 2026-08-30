@@ -50,7 +50,6 @@ from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
 from .authority.v4_models import AuthorityDenied
 from tobkiri_host.errors import HostCoreError
 
-
 logger = logging.getLogger(__name__)
 
 THREAD_JOIN_TIMEOUT_SECONDS = 5
@@ -105,7 +104,9 @@ def _public_error_code(value: object) -> str:
     candidate = str(value or "").strip()
     if candidate in _PUBLIC_ERROR_STATUS:
         return candidate
-    return _ERROR_CODE_ALIASES.get(candidate.lower(), RuntimeSurfaceErrorCode.API_FAILURE.value)
+    return _ERROR_CODE_ALIASES.get(
+        candidate.lower(), RuntimeSurfaceErrorCode.API_FAILURE.value
+    )
 
 
 def _public_error_result(code: object) -> dict[str, object]:
@@ -150,7 +151,9 @@ def _exception_error_code(error: BaseException) -> str:
                 "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
                 "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
             }
-            return authority_codes.get(str(current.code), RuntimeSurfaceErrorCode.UNAPPROVED.value)
+            return authority_codes.get(
+                str(current.code), RuntimeSurfaceErrorCode.UNAPPROVED.value
+            )
         if isinstance(current, HostCoreError):
             candidate = str(current.code)
             if candidate in _ERROR_CODE_ALIASES:
@@ -269,9 +272,7 @@ class DispatchSession(Protocol):
 
 def _load_production_capture_inputs(
     active: Any | None = None,
-) -> tuple[
-    Path, Path, Any, tuple[FrontendContractBinding, ...]
-]:
+) -> tuple[Path, Path, Any, tuple[FrontendContractBinding, ...]]:
     """Load canonical inputs for one production runtime capture."""
 
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
@@ -340,10 +341,7 @@ def _load_production_capture_inputs(
     ):
         raise RuntimeError("active Profile Frontend Contract Map path is unsafe")
     bindings = load_frontend_contract_bindings(
-        runtime_root
-        / "ecosystem"
-        / "defaultspack"
-        / Path(*map_path.parts),
+        runtime_root / "ecosystem" / "defaultspack" / Path(*map_path.parts),
         application,
     )
     return runtime_root, bundle_root, catalog, bindings
@@ -435,7 +433,9 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request: Any, client_address: Any) -> None:
         with self._request_condition:
-            accepted = self._accepting_requests and self._request_slots.acquire(blocking=False)
+            accepted = self._accepting_requests and self._request_slots.acquire(
+                blocking=False
+            )
             if accepted:
                 self._active_requests += 1
         if not accepted:
@@ -467,7 +467,9 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
             b"HTTP/1.1 503 Service Unavailable\r\n"
             b"Content-Type: application/json; charset=utf-8\r\n"
             b"Cache-Control: no-store\r\n"
-            b"Connection: close\r\n" + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
+            b"Connection: close\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+            + body
         )
         try:
             request.sendall(response)
@@ -531,8 +533,7 @@ class _RequestReplayGuard:
     """Consume browser request identities once per authenticated server."""
 
     _REQUEST_ID = re.compile(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-"
-        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-" r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     )
 
     DEFAULT_CAPACITY = 100_000
@@ -666,7 +667,9 @@ class PackAPIHandler(
         panel_auth_manager: PanelAuthManager,
         dispatch_session: DispatchSession | None,
         app_lifecycle_manager: LifecyclePort | None,
-        contract_routes: Mapping[tuple[str, str], FrontendContractBinding] | None = None,
+        contract_routes: (
+            Mapping[tuple[str, str], FrontendContractBinding] | None
+        ) = None,
         replay_guard: _RequestReplayGuard | None = None,
         operation_journal: ControlReconciliationStore | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
@@ -697,7 +700,9 @@ class PackAPIHandler(
             _packvm_lifecycle = bound_packvm_lifecycle
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
-                staticmethod(bound_runtime_refresh) if bound_runtime_refresh is not None else None
+                staticmethod(bound_runtime_refresh)
+                if bound_runtime_refresh is not None
+                else None
             )
             _workspace_binding_resolver = (
                 staticmethod(bound_workspace_binding_resolver)
@@ -873,7 +878,9 @@ class PackAPIHandler(
             return True
         panel_session = self._panel_session
         raw_session_id = panel_session.get("session_id") if panel_session else None
-        session_id: str | None = raw_session_id if isinstance(raw_session_id, str) else None
+        session_id: str | None = (
+            raw_session_id if isinstance(raw_session_id, str) else None
+        )
         session_ttl_seconds = self._panel_session_ttl_seconds(panel_session)
         request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
         replay_guard = self._contract_replay_guard
@@ -908,7 +915,9 @@ class PackAPIHandler(
             else:
                 outer_body = body
                 nested = body.get("payload")
-                if not isinstance(nested, dict) or any(not isinstance(key, str) for key in nested):
+                if not isinstance(nested, dict) or any(
+                    not isinstance(key, str) for key in nested
+                ):
                     self._send_response(
                         APIResponse(False, error="Contract payload must be an object"),
                         400,
@@ -997,7 +1006,9 @@ class PackAPIHandler(
         else:
             if operation_journal is None:
                 self._send_response(
-                    APIResponse(False, error="Control operation journal is unavailable"),
+                    APIResponse(
+                        False, error="Control operation journal is unavailable"
+                    ),
                     503,
                 )
                 return True
@@ -1183,7 +1194,9 @@ class PackAPIHandler(
                 operation_journal.finish_operation(
                     request_id,
                     session_id=session_id,
-                    state=("failed" if safe_result.get("state") == "error" else "succeeded"),
+                    state=(
+                        "failed" if safe_result.get("state") == "error" else "succeeded"
+                    ),
                     result=safe_result,
                     record_refs=_result_record_refs(safe_result),
                     safe_error_code=(
@@ -1254,7 +1267,11 @@ class PackAPIHandler(
     @staticmethod
     def _panel_session_ttl_seconds(session: Mapping[str, object] | None) -> float:
         value = session.get("expires_in") if session else None
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        ):
             return min(float(value), PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
         return float(PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
 
@@ -1348,7 +1365,9 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return True
         panel_session = self._panel_session
-        raw_packvm_session_id = panel_session.get("session_id") if panel_session else None
+        raw_packvm_session_id = (
+            panel_session.get("session_id") if panel_session else None
+        )
         packvm_session_id: str | None = (
             raw_packvm_session_id if isinstance(raw_packvm_session_id, str) else None
         )
@@ -1362,7 +1381,9 @@ class PackAPIHandler(
                     and guard.consume(
                         packvm_session_id,
                         request_id,
-                        session_ttl_seconds=self._panel_session_ttl_seconds(panel_session),
+                        session_ttl_seconds=self._panel_session_ttl_seconds(
+                            panel_session
+                        ),
                     )
                 )
             except _RequestReplayCapacityError:
@@ -1372,7 +1393,9 @@ class PackAPIHandler(
             if not fresh_request:
                 self._discard_request_body()
                 self._send_response(
-                    APIResponse(False, error="Canonical request identity is missing or replayed"),
+                    APIResponse(
+                        False, error="Canonical request identity is missing or replayed"
+                    ),
                     409,
                 )
                 return True
@@ -1384,7 +1407,9 @@ class PackAPIHandler(
             payload = {}
         lifecycle = self._packvm_lifecycle
         if lifecycle is None:
-            self._send_response(APIResponse(False, error="PackVM lifecycle is unavailable"), 503)
+            self._send_response(
+                APIResponse(False, error="PackVM lifecycle is unavailable"), 503
+            )
             return True
         try:
             if operation == "prepare":
@@ -1398,17 +1423,25 @@ class PackAPIHandler(
             elif operation == "doctor":
                 result = lifecycle.doctor()
             elif operation == "progress":
-                operation_values = parse_qs(urlparse(self.path).query).get("operation_id", [])
+                operation_values = parse_qs(urlparse(self.path).query).get(
+                    "operation_id", []
+                )
                 if len(operation_values) != 1:
                     raise ValueError("PackVM progress requires one operation_id")
-                result = lifecycle.progress(operation_values[0], session_id=packvm_session_id)
+                result = lifecycle.progress(
+                    operation_values[0], session_id=packvm_session_id
+                )
             elif operation == "cancel":
                 result = lifecycle.cancel(payload, session_id=packvm_session_id)
             elif operation == "stop":
                 result = lifecycle.stop(payload)
             else:
                 result = lifecycle.cleanup(payload, session_id=packvm_session_id)
-            if operation == "doctor" and result.get("ready") is True and self._runtime_refresh:
+            if (
+                operation == "doctor"
+                and result.get("ready") is True
+                and self._runtime_refresh
+            ):
                 self._runtime_refresh(None)
             elif operation == "stop" and self._runtime_refresh:
                 self._runtime_refresh(None)
@@ -1622,9 +1655,13 @@ class PackAPIHandler(
 
         if binding.presentation != "dynamic_pack_catalog":
             return dict(result)
-        capability_binding = self._contract_routes.get(("POST", "/api/ui/capability/invoke"))
+        capability_binding = self._contract_routes.get(
+            ("POST", "/api/ui/capability/invoke")
+        )
         contributions = (
-            self._capability_targets(capability_binding, result) if capability_binding else ()
+            self._capability_targets(capability_binding, result)
+            if capability_binding
+            else ()
         )
         diagnostics = self._capability_diagnostics(result)
         session = self._dispatch_session
@@ -1671,7 +1708,9 @@ class PackAPIHandler(
             "owner_pack_hash": target.artifact_digest
             or (session.plan_digest if session is not None else ""),
             "build_identity": target.function_id,
-            "resolved_profile_revision": session.plan_digest if session is not None else "",
+            "resolved_profile_revision": (
+                session.plan_digest if session is not None else ""
+            ),
             "resolved_plan_hash": session.plan_digest if session is not None else "",
             "descriptor_hash": canonical_digest(
                 {
@@ -1746,7 +1785,9 @@ class PackAPIHandler(
         parsed: object = self._parse_body()
         if parsed is None:
             return None
-        if not isinstance(parsed, dict) or any(not isinstance(key, str) for key in parsed):
+        if not isinstance(parsed, dict) or any(
+            not isinstance(key, str) for key in parsed
+        ):
             self._send_response(
                 APIResponse(False, error="Request body must be a JSON object"),
                 400,
@@ -1846,14 +1887,19 @@ class PackAPIHandler(
 
     def _handle_panel_exchange(self, body: Mapping[str, object]) -> None:
         manager = self._panel_auth_manager
-        if not self._is_loopback_client(self.client_address) or not self._check_panel_origin():
+        if (
+            not self._is_loopback_client(self.client_address)
+            or not self._check_panel_origin()
+        ):
             self._send_response(APIResponse(False, error="Forbidden origin"), 403)
             return
         code_value = body.get("code")
         code = code_value.strip() if isinstance(code_value, str) else ""
         exchange = manager.exchange_code(code) if manager is not None else None
         if exchange is None:
-            self._send_response(APIResponse(False, error="Invalid or expired code"), 401)
+            self._send_response(
+                APIResponse(False, error="Invalid or expired code"), 401
+            )
             return
         cookie = self._build_set_cookie(
             "rumi_panel_session",
@@ -1969,9 +2015,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         store = self._profile_registry_store()
         state = store.snapshot()
         repair_legacy_active_profile_pointer()
-        active = ActiveProfileStore(runtime_user_data_root()).load(
-            verify_snapshot=True
-        )
+        active = ActiveProfileStore(runtime_user_data_root()).load(verify_snapshot=True)
         return {
             "profile_registry_api_version": "io.tobkiri.profile-registry.v4",
             "generation": int(state["generation"]),
@@ -2222,7 +2266,9 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 self._handle_panel_exchange(body)
             return
         if path == "/api/setup/packs/install":
-            if not self._setup_pre_auth_allowed() and not self._check_auth("POST", path):
+            if not self._setup_pre_auth_allowed() and not self._check_auth(
+                "POST", path
+            ):
                 self._discard_request_body()
                 self._send_response(APIResponse(False, error="Unauthorized"), 401)
                 return
@@ -2375,7 +2421,9 @@ class PackAPIServer:
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
-                    runtime_refresh=self._runtime_refresh_callback(lifecycle_generation),
+                    runtime_refresh=self._runtime_refresh_callback(
+                        lifecycle_generation
+                    ),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
                 )
@@ -2404,7 +2452,10 @@ class PackAPIServer:
         refresh_method = self._refresh_runtime_capture
 
         def refresh(session: DispatchSession | None = None) -> None:
-            if getattr(refresh_method, "__func__", None) is PackAPIServer._refresh_runtime_capture:
+            if (
+                getattr(refresh_method, "__func__", None)
+                is PackAPIServer._refresh_runtime_capture
+            ):
                 refresh_method(
                     session,
                     lifecycle_generation=lifecycle_generation,
@@ -2416,7 +2467,9 @@ class PackAPIServer:
                     or lifecycle_generation != self._lifecycle_generation
                 ):
                     return
-            override_refresh = cast(Callable[[DispatchSession | None], None], refresh_method)
+            override_refresh = cast(
+                Callable[[DispatchSession | None], None], refresh_method
+            )
             override_refresh(session)
 
         return refresh
@@ -2438,7 +2491,17 @@ class PackAPIServer:
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
-        if not session.profile_id or not session.plan_digest.startswith("sha256:"):
+        host_profile_control = (
+            getattr(session, "session_kind", None) == "host_profile_control"
+        )
+        if host_profile_control:
+            if (
+                getattr(session, "execution_profile_id", object()) is not None
+                or not str(getattr(session, "principal_id", ""))
+                or not session.plan_digest.startswith("sha256:")
+            ):
+                raise RuntimeError("Host Profile control identity is invalid")
+        elif not session.profile_id or not session.plan_digest.startswith("sha256:"):
             raise RuntimeError("frontend contracts require an exact active Profile")
         for binding in routes.values():
             for target in binding.targets:
@@ -2448,11 +2511,25 @@ class PackAPIServer:
                     for provider in providers
                     if provider.get("provider_id") == target.provider_id
                     and provider.get("operation_id") == target.operation_id
-                    and provider.get("profile_id") == session.profile_id
-                    and provider.get("plan_digest") == session.plan_digest
+                    and (
+                        (
+                            host_profile_control
+                            and provider.get("principal_id")
+                            == getattr(session, "principal_id", None)
+                            and provider.get("execution_profile_id") is None
+                            and provider.get("catalog_digest") == session.plan_digest
+                        )
+                        or (
+                            not host_profile_control
+                            and provider.get("profile_id") == session.profile_id
+                            and provider.get("plan_digest") == session.plan_digest
+                        )
+                    )
                 )
                 if len(exact) != 1 or target.function_id != target.provider_id:
-                    raise RuntimeError("frontend contract Provider identity is unavailable")
+                    raise RuntimeError(
+                        "frontend contract Provider identity is unavailable"
+                    )
                 if not _is_conversation_capability_target(target):
                     session.assert_operation_ready(
                         target.contract_id,
@@ -2546,7 +2623,9 @@ class PackAPIServer:
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
-                    runtime_refresh=self._runtime_refresh_callback(published_generation),
+                    runtime_refresh=self._runtime_refresh_callback(
+                        published_generation
+                    ),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
                 )
@@ -2634,7 +2713,9 @@ class PackAPIServer:
             "serving_thread_alive": serving_thread_alive,
         }
         if server is not None:
-            drained = server.wait_for_request_drain(max(0.0, deadline - time.monotonic()))
+            drained = server.wait_for_request_drain(
+                max(0.0, deadline - time.monotonic())
+            )
             diagnostics.update(server.teardown_snapshot())
 
         with self._lifecycle_lock:
@@ -2675,7 +2756,11 @@ class PackAPIServer:
     def is_running(self) -> bool:
         """Return whether the serving thread is alive."""
 
-        return self.server is not None and self.thread is not None and self.thread.is_alive()
+        return (
+            self.server is not None
+            and self.thread is not None
+            and self.thread.is_alive()
+        )
 
 
 _api_server: PackAPIServer | None = None

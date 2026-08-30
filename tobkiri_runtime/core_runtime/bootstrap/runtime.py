@@ -25,8 +25,10 @@ from ..authority.v4 import AuthorityStore
 from ..pack_api_server import PackAPIServer, initialize_pack_api_server
 from ..frontend_contract_routes import (
     FrontendContractBinding,
+    host_profile_control_bindings,
     load_frontend_contract_bindings,
 )
+from ..pack_control_v4 import HostProfileControlSession
 from ..runtime_port import resolve_runtime_port
 from tobkiri_host.runtime import V4DispatchSession, install_dispatch_session
 from .production_v4 import capture_production_dispatch
@@ -41,7 +43,6 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     BundledCatalog,
     ProfileReconfirmationRequired,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,9 @@ class Kernel:
 
         self._lock = RLock()
         self._server: PackAPIServer | None = None
-        self._dispatch_session: V4DispatchSession | None = None
+        self._dispatch_session: V4DispatchSession | HostProfileControlSession | None = (
+            None
+        )
         self._packvm_lifecycle = PackVMLifecycleV4()
         self._lifecycle = AppLifecycleManager(
             packvm_lifecycle=self._packvm_lifecycle,
@@ -126,8 +129,11 @@ class Kernel:
             runtime_root = Path(__file__).resolve().parents[2]
             user_data = runtime_user_data_root()
             _prepare_desktop_api_token(user_data)
+            bundle_root = _bundle_root()
             dispatch_session = None
-            contract_bindings: tuple[FrontendContractBinding, ...] = ()
+            contract_bindings: tuple[FrontendContractBinding, ...] = (
+                host_profile_control_bindings()
+            )
             reconfirmation_error: str | None = None
             if active_profile_exists():
                 try:
@@ -135,9 +141,8 @@ class Kernel:
                     authority_store = AuthorityStore(
                         user_data / "authority" / "v4.sqlite3"
                     )
-                    bundle_root = _bundle_root()
                     catalog = host_profile_catalog()
-                    contract_bindings = load_frontend_contract_bindings(
+                    all_contract_bindings = load_frontend_contract_bindings(
                         runtime_root
                         / "ecosystem"
                         / "defaultspack"
@@ -145,6 +150,7 @@ class Kernel:
                         / "frontend_contract_map.v4.json",
                         catalog.packs["runtime.tauri.application.default"],
                     )
+                    contract_bindings = all_contract_bindings
                     try:
                         dispatch_session = capture_production_dispatch(
                             active,
@@ -164,6 +170,12 @@ class Kernel:
                     self._dispatch_session = dispatch_session
                 except ProfileReconfirmationRequired as error:
                     reconfirmation_error = str(error)
+            else:
+                dispatch_session = HostProfileControlSession(
+                    bundle_root=bundle_root,
+                    user_data_root=user_data,
+                )
+                self._dispatch_session = dispatch_session
             port = resolve_runtime_port()
             self._server = initialize_pack_api_server(
                 host="127.0.0.1",
@@ -188,6 +200,12 @@ class Kernel:
                 return {
                     "status": "setup_required",
                     "runtime_ready": False,
+                }
+            if not active_profile_exists():
+                return {
+                    "status": "profile_activation_required",
+                    "runtime_ready": False,
+                    "profile_ceremony_available": True,
                 }
             if self._server is not None and not self._server._contract_routes:
                 from ..di_container import get_container

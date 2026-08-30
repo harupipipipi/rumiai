@@ -15,7 +15,11 @@ import queue
 import secrets
 import threading
 import time
-from concurrent.futures import CancelledError, Future, TimeoutError as FutureTimeoutError
+from concurrent.futures import (
+    CancelledError,
+    Future,
+    TimeoutError as FutureTimeoutError,
+)
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
@@ -30,8 +34,18 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import validate_document
 
-
 RUNTIME_SURFACE_API_VERSION = "io.tobkiri.launcher.runtime-surface.v4"
+NO_ACTIVE_PROFILE_REVISION = canonical_digest(
+    {
+        "schema": "io.tobkiri.profile-predecessor.v1",
+        "state": "none",
+        "field": "revision",
+    }
+)
+NO_ACTIVE_PLAN_DIGEST = canonical_digest(
+    {"schema": "io.tobkiri.profile-predecessor.v1", "state": "none", "field": "plan"}
+)
+NO_ACTIVE_ACTIVATION_ID = "activation:none"
 
 
 class RuntimeSurfaceErrorCode(str, Enum):
@@ -182,7 +196,9 @@ class _BoundedReadExecutor:
             self._jobs_by_owner.setdefault(owner, set()).add(job)
         try:
             self._queue.put_nowait(job)
-        except queue.Full:  # pragma: no cover - semaphore and queue move atomically enough
+        except (
+            queue.Full
+        ):  # pragma: no cover - semaphore and queue move atomically enough
             self._finish(job)
             return None
         return future
@@ -284,6 +300,7 @@ class RuntimeProfileChangeService:
         surface_service: "RuntimeSurfaceService | None" = None,
         store_path: Path | None = None,
         bundle_root: Path | None = None,
+        user_data_root: Path | None = None,
     ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
@@ -292,15 +309,22 @@ class RuntimeProfileChangeService:
         self._surface_service = surface_service
         self._bundle_root = bundle_root
         self._lock = threading.RLock()
-        if store_path is None:
-            from .bootstrap.profile_capture import runtime_user_data_root
+        from .bootstrap.profile_capture import runtime_user_data_root
 
-            store_path = runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
+        self._user_data_root = (
+            Path(user_data_root).resolve()
+            if user_data_root is not None
+            else runtime_user_data_root()
+        )
+        if store_path is None:
+            store_path = self._user_data_root / "control" / "reconciliation-v4.sqlite3"
         from .control_reconciliation_v4 import ControlReconciliationStore
 
         self._store = ControlReconciliationStore(store_path)
 
-    def resolve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
+    def resolve(
+        self, body: Mapping[str, object], *, session_id: str
+    ) -> dict[str, object]:
         """Resolve a candidate closure without writing runtime state."""
 
         legacy_expected = {
@@ -342,11 +366,35 @@ class RuntimeProfileChangeService:
                 RuntimeSurfaceErrorCode.INVALID_REQUEST,
                 "desired_pack_ids contains a duplicate",
             )
-        current = self._surface().read_profile(
-            expected_profile_revision=revision,
-            expected_plan_digest=plan_digest,
-        )
-        current_data = cast(Mapping[str, Any], current["data"])
+        no_active_predecessor = hmac.compare_digest(
+            revision, NO_ACTIVE_PROFILE_REVISION
+        ) and hmac.compare_digest(plan_digest, NO_ACTIVE_PLAN_DIGEST)
+        if no_active_predecessor:
+            from .active_profile_store_v4 import ActiveProfileStore
+
+            if (
+                ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
+                is not None
+            ):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.STALE_REVISION,
+                    "Profile activation predecessor is no longer empty",
+                )
+            current: Mapping[str, Any] | None = None
+            current_data: Mapping[str, Any] | None = None
+        else:
+            if hmac.compare_digest(
+                revision, NO_ACTIVE_PROFILE_REVISION
+            ) or hmac.compare_digest(plan_digest, NO_ACTIVE_PLAN_DIGEST):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.INVALID_REQUEST,
+                    "Profile predecessor binding is incomplete",
+                )
+            current = self._surface().read_profile(
+                expected_profile_revision=revision,
+                expected_plan_digest=plan_digest,
+            )
+            current_data = cast(Mapping[str, Any], current["data"])
         if authoritative_selection:
             definition_digest = _required_string(body.get("profile_definition_digest"))
             catalog_digest = _required_string(body.get("profile_catalog_digest"))
@@ -361,7 +409,7 @@ class RuntimeProfileChangeService:
             except RuntimeSurfaceError:
                 raise
         else:
-            if profile_id != str(current["profile_id"]):
+            if current is None or profile_id != str(current["profile_id"]):
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.INVALID_REQUEST,
                     "non-active Profile selection requires exact catalog bindings",
@@ -369,7 +417,9 @@ class RuntimeProfileChangeService:
             catalog = self._surface().read_profile_catalog()
             catalog_data = cast(Mapping[str, Any], catalog["data"])
             entry = next(
-                item for item in catalog_data["profiles"] if item["profile_id"] == profile_id
+                item
+                for item in catalog_data["profiles"]
+                if item["profile_id"] == profile_id
             )
             definition_digest = str(entry["definition"]["digest"])
             catalog_digest = str(catalog_data["catalog_digest"])
@@ -385,6 +435,7 @@ class RuntimeProfileChangeService:
                         expected_profile_definition_digest=definition_digest,
                         expected_profile_catalog_digest=catalog_digest,
                         expected_bundle_lock_digest=bundle_digest,
+                        user_data_root=self._user_data_root,
                     )
                 else:
                     resolved = resolve_profile_pack_set(
@@ -394,6 +445,7 @@ class RuntimeProfileChangeService:
                         expected_profile_catalog_digest=catalog_digest,
                         expected_bundle_lock_digest=bundle_digest,
                         bundle_root=self._bundle_root,
+                        user_data_root=self._user_data_root,
                     )
             else:
                 resolved = resolve_profile_pack_set(
@@ -403,27 +455,36 @@ class RuntimeProfileChangeService:
                         if self._bundle_root is None
                         else {"bundle_root": self._bundle_root}
                     ),
+                    user_data_root=self._user_data_root,
                 )
         except Exception as error:
             raise _map_change_error(error) from error
+        execution_profile_id = None if current is None else str(current["profile_id"])
+        execution_activation_id = (
+            NO_ACTIVE_ACTIVATION_ID
+            if current_data is None
+            else str(current_data["activation_record"]["activation_id"])
+        )
         review = {
-            "candidate_generation": "profile-change-generation:" + secrets.token_hex(16),
+            "candidate_generation": "profile-change-generation:"
+            + secrets.token_hex(16),
             "profile": dict(resolved.profile),
             "profile_lock": dict(resolved.lock),
             "resolved_plan": dict(resolved.plan),
             "selection": {
                 "selected_profile_id": profile_id,
-                "execution_profile_id": str(current["profile_id"]),
+                "execution_profile_id": execution_profile_id,
                 "execution_profile_revision": revision,
                 "execution_plan_digest": plan_digest,
-                "execution_activation_id": str(
-                    current_data["activation_record"]["activation_id"]
+                "execution_activation_id": (
+                    None if current_data is None else execution_activation_id
                 ),
             },
             "predecessor": {
+                "state": "none" if current is None else "active",
                 "profile_revision": revision,
                 "plan_digest": plan_digest,
-                "activation_id": current_data["activation_record"]["activation_id"],
+                "activation_id": execution_activation_id,
             },
             "catalog_binding": {
                 "profile_definition_digest": definition_digest,
@@ -447,7 +508,7 @@ class RuntimeProfileChangeService:
             session_id=session_id,
             expected_profile_revision=revision,
             expected_plan_digest=plan_digest,
-            expected_activation_id=str(current_data["activation_record"]["activation_id"]),
+            expected_activation_id=execution_activation_id,
             profile_definition_digest=definition_digest,
             profile_catalog_digest=catalog_digest,
             bundle_lock_digest=bundle_digest,
@@ -477,12 +538,23 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def review(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
+    def review(
+        self, body: Mapping[str, object], *, session_id: str
+    ) -> dict[str, object]:
         """Acknowledge the exact resolved candidate for later approval."""
 
         with self._lock:
             candidate_id, digest = self._candidate_request(body)
             try:
+                current = self._store.require_candidate(
+                    candidate_id,
+                    digest,
+                    session_id=session_id,
+                    allowed_states=("resolved", "reviewed"),
+                )
+                current_candidate = self._candidate_from_record(current)
+                self._require_predecessor_current(current_candidate)
+                self._require_candidate_catalog_current(current_candidate)
                 record = self._store.transition_reviewed(
                     candidate_id,
                     digest,
@@ -501,12 +573,23 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def approve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
+    def approve(
+        self, body: Mapping[str, object], *, session_id: str
+    ) -> dict[str, object]:
         """Create a one-shot server approval from a reviewed candidate."""
 
         with self._lock:
             candidate_id, digest = self._candidate_request(body)
             try:
+                current = self._store.require_candidate(
+                    candidate_id,
+                    digest,
+                    session_id=session_id,
+                    allowed_states=("reviewed", "approval_prepared", "approved"),
+                )
+                current_candidate = self._candidate_from_record(current)
+                self._require_predecessor_current(current_candidate)
+                self._require_candidate_catalog_current(current_candidate)
                 prepared = self._store.prepare_approval(
                     candidate_id,
                     digest,
@@ -521,6 +604,7 @@ class RuntimeProfileChangeService:
                 session_id=session_id,
                 approval_id=str(prepared["approval_id"]),
                 decided_at=float(prepared["approval_decided_at"]),
+                user_data_root=self._user_data_root,
             )
             approval_id = str(authority_record.approval_id)
             approval_digest = str(authority_record.digest)
@@ -563,7 +647,9 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def activate(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
+    def activate(
+        self, body: Mapping[str, object], *, session_id: str
+    ) -> dict[str, object]:
         """Consume one approval and atomically activate its exact candidate."""
 
         if set(body) != {"approval_id", "approval_digest"}:
@@ -583,7 +669,9 @@ class RuntimeProfileChangeService:
             except Exception as error:
                 raise _map_reconciliation_error(error, approval=True) from error
             if record["state"] == "activated":
-                return self._activation_projection(cast(Mapping[str, Any], record["activation"]))
+                return self._activation_projection(
+                    cast(Mapping[str, Any], record["activation"])
+                )
             candidate = self._candidate_from_record(record)
             approval = _ProfileApproval(
                 approval_id=approval_id,
@@ -600,7 +688,23 @@ class RuntimeProfileChangeService:
                 expected_catalog_digest=candidate.profile_catalog_digest,
                 expected_bundle_lock_digest=candidate.bundle_lock_digest,
             )
-            _verify_authority_profile_approval(approval)
+            activation_id = (
+                f"activation:{candidate.resolved.profile['profile_id']}-profile-change-"
+                + canonical_digest(
+                    {
+                        "approval_id": approval_id,
+                        "candidate_digest": candidate.candidate_digest,
+                    }
+                ).removeprefix("sha256:")[:24]
+            )
+            self._require_predecessor_current(
+                candidate,
+                accepted_activation_id=activation_id,
+            )
+            _verify_authority_profile_approval(
+                approval,
+                user_data_root=self._user_data_root,
+            )
             try:
                 from .pack_control_v4 import activate_resolved_profile_pack_set
 
@@ -611,19 +715,12 @@ class RuntimeProfileChangeService:
                 )
                 activation = activate_resolved_profile_pack_set(
                     candidate.resolved,
-                    activation_id=(
-                        f"activation:{candidate.resolved.profile['profile_id']}-profile-change-"
-                        + canonical_digest(
-                            {
-                                "approval_id": approval_id,
-                                "candidate_digest": candidate.candidate_digest,
-                            }
-                        ).removeprefix("sha256:")[:24]
-                    ),
+                    activation_id=activation_id,
                     expected_profile_revision=candidate.expected_profile_revision,
                     expected_plan_digest=candidate.expected_plan_digest,
                     expected_activation_id=candidate.expected_activation_id,
                     **bundle_binding,
+                    user_data_root=self._user_data_root,
                 )
             except Exception as error:
                 raise _map_change_error(error) from error
@@ -693,6 +790,82 @@ class RuntimeProfileChangeService:
                 RuntimeSurfaceErrorCode.TIMEOUT,
                 "Profile ceremony candidate expired",
             )
+
+    def _require_predecessor_current(
+        self,
+        candidate: _ProfileCandidate,
+        *,
+        accepted_activation_id: str | None = None,
+    ) -> None:
+        """Fence every ceremony transition to the reviewed Host predecessor."""
+
+        from .active_profile_store_v4 import ActiveProfileStore
+
+        current = ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
+        expects_none = (
+            hmac.compare_digest(
+                candidate.expected_profile_revision,
+                NO_ACTIVE_PROFILE_REVISION,
+            )
+            and hmac.compare_digest(
+                candidate.expected_plan_digest,
+                NO_ACTIVE_PLAN_DIGEST,
+            )
+            and hmac.compare_digest(
+                candidate.expected_activation_id,
+                NO_ACTIVE_ACTIVATION_ID,
+            )
+        )
+        candidate_is_current = current is not None and accepted_activation_id is not None and (
+            current.profile_id == str(candidate.resolved.profile["profile_id"])
+            and hmac.compare_digest(
+                current.profile_revision,
+                str(candidate.resolved.plan["profile_revision"]),
+            )
+            and hmac.compare_digest(
+                current.plan_digest,
+                str(candidate.resolved.plan["plan_digest"]),
+            )
+            and hmac.compare_digest(
+                current.lock_digest,
+                str(candidate.resolved.lock["lock_digest"]),
+            )
+            and hmac.compare_digest(current.activation_id, accepted_activation_id)
+        )
+        if candidate_is_current:
+            return
+        if expects_none:
+            if current is None:
+                return
+        elif current is not None and (
+            hmac.compare_digest(
+                current.profile_revision,
+                candidate.expected_profile_revision,
+            )
+            and hmac.compare_digest(
+                current.plan_digest,
+                candidate.expected_plan_digest,
+            )
+            and hmac.compare_digest(
+                current.activation_id,
+                candidate.expected_activation_id,
+            )
+        ):
+            return
+        raise RuntimeSurfaceError(
+            RuntimeSurfaceErrorCode.STALE_REVISION,
+            "Profile activation predecessor changed during ceremony",
+        )
+
+    def _require_candidate_catalog_current(self, candidate: _ProfileCandidate) -> None:
+        """Fence review and approval to the exact resolved catalog bytes."""
+
+        self._surface().require_catalog_binding(
+            profile_id=str(candidate.resolved.profile["profile_id"]),
+            expected_definition_digest=candidate.profile_definition_digest,
+            expected_catalog_digest=candidate.profile_catalog_digest,
+            expected_bundle_lock_digest=candidate.bundle_lock_digest,
+        )
 
 
 class RuntimeSurfaceService:
@@ -850,10 +1023,7 @@ class RuntimeSurfaceService:
             expected_plan_digest=expected_plan_digest,
         )
         active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
-        if (
-            selected_profile_id is not None
-            and selected_profile_id != active_profile_id
-        ):
+        if selected_profile_id is not None and selected_profile_id != active_profile_id:
             data = self._browsing_profile_projection(
                 snapshot,
                 selected_profile_id,
@@ -919,7 +1089,8 @@ class RuntimeSurfaceService:
             }
             effective_sets: list[object] = [active.resolved.lock["effective_set"]]
             effective_sets.extend(
-                record["review"]["profile_lock"]["effective_set"] for record in candidate_records
+                record["review"]["profile_lock"]["effective_set"]
+                for record in candidate_records
             )
             catalog = _catalog_for_effective_sets(catalog, effective_sets)
             from .profile_catalog_v4 import project_profile_catalog
@@ -1038,10 +1209,7 @@ class RuntimeSurfaceService:
             expected_plan_digest=expected_plan_digest,
         )
         active_profile_id = str(snapshot.active.resolved.profile["profile_id"])
-        if (
-            selected_profile_id is not None
-            and selected_profile_id != active_profile_id
-        ):
+        if selected_profile_id is not None and selected_profile_id != active_profile_id:
             browsing = self._browsing_advanced_projection(
                 snapshot,
                 selected_profile_id,
@@ -1110,25 +1278,20 @@ class RuntimeSurfaceService:
                 ) from error
         active = snapshot.active
         active_profile_id = str(active.resolved.profile["profile_id"])
-        if (
-            selected_profile_id is not None
-            and selected_profile_id != active_profile_id
-        ):
+        if selected_profile_id is not None and selected_profile_id != active_profile_id:
             entry = self._browsing_profile_entry(snapshot, selected_profile_id)
             definition = snapshot.catalog.profiles[selected_profile_id]
             data = {
                 "user_settings": {
                     "scope": "user",
                     "source": "launcher_local",
-                    "state": "unavailable_from_runtime"
-                    if user_settings is None
-                    else "available_from_explicit_adapter",
-                    "mutable_via_profile_activation": False,
-                    **(
-                        {"values": user_settings}
-                        if user_settings is not None
-                        else {}
+                    "state": (
+                        "unavailable_from_runtime"
+                        if user_settings is None
+                        else "available_from_explicit_adapter"
                     ),
+                    "mutable_via_profile_activation": False,
+                    **({"values": user_settings} if user_settings is not None else {}),
                 },
                 "runtime_profile_settings": {
                     "scope": "runtime_profile",
@@ -1143,12 +1306,8 @@ class RuntimeSurfaceService:
                     "execution_profile_revision": str(
                         active.resolved.plan["profile_revision"]
                     ),
-                    "execution_activation_id": str(
-                        active.activation["activation_id"]
-                    ),
-                    "execution_plan_digest": str(
-                        active.resolved.plan["plan_digest"]
-                    ),
+                    "execution_activation_id": str(active.activation["activation_id"]),
+                    "execution_plan_digest": str(active.resolved.plan["plan_digest"]),
                 },
                 "profile_catalog_entry": entry,
             }
@@ -1162,9 +1321,11 @@ class RuntimeSurfaceService:
             "user_settings": {
                 "scope": "user",
                 "source": "launcher_local",
-                "state": "unavailable_from_runtime"
-                if user_settings is None
-                else "available_from_explicit_adapter",
+                "state": (
+                    "unavailable_from_runtime"
+                    if user_settings is None
+                    else "available_from_explicit_adapter"
+                ),
                 "mutable_via_profile_activation": False,
                 **({"values": user_settings} if user_settings is not None else {}),
             },
@@ -1311,13 +1472,19 @@ class RuntimeSurfaceService:
         )
         deadline.checkpoint()
         application = next(
-            (dict(item) for item in profile["packs"] if item.get("role") == "application"),
+            (
+                dict(item)
+                for item in profile["packs"]
+                if item.get("role") == "application"
+            ),
             None,
         )
         return {
             "profile": {
                 "profile_id": str(profile["profile_id"]),
-                "display_name": str(profile.get("display_name") or profile["profile_id"]),
+                "display_name": str(
+                    profile.get("display_name") or profile["profile_id"]
+                ),
                 "profile_revision": str(plan["profile_revision"]),
                 "catalog_revision": str(lock["catalog_revision"]),
             },
@@ -1510,9 +1677,7 @@ class RuntimeSurfaceService:
                             f"browsing::{selected_profile_id}::{pack_id}::"
                             f"{contract_id}::{operation_name}"
                         ),
-                        "catalog_digest": str(
-                            entry["definition"]["digest"]
-                        ),
+                        "catalog_digest": str(entry["definition"]["digest"]),
                         "domain_kind": "browsing",
                         "artifact_digest": str(pack["artifact_digest"]),
                         "function_id": function_id,
@@ -1521,9 +1686,7 @@ class RuntimeSurfaceService:
                         ),
                         "contract_revision_digest": revision,
                         "function_implementation_digest": None,
-                        "caller_function_id": str(
-                            edge.get("caller_function_id") or ""
-                        ),
+                        "caller_function_id": str(edge.get("caller_function_id") or ""),
                         "target_provider_id": str(
                             edge.get("target_provider_id") or function_id
                         ),
@@ -1578,7 +1741,8 @@ class RuntimeSurfaceService:
         lifecycle = _captured_lifecycle_projection(snapshot)
         lifecycle_packs = {str(item["pack_id"]): item for item in lifecycle["packs"]}
         selected = {
-            str(item["identity"]): dict(item) for item in active.resolved.lock["effective_set"]
+            str(item["identity"]): dict(item)
+            for item in active.resolved.lock["effective_set"]
         }
         required_pack_ids = {
             str(active.resolved.plan["base"]["pack_id"]),
@@ -1626,19 +1790,32 @@ class RuntimeSurfaceService:
                         for artifact in manifest["artifacts"]
                     ],
                     "provenance": {
-                        "source_identity": str(manifest["integrity"]["source_identity"]),
-                        "artifact_set_digest": str(manifest["integrity"]["artifact_set_digest"]),
+                        "source_identity": str(
+                            manifest["integrity"]["source_identity"]
+                        ),
+                        "artifact_set_digest": str(
+                            manifest["integrity"]["artifact_set_digest"]
+                        ),
                         "contract_catalog_digest": str(
                             manifest["integrity"]["contract_catalog_digest"]
                         ),
                     },
-                    "pack_dependencies": dict(manifest["requirements"]["pack_dependencies"]),
+                    "pack_dependencies": dict(
+                        manifest["requirements"]["pack_dependencies"]
+                    ),
                     "contract_dependencies": [
-                        dict(item) for item in manifest["requirements"]["contract_dependencies"]
+                        dict(item)
+                        for item in manifest["requirements"]["contract_dependencies"]
                     ],
-                    "installed": bool(lifecycle_packs.get(pack_id, {}).get("installed", False)),
-                    "enabled": bool(lifecycle_packs.get(pack_id, {}).get("enabled", False)),
-                    "approved": bool(lifecycle_packs.get(pack_id, {}).get("approved", False)),
+                    "installed": bool(
+                        lifecycle_packs.get(pack_id, {}).get("installed", False)
+                    ),
+                    "enabled": bool(
+                        lifecycle_packs.get(pack_id, {}).get("enabled", False)
+                    ),
+                    "approved": bool(
+                        lifecycle_packs.get(pack_id, {}).get("approved", False)
+                    ),
                     "approval_source": "pack_control_catalog",
                     "required": pack_id in required_pack_ids,
                     "invokable_operations": sorted(invokable_by_pack.get(pack_id, [])),
@@ -1647,7 +1824,10 @@ class RuntimeSurfaceService:
             )
             for function in manifest["functions"]:
                 for contract in manifest["contracts"]:
-                    if function["contract_revision_digest"] == contract["revision_digest"]:
+                    if (
+                        function["contract_revision_digest"]
+                        == contract["revision_digest"]
+                    ):
                         functions_by_contract.setdefault(
                             (pack_id, str(contract["contract_id"])), []
                         ).append(str(function["id"]))
@@ -1726,7 +1906,9 @@ class RuntimeSurfaceService:
                 "function_id": str(principal["function_id"]),
                 "function_principal_id": _principal_id(principal),
                 "contract_revision_digest": str(principal["contract_revision_digest"]),
-                "function_implementation_digest": str(principal["function_implementation_digest"]),
+                "function_implementation_digest": str(
+                    principal["function_implementation_digest"]
+                ),
                 "caller_function_id": str(binding["caller_function_id"]),
                 "target_provider_id": str(edge.get("target_provider_id") or ""),
                 "authority_reference": str(binding["authority_reference"]),
@@ -1737,7 +1919,9 @@ class RuntimeSurfaceService:
                     "provider_pack_id": str(binding["pack_id"]),
                 },
             }
-            contract_row = contracts.get((str(binding["pack_id"]), str(binding["contract_id"])))
+            contract_row = contracts.get(
+                (str(binding["pack_id"]), str(binding["contract_id"]))
+            )
             if contract_row is None:
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
@@ -1757,15 +1941,23 @@ class RuntimeSurfaceService:
                     "ResolvedPlan binding has no unique verified Operation schema",
                 )
             row["schema"] = (
-                dict(operation_rows[0]) if len(operation_rows) == 1 else {"state": "unavailable"}
+                dict(operation_rows[0])
+                if len(operation_rows) == 1
+                else {"state": "unavailable"}
             )
             semantics = contract_row["provider_semantics"]
             row["provider_semantics"] = (
-                dict(cast(Mapping[str, Any], semantics)) if semantics is not None else None
+                dict(cast(Mapping[str, Any], semantics))
+                if semantics is not None
+                else None
             )
             lifecycle_pack = lifecycle_packs.get(str(binding["pack_id"]), {})
             pack_kind = next(
-                (item["kind"] for item in packs if item["pack_id"] == str(binding["pack_id"])),
+                (
+                    item["kind"]
+                    for item in packs
+                    if item["pack_id"] == str(binding["pack_id"])
+                ),
                 "",
             )
             capability_target = _capability_invocation_target(
@@ -1777,16 +1969,23 @@ class RuntimeSurfaceService:
             row["invocation_reason"] = (
                 None
                 if capability_target is not None
-                else str(lifecycle_pack.get("approval_reason") or "capability_binding_unavailable")
+                else str(
+                    lifecycle_pack.get("approval_reason")
+                    or "capability_binding_unavailable"
+                )
             )
             if pack_kind == "normal_sandbox" and not _packvm_attested(packvm_readiness):
                 row["invokable"] = False
                 row["invocation_reason"] = "packvm_attestation_not_current"
             row["invocation_contribution_id"] = (
-                str(capability_target["contribution_id"]) if capability_target is not None else None
+                str(capability_target["contribution_id"])
+                if capability_target is not None
+                else None
             )
             row["invocation_owner_pack_id"] = (
-                str(capability_target["owner_pack_id"]) if capability_target is not None else None
+                str(capability_target["owner_pack_id"])
+                if capability_target is not None
+                else None
             )
             row["invocation_catalog_hash"] = (
                 str(capability_binding["catalog_hash"])
@@ -2252,7 +2451,9 @@ def _capability_invocation_target(
     if value.get("profile_id") != profile_id or value.get("plan_digest") != plan_digest:
         return None
     targets = value.get("targets")
-    if not isinstance(targets, list) or any(not isinstance(item, Mapping) for item in targets):
+    if not isinstance(targets, list) or any(
+        not isinstance(item, Mapping) for item in targets
+    ):
         return None
     required = (
         "contribution_id",
@@ -2264,9 +2465,9 @@ def _capability_invocation_target(
     )
     digest_targets: list[dict[str, str]] = []
     for target in targets:
-        if any(not isinstance(target.get(key), str) for key in required) or not isinstance(
-            target.get("owner_pack_id"), str
-        ):
+        if any(
+            not isinstance(target.get(key), str) for key in required
+        ) or not isinstance(target.get("owner_pack_id"), str):
             return None
         digest_targets.append({key: str(target[key]) for key in required})
     expected_hash = canonical_digest(
@@ -2331,7 +2532,10 @@ def _validated_contract_catalogs(
             )
         index_path = root / "artifact-index.v4.json"
         contracts_path = root / "contracts.v4.json"
-        if any(path.is_symlink() or not path.is_file() for path in (index_path, contracts_path)):
+        if any(
+            path.is_symlink() or not path.is_file()
+            for path in (index_path, contracts_path)
+        ):
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "selected Pack Contract catalog artifact is unavailable",
@@ -2358,7 +2562,8 @@ def _validated_contract_catalogs(
         index_entries = [
             item
             for item in index["artifacts"]
-            if item["role"] == "contract_catalog" and item["path"] == "contracts.v4.json"
+            if item["role"] == "contract_catalog"
+            and item["path"] == "contracts.v4.json"
         ]
         digest = "sha256:" + hashlib.sha256(contract_bytes).hexdigest()
         source_identity = str(manifest["integrity"]["source_identity"])
@@ -2388,7 +2593,8 @@ def _one_contract_document(
     documents = [
         item
         for item in catalog["contracts"]
-        if item["contract_id"] == contract_id and item["revision_digest"] == revision_digest
+        if item["contract_id"] == contract_id
+        and item["revision_digest"] == revision_digest
     ]
     if len(documents) != 1:
         raise RuntimeSurfaceError(
@@ -2519,12 +2725,12 @@ def _commit_authority_profile_approval(
     session_id: str,
     approval_id: str,
     decided_at: float,
+    user_data_root: Path,
 ) -> Any:
     """Commit immutable approval provenance and its Authority audit event."""
 
     from .authority.v4 import ApprovalRecord, AuthorityStore, FunctionPrincipal
     from .authority.v4_models import authority_digest
-    from .bootstrap.profile_capture import runtime_user_data_root
     from .pack_control_v4 import CONTROL_PRESENTATION_CONTRACT
 
     bindings = candidate.resolved.plan.get("bindings")
@@ -2549,7 +2755,9 @@ def _commit_authority_profile_approval(
             "Profile candidate principal is invalid",
         )
     principal = FunctionPrincipal.from_dict(approval_binding["function_principal"])
-    actor_suffix = authority_digest({"session_id": session_id}).removeprefix("sha256:")[:24]
+    actor_suffix = authority_digest({"session_id": session_id}).removeprefix("sha256:")[
+        :24
+    ]
     record = ApprovalRecord(
         approval_id=approval_id,
         snapshot_digest=candidate.candidate_digest,
@@ -2563,7 +2771,7 @@ def _commit_authority_profile_approval(
         security_epoch=int(candidate.resolved.plan["security_epoch"]),
     )
     try:
-        with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        with AuthorityStore(user_data_root / "authority" / "v4.sqlite3") as authority:
             if authority.security_epoch != record.security_epoch:
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.STALE_REVISION,
@@ -2594,14 +2802,17 @@ def _commit_authority_profile_approval(
     return record
 
 
-def _verify_authority_profile_approval(approval: _ProfileApproval) -> None:
+def _verify_authority_profile_approval(
+    approval: _ProfileApproval,
+    *,
+    user_data_root: Path,
+) -> None:
     """Re-authenticate the durable approval immediately before activation."""
 
     from .authority.v4 import AuthorityStore
-    from .bootstrap.profile_capture import runtime_user_data_root
 
     try:
-        with AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3") as authority:
+        with AuthorityStore(user_data_root / "authority" / "v4.sqlite3") as authority:
             record = authority.get_approval(approval.authority_record_id)
             current_epoch = authority.security_epoch
     except Exception as error:
@@ -2668,9 +2879,13 @@ def _map_change_error(error: Exception) -> RuntimeSurfaceError:
     )
 
 
-def _map_reconciliation_error(error: Exception, *, approval: bool = False) -> RuntimeSurfaceError:
+def _map_reconciliation_error(
+    error: Exception, *, approval: bool = False
+) -> RuntimeSurfaceError:
     """Map durable reconciliation failures without leaking persisted state."""
 
+    if isinstance(error, RuntimeSurfaceError):
+        return error
     message = str(error).lower()
     if "expired" in message:
         return RuntimeSurfaceError(

@@ -35,6 +35,23 @@ test('only coherent runtime health opens runtime routes', () => {
   }), 'checking');
 });
 
+test('Host catalog verification opens Profile ceremony without launch readiness', () => {
+  assert.equal(resolveSetupVerificationState({
+    ...healthy,
+    isSetupDone: false,
+    runtimeStatus: 'panel_ready',
+    hostCatalogVerified: true,
+    profileCeremonyAvailable: true,
+  }), 'verified');
+  assert.equal(resolveSetupVerificationState({
+    ...healthy,
+    isSetupDone: false,
+    runtimeStatus: 'panel_ready',
+    hostCatalogVerified: true,
+    profileCeremonyAvailable: false,
+  }), 'needs_setup');
+});
+
 test('reconfirmation, errors, disconnects, and incomplete setup fail closed', () => {
   assert.equal(resolveSetupVerificationState({
     ...healthy,

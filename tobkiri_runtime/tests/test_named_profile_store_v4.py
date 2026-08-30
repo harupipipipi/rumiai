@@ -12,7 +12,6 @@ from core_runtime.active_profile_store_v4 import (
 )
 from core_runtime.authority.v4 import AuthorityStore
 from core_runtime.bootstrap.profile_capture import (
-    active_default_profile_exists,
     activation_audit_receipt,
     capture_active_profile,
     capture_default_profile,
@@ -33,7 +32,7 @@ from core_runtime.runtime_surface_v4 import (
     RuntimeSurfaceErrorCode,
     RuntimeSurfaceService,
 )
-from tobkiri_protocol.canonical import canonical_digest, canonical_json
+from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.validation import validate_document
 
 
@@ -157,6 +156,67 @@ def test_named_profile_crud_creates_immutable_successors_and_tombstones(
         profile_a.profile_revision,
         updated.profile_revision,
     ]
+
+
+def test_profile_store_migrates_legacy_v1_bootstrap_metadata_without_identity_guessing(
+    tmp_path: Path,
+) -> None:
+    store = ProfileDefinitionStore(tmp_path, clock=lambda: 100)
+    store.create_profile(_definition("named-profile", "Named Profile"))
+    document = strict_loads(store.path.read_bytes())
+    document.pop("bootstrap")
+    document["store_digest"] = canonical_digest(
+        {key: value for key, value in document.items() if key != "store_digest"}
+    )
+    store.path.write_bytes(canonical_json(document) + b"\n")
+
+    assert ProfileDefinitionStore(tmp_path).bootstrap_state() == {
+        "state": "not_required",
+        "template_profile_revision": None,
+    }
+
+
+def test_profile_store_rejects_rehashed_tampered_bootstrap_revision(
+    tmp_path: Path,
+) -> None:
+    store = ProfileDefinitionStore(tmp_path, clock=lambda: 100)
+    store.bootstrap_defaults(_definition("template", "Template"))
+    document = strict_loads(store.path.read_bytes())
+    document["bootstrap"]["template_profile_revision"] = canonical_digest(
+        {"tampered": True}
+    )
+    document["store_digest"] = canonical_digest(
+        {key: value for key, value in document.items() if key != "store_digest"}
+    )
+    store.path.write_bytes(canonical_json(document) + b"\n")
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError):
+        ProfileDefinitionStore(tmp_path).snapshot()
+
+
+def test_host_profile_control_routes_match_inventory_and_reject_other_ops() -> None:
+    from core_runtime.frontend_contract_routes import (
+        HOST_PROFILE_CONTROL_OPERATIONS,
+        host_profile_control_bindings,
+    )
+    from core_runtime.pack_control_v4 import (
+        CONTROL_PRESENTATION_CONTRACT,
+        HostProfileControlSession,
+        PackControlUnapproved,
+    )
+
+    operations = {
+        target.operation_id
+        for binding in host_profile_control_bindings()
+        for target in binding.targets
+    }
+    assert operations == HOST_PROFILE_CONTROL_OPERATIONS
+    assert HostProfileControlSession._OPERATIONS == HOST_PROFILE_CONTROL_OPERATIONS
+    session = HostProfileControlSession.__new__(HostProfileControlSession)
+    with pytest.raises(PackControlUnapproved):
+        session.assert_operation_ready(CONTROL_PRESENTATION_CONTRACT, "profile.read")
+    with pytest.raises(PackControlUnapproved):
+        session.assert_operation_ready("tobkiri.host.pack-control.v4", "catalog.read")
 
 
 def test_active_pointer_switch_restart_cas_and_workspace_isolation(
@@ -439,10 +499,7 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
             path.write_text(f"{relative}:{profile_id}", encoding="utf-8")
     legacy_pointer = user_data / "profiles" / "active_profile.json"
     legacy_pointer.write_bytes(
-        canonical_json(
-            {"version": 1, "active_profile_id": "default-profile"}
-        )
-        + b"\n"
+        canonical_json({"version": 1, "active_profile_id": "default-profile"}) + b"\n"
     )
 
     preexisting = ProfileDefinitionStore(user_data)
@@ -459,9 +516,12 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
         "new-custom-profile",
         "new-custom-profile-2",
     )
-    assert tuple(
-        profile_id for profile_id in expected_ids if profile_id in catalog.profiles
-    ) == expected_ids
+    assert (
+        tuple(
+            profile_id for profile_id in expected_ids if profile_id in catalog.profiles
+        )
+        == expected_ids
+    )
     assert definitions.legacy_state()["source_document"] == legacy
     assert definitions.legacy_state()["active_profile_id"] == "default-profile"
     assert ActiveProfileStore(user_data).load() is None
@@ -482,9 +542,7 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
         assert stored.profile["profile_id"] == profile_id
         assert stored.profile["display_name"] == source["display_name"]["ja"]
         assert stored.profile["state"] == "needs_resolution"
-        migrated_pack_ids = [
-            item["pack_id"] for item in stored.profile["packs"]
-        ]
+        migrated_pack_ids = [item["pack_id"] for item in stored.profile["packs"]]
         assert migrated_pack_ids[0] == "defaultspack"
         assert migrated_pack_ids[-1] == "runtime.tauri.application.default"
         assert "rumi_ai_gateway_pack" in migrated_pack_ids
@@ -496,12 +554,8 @@ def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
         revisions = entries[profile_id]["revisions"]
         assert len(revisions) == 2
         assert revisions[1]["parent_revision"] == revisions[0]["profile_revision"]
-        assert revisions[0]["profile"]["legacy_display_name"] == source[
-            "display_name"
-        ]
-        assert revisions[0]["profile"]["display_name"] == source[
-            "display_name"
-        ]["ja"]
+        assert revisions[0]["profile"]["legacy_display_name"] == source["display_name"]
+        assert revisions[0]["profile"]["display_name"] == source["display_name"]["ja"]
         for relative in identity_files:
             migrated = user_data / "workspaces" / profile_id / relative
             assert migrated.read_text(encoding="utf-8") == f"{relative}:{profile_id}"
@@ -647,13 +701,8 @@ def test_legacy_pointer_requires_same_identity_ceremony_and_never_becomes_defaul
         "default-profile",
         "new-custom-profile",
         "new-custom-profile-2",
-        "defaults",
     ]
-    capture_default_profile(confirmation=prepare_default_profile_confirmation())
     pointer_store = ActiveProfileStore(user_data)
-    assert pointer_store.require(verify_snapshot=True).profile_id == "defaults"
-    pointer_store.path.unlink()
-    assert active_default_profile_exists()
 
     repaired = repair_legacy_active_profile_pointer()
 
@@ -662,31 +711,28 @@ def test_legacy_pointer_requires_same_identity_ceremony_and_never_becomes_defaul
     assert legacy_pointer.is_file()
     assert definitions.legacy_state()["active_profile_id"] == "default-profile"
     assert definitions.get_profile("default-profile") is not None
-    assert definitions.get_profile("defaults") is not None
+    assert definitions.get_profile("defaults") is None
     assert repair_legacy_active_profile_pointer() is None
     assert pointer_store.load() is None
 
 
-def test_legacy_defaults_id_does_not_replace_bootstrap_template(
+def test_legacy_defaults_id_is_preserved_when_no_bootstrap_template_exists(
     tmp_path: Path,
 ) -> None:
-    """Preserve a legacy Defaults Profile under a non-reserved ID."""
+    """Preserve legacy identity without reserving a product-favored ID."""
 
     store = ProfileDefinitionStore(tmp_path)
     receipt = store.import_legacy_collection(
         {
-            "profiles": [
-                {"profile_id": "defaults", "display_name": "My old Defaults"}
-            ],
+            "profiles": [{"profile_id": "defaults", "display_name": "My old Defaults"}],
             "active_profile_id": "defaults",
         },
         copy_workspaces=False,
     )
 
-    assert receipt.legacy_id_map == {"defaults": "defaults-2"}
-    assert receipt.active_profile_id == "defaults-2"
-    assert store.get_profile("defaults") is None
-    assert store.get_profile("defaults-2") is not None
+    assert receipt.legacy_id_map == {"defaults": "defaults"}
+    assert receipt.active_profile_id == "defaults"
+    assert store.get_profile("defaults") is not None
 
 
 def test_legacy_profile_map_key_and_extra_fields_are_lossless(tmp_path: Path) -> None:
@@ -819,9 +865,7 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
         snapshot_loader=capture_active_profile,
         catalog_loader=host_profile_catalog,
     )
-    browsing_profile = browsing_surface.read_profile(
-        selected_profile_id="profile-a"
-    )
+    browsing_profile = browsing_surface.read_profile(selected_profile_id="profile-a")
     assert browsing_profile["data"]["selection"] == {
         "state": "browsing",
         "selected_profile_id": "profile-a",
@@ -845,13 +889,10 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     )["data"]["operations"]
     assert browsing_operations
     assert all(
-        item["invokable"] is False
-        and item["invocation_reason"] == "browsing_only"
+        item["invokable"] is False and item["invocation_reason"] == "browsing_only"
         for item in browsing_operations
     )
-    browsing_settings = browsing_surface.read_settings(
-        selected_profile_id="profile-a"
-    )
+    browsing_settings = browsing_surface.read_settings(selected_profile_id="profile-a")
     assert (
         browsing_settings["data"]["runtime_profile_settings"]["state"]
         == "browsing_only"
@@ -866,13 +907,16 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
     assert active_a_again.resolved.profile["profile_id"] == "profile-a"
     assert_active("profile-a")
 
-    assert len(
-        {
-            defaults_active.resolved.plan["plan_digest"],
-            active_a.resolved.plan["plan_digest"],
-            active_b.resolved.plan["plan_digest"],
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                defaults_active.resolved.plan["plan_digest"],
+                active_a.resolved.plan["plan_digest"],
+                active_b.resolved.plan["plan_digest"],
+            }
+        )
+        == 3
+    )
     assert ActiveProfileStore(user_data).path == user_data / "profiles" / "active.json"
     assert ActiveProfileStore(user_data).path.parent not in {
         user_data / "workspaces" / profile_id
@@ -886,6 +930,6 @@ def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(
             "credentials/provider.ref",
             "handoff/shell.json",
         ):
-            assert (workspace / relative).read_text(encoding="utf-8").endswith(
-                profile_id
+            assert (
+                (workspace / relative).read_text(encoding="utf-8").endswith(profile_id)
             )

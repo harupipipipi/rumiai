@@ -177,6 +177,10 @@ interface AppState {
   runtimeStatus: RuntimeStatus;
   runtimeError: string | null;
   runtimeDisconnected: boolean;
+  hostCatalogVerified: boolean;
+  profileCeremonyAvailable: boolean;
+  activeProfileReady: boolean;
+  launchReady: boolean;
   lastRuntimeHealthyAt: number | null;
   setRuntimeHealth: (health: HealthResponseData) => void;
   refreshRuntimeHealth: () => Promise<void>;
@@ -635,6 +639,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeStatus: 'starting',
   runtimeError: null,
   runtimeDisconnected: false,
+  hostCatalogVerified: false,
+  profileCeremonyAvailable: false,
+  activeProfileReady: false,
+  launchReady: false,
   lastRuntimeHealthyAt: null,
   setRuntimeHealth: (health) => {
     let parsedHealth: HealthResponseData;
@@ -661,6 +669,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       runtimeStatus: parsedHealth.runtime_status,
       runtimeError: parsedHealth.runtime_error,
       runtimeDisconnected: false,
+      hostCatalogVerified: parsedHealth.host_catalog_verified,
+      profileCeremonyAvailable: parsedHealth.profile_ceremony_available,
+      activeProfileReady: parsedHealth.active_profile_ready,
+      launchReady: parsedHealth.launch_ready,
       lastRuntimeHealthyAt: parsedHealth.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
     }));
   },

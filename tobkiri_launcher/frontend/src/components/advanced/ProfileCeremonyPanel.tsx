@@ -58,6 +58,8 @@ function snapshotKey(snapshot: {profile_id: string; profile_revision: string; pl
 }
 
 const PROFILE_CONTROL_CONTRACT = 'tobkiri.host.control-presentation.v4';
+const NO_ACTIVE_PROFILE_REVISION = 'sha256:edce803cae9e07be4b409a12b7c775320d8626a86e0ee7dd540738bf39b4aad5';
+const NO_ACTIVE_PLAN_DIGEST = 'sha256:0ef670f236250f9e03a6f9a8c462de318bda850ed28a5b6cff5f591a170a264c';
 
 function profileOperationId(step: unknown): string {
   if (step === 'resolving') return 'profile.change.resolve';
@@ -161,10 +163,19 @@ export function ProfileCeremonyPanel({
   }, [ceremonyState, onBusyChange]);
 
   const currentSnapshot = snapshotForProfileCeremony(surface.data);
+  const predecessorSnapshot = currentSnapshot ?? (
+    catalogProjection?.active_profile_id === null
+      ? {
+        profile_id: '',
+        profile_revision: NO_ACTIVE_PROFILE_REVISION,
+        plan_digest: NO_ACTIVE_PLAN_DIGEST,
+      }
+      : null
+  );
   const ceremonyIsBusy = ['resolving', 'reviewing', 'approving', 'activating'].includes(ceremonyState);
   const desiredPackIds = selectedPackIds;
   const currentBindingKey = [
-    currentSnapshot ? snapshotKey(currentSnapshot) : 'no-runtime-snapshot',
+    predecessorSnapshot ? snapshotKey(predecessorSnapshot) : 'no-runtime-snapshot',
     catalogEntry.profile_id,
     catalogEntry.definition.digest,
     authoritativeSelection.catalogDigest,
@@ -209,9 +220,10 @@ export function ProfileCeremonyPanel({
     && catalogMissingPackIds.length === 0
     && catalogIncompatiblePackIds.length === 0,
   );
-  const isRuntimeReady = surface.status === 'ready'
-    && !surface.stale
-    && currentSnapshot !== null
+  const isRuntimeReady = (
+    (surface.status === 'ready' && !surface.stale && currentSnapshot !== null)
+    || (catalogProjection?.active_profile_id === null && catalogBindingStable)
+  )
     && catalogSelectionAvailable;
   const snapshotChanged = Boolean(
     ceremonySnapshot && ceremonySnapshot !== currentBindingKey,
@@ -560,7 +572,7 @@ export function ProfileCeremonyPanel({
   };
 
   const requireStableSnapshot = () => {
-    if (!isRuntimeReady || snapshotChanged || !currentSnapshot) {
+    if (!isRuntimeReady || snapshotChanged || !predecessorSnapshot) {
       throw new RuntimeSurfaceError('DIGEST_MISMATCH', runtimeSurfaceErrorMessage('DIGEST_MISMATCH'));
     }
     if (!catalogBindingStable) {
@@ -569,7 +581,7 @@ export function ProfileCeremonyPanel({
         'The selected Profile definition or catalog lock changed. Refresh the authoritative catalog before continuing.',
       );
     }
-    return currentSnapshot;
+    return predecessorSnapshot;
   };
 
   const resolve = async () => {

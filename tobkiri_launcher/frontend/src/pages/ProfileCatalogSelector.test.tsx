@@ -734,7 +734,12 @@ test('fresh selector mount rehydrates the active marker from the catalog project
 
     const empty: RuntimeSurfaceEnvelope<RuntimeProfileCatalogProjection> = {
       ...catalogEnvelope('alternate'),
-      data: {...catalogEnvelope('alternate').data, count: 0, profiles: []},
+      data: {
+        ...catalogEnvelope('alternate').data,
+        active_profile_id: null,
+        count: 0,
+        profiles: [],
+      },
     };
     await act(async () => {
       root.render(

@@ -140,6 +140,11 @@ function installFetchMock(): void {
           runtime_ready: true,
           runtime_status: 'runtime_ready',
           runtime_error: null,
+          host_catalog_verified: true,
+          profile_ceremony_available: true,
+          active_profile_ready: true,
+          launch_ready: true,
+          defaults_bootstrap_required: false,
           status: 'ok',
         },
         success: true,
@@ -744,6 +749,11 @@ test('health parsing recognizes reconfirmation and preserves the typed setup pat
     runtime_ready: false,
     runtime_status: 'profile_reconfirmation_required',
     runtime_error: 'internal denial detail is not surfaced by the UI',
+    host_catalog_verified: true,
+    profile_ceremony_available: true,
+    active_profile_ready: false,
+    launch_ready: false,
+    defaults_bootstrap_required: false,
   });
   assert.equal(health.runtime_status, 'profile_reconfirmation_required');
   assert.equal(health.runtime_ready, false);
@@ -819,6 +829,11 @@ test('health parsing accepts only coherent lifecycle relationships across all pe
                 runtime_ready: runtimeReady,
                 runtime_status: runtimeStatus,
                 runtime_error: runtimeError,
+                host_catalog_verified: true,
+                profile_ceremony_available: true,
+                active_profile_ready: runtimeReady,
+                launch_ready: runtimeReady,
+                defaults_bootstrap_required: false,
               };
               const coherent = runtimeStatus === 'starting'
                 ? status === 'ok' && !panelReady && !runtimeReady && runtimeError === null

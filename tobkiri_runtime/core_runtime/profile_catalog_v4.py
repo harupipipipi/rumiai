@@ -10,11 +10,13 @@ from typing import Any, Mapping, cast
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile, BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import (
+    ActiveDefaultProfile,
+    BundledCatalog,
+)
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import ProtocolError
 from tobkiri_protocol.ids import validate_artifact_digest, validate_canonical_id
-
 
 _PROFILE_PACK_FIELDS = frozenset({"pack_id", "artifact_digest", "role"})
 _PROFILE_PACK_ROLES = frozenset({"backend", "contribution", "provider", "application"})
@@ -51,23 +53,31 @@ def profile_definition_digest(catalog: BundledCatalog, profile_id: str) -> str:
 
 def project_profile_catalog(
     catalog: BundledCatalog,
-    active: ActiveDefaultProfile,
+    active: ActiveDefaultProfile | None,
     *,
     candidates: Mapping[str, Mapping[str, Any]] | None = None,
     selected_profile_id: str | None = None,
 ) -> dict[str, object]:
     """Project all Profiles with browsing and execution identities separated."""
 
-    active_profile_id = str(active.resolved.profile["profile_id"])
-    selected_id = active_profile_id if selected_profile_id is None else str(
-        selected_profile_id
+    active_profile_id = (
+        str(active.resolved.profile["profile_id"]) if active is not None else None
     )
+    selected_id = (
+        active_profile_id if selected_profile_id is None else str(selected_profile_id)
+    )
+    if selected_id is None and catalog.profiles:
+        selected_id = sorted(catalog.profiles)[0]
     if selected_id not in catalog.profiles:
         raise ValueError("Profile is absent from the canonical catalog")
-    active_revision = str(active.resolved.plan["profile_revision"])
-    active_plan_digest = str(active.resolved.plan["plan_digest"])
-    active_lock_digest = str(active.resolved.lock["lock_digest"])
-    active_authority_digest = str(active.resolved.profile["profile_authority_snapshot_digest"])
+    active_revision = str(active.resolved.plan["profile_revision"]) if active else ""
+    active_plan_digest = str(active.resolved.plan["plan_digest"]) if active else ""
+    active_lock_digest = str(active.resolved.lock["lock_digest"]) if active else ""
+    active_authority_digest = (
+        str(active.resolved.profile["profile_authority_snapshot_digest"])
+        if active
+        else ""
+    )
     catalog_digest = profile_catalog_digest(catalog)
     lock_digest = bundle_lock_digest(catalog)
     definitions = [
@@ -80,9 +90,15 @@ def project_profile_catalog(
             active_plan_digest=active_plan_digest,
             active_lock_digest=active_lock_digest,
             active_authority_digest=active_authority_digest,
-            active_profile=active.resolved.profile if profile_id == active_profile_id else None,
+            active_profile=(
+                active.resolved.profile
+                if active is not None and profile_id == active_profile_id
+                else None
+            ),
             active_effective_set=(
-                active.resolved.lock["effective_set"] if profile_id == active_profile_id else None
+                active.resolved.lock["effective_set"]
+                if active is not None and profile_id == active_profile_id
+                else None
             ),
             candidate=(candidates or {}).get(profile_id),
         )
@@ -97,7 +113,7 @@ def project_profile_catalog(
         "selection": {
             "state": (
                 "active_execution"
-                if selected_id == active_profile_id
+                if active_profile_id is not None and selected_id == active_profile_id
                 else "browsing"
             ),
             "selected_profile_id": selected_id,
@@ -138,7 +154,7 @@ def _project_definition(
     profile_id: str,
     definition: Mapping[str, Any],
     *,
-    active_profile_id: str,
+    active_profile_id: str | None,
     active_revision: str,
     active_plan_digest: str,
     active_lock_digest: str,
@@ -162,9 +178,12 @@ def _project_definition(
         requirements = base["shell_requirements"]
         presentation = shell["presentation"]
         if presentation["family"] not in requirements["presentation_families"]:
-            diagnostics.append({"code": "SHELL_FAMILY_INCOMPATIBLE", "subject": shell_id})
+            diagnostics.append(
+                {"code": "SHELL_FAMILY_INCOMPATIBLE", "subject": shell_id}
+            )
         missing_capabilities = sorted(
-            set(requirements["required_capabilities"]) - set(presentation["capabilities"])
+            set(requirements["required_capabilities"])
+            - set(presentation["capabilities"])
         )
         diagnostics.extend(
             {"code": "SHELL_CAPABILITY_MISSING", "subject": capability}
@@ -181,7 +200,9 @@ def _project_definition(
             and variant["artifact_digest"] == shell["artifact_digest"]
         ]
         if len(matching_variants) != 1:
-            diagnostics.append({"code": "SHELL_VARIANT_INCOMPATIBLE", "subject": shell_id})
+            diagnostics.append(
+                {"code": "SHELL_VARIANT_INCOMPATIBLE", "subject": shell_id}
+            )
 
     requested = _normalize_profile_packs(definition, diagnostics)
     requested_ids = [str(item["pack_id"]) for item in requested]
@@ -189,7 +210,9 @@ def _project_definition(
         diagnostics.append({"code": "PACK_DUPLICATE", "subject": profile_id})
     application_rows = [item for item in requested if item.get("role") == "application"]
     if len(application_rows) != 1:
-        diagnostics.append({"code": "APPLICATION_BINDING_INVALID", "subject": profile_id})
+        diagnostics.append(
+            {"code": "APPLICATION_BINDING_INVALID", "subject": profile_id}
+        )
     for item in requested:
         pack_id = str(item["pack_id"])
         manifest = catalog.packs.get(pack_id)
@@ -206,12 +229,18 @@ def _project_definition(
             diagnostics.append({"code": "APPLICATION_KIND_INVALID", "subject": pack_id})
 
     is_active = profile_id == active_profile_id
-    candidate_review = candidate.get("review") if isinstance(candidate, Mapping) else None
+    candidate_review = (
+        candidate.get("review") if isinstance(candidate, Mapping) else None
+    )
     candidate_profile = (
-        candidate_review.get("profile") if isinstance(candidate_review, Mapping) else None
+        candidate_review.get("profile")
+        if isinstance(candidate_review, Mapping)
+        else None
     )
     candidate_lock = (
-        candidate_review.get("profile_lock") if isinstance(candidate_review, Mapping) else None
+        candidate_review.get("profile_lock")
+        if isinstance(candidate_review, Mapping)
+        else None
     )
     if isinstance(candidate_profile, Mapping) and isinstance(candidate_lock, Mapping):
         closure = _resolved_pack_closure(
@@ -269,7 +298,9 @@ def _project_definition(
         },
         "candidate": {
             "state": str(candidate["state"]) if candidate is not None else "not_staged",
-            "candidate_id": (str(candidate["candidate_id"]) if candidate is not None else None),
+            "candidate_id": (
+                str(candidate["candidate_id"]) if candidate is not None else None
+            ),
             "candidate_digest": (
                 str(candidate["candidate_digest"]) if candidate is not None else None
             ),
@@ -295,7 +326,9 @@ def _resolved_pack_closure(
     """Project the exact resolved ProfileLock closure without re-resolving it."""
 
     if not isinstance(effective_set, list):
-        diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
+        diagnostics.append(
+            {"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"}
+        )
         return []
     if requested is None:
         definition = catalog.profiles.get(str(profile.get("profile_id") or ""))
@@ -312,7 +345,9 @@ def _resolved_pack_closure(
         }
     )
     selected_ids = {
-        str(item.get("identity") or "") for item in effective_set if isinstance(item, Mapping)
+        str(item.get("identity") or "")
+        for item in effective_set
+        if isinstance(item, Mapping)
     }
     dependency_ids = {
         str(dependency_id)
@@ -325,13 +360,17 @@ def _resolved_pack_closure(
     seen: set[str] = set()
     for item in effective_set:
         if not isinstance(item, Mapping):
-            diagnostics.append({"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"})
+            diagnostics.append(
+                {"code": "PROFILE_LOCK_CLOSURE_INVALID", "subject": "effective_set"}
+            )
             continue
         pack_id = str(item.get("identity") or "")
         digest = str(item.get("artifact_digest") or "")
         manifest = catalog.packs.get(pack_id)
         if not pack_id or pack_id in seen:
-            diagnostics.append({"code": "PACK_DUPLICATE", "subject": pack_id or "effective_set"})
+            diagnostics.append(
+                {"code": "PACK_DUPLICATE", "subject": pack_id or "effective_set"}
+            )
             continue
         seen.add(pack_id)
         if manifest is None:
@@ -369,7 +408,9 @@ def _normalize_profile_packs(
     """
 
     if definition is None:
-        diagnostics.append({"code": "PROFILE_DEFINITION_UNAVAILABLE", "subject": "packs"})
+        diagnostics.append(
+            {"code": "PROFILE_DEFINITION_UNAVAILABLE", "subject": "packs"}
+        )
         return []
 
     raw_packs = definition.get("packs")
@@ -442,7 +483,12 @@ def _static_pack_closure(
     roles = {base_id: "base"}
     if shell is not None:
         roles[str(shell["pack_id"])] = "shell"
-    roles.update({str(item["pack_id"]): str(item.get("role") or "provider") for item in requested})
+    roles.update(
+        {
+            str(item["pack_id"]): str(item.get("role") or "provider")
+            for item in requested
+        }
+    )
     pending = list(roles)
     seen: set[str] = set()
     result: list[dict[str, object]] = []
@@ -459,13 +505,15 @@ def _static_pack_closure(
         for dependency in dependencies:
             roles.setdefault(dependency, "dependency")
             if dependency not in catalog.packs:
-                diagnostics.append({"code": "DEPENDENCY_UNAVAILABLE", "subject": dependency})
+                diagnostics.append(
+                    {"code": "DEPENDENCY_UNAVAILABLE", "subject": dependency}
+                )
                 continue
             version_range = manifest["requirements"]["pack_dependencies"][dependency]
             try:
-                compatible = Version(catalog.packs[dependency]["pack"]["version"]) in SpecifierSet(
-                    version_range.replace(" ", ",")
-                )
+                compatible = Version(
+                    catalog.packs[dependency]["pack"]["version"]
+                ) in SpecifierSet(version_range.replace(" ", ","))
             except (InvalidSpecifier, InvalidVersion):
                 compatible = False
             if not compatible:
@@ -528,7 +576,9 @@ def _application_binding(
         "pack_id": pack_id,
         "artifact_digest": manifest["pack"]["artifact_digest"] if manifest else None,
         "artifact_ref": (
-            f"pack-v4://{pack_id}@{manifest['pack']['artifact_digest']}" if manifest else None
+            f"pack-v4://{pack_id}@{manifest['pack']['artifact_digest']}"
+            if manifest
+            else None
         ),
     }
 

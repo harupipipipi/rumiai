@@ -213,6 +213,11 @@ export function parseHealthResponse(value: unknown): HealthResponseData {
     runtime_ready: requiredBoolean(value, 'runtime_ready'),
     runtime_status: value.runtime_status as RuntimeStatus,
     runtime_error: requiredRuntimeError(value),
+    host_catalog_verified: requiredBoolean(value, 'host_catalog_verified'),
+    profile_ceremony_available: requiredBoolean(value, 'profile_ceremony_available'),
+    active_profile_ready: requiredBoolean(value, 'active_profile_ready'),
+    launch_ready: requiredBoolean(value, 'launch_ready'),
+    defaults_bootstrap_required: requiredBoolean(value, 'defaults_bootstrap_required'),
   };
   assertCoherentHealth(health);
   return health;

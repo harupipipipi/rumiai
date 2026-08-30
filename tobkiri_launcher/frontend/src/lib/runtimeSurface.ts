@@ -164,7 +164,7 @@ export interface RuntimeProfileCatalogProjection {
   catalog_digest: string;
   bundle_lock_digest: string;
   catalog_ref: string;
-  active_profile_id: string;
+  active_profile_id: string | null;
   count: number;
   profiles: RuntimeProfileCatalogEntry[];
 }
@@ -649,6 +649,35 @@ export function validateRuntimeSurfaceEnvelope<T>(
 ): RuntimeSurfaceEnvelope<T> {
   if (!isRecord(value)) {
     throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
+  }
+  if (
+    expectedSurface === 'profiles'
+    && exactObject(value, [
+      'runtime_surface_api_version',
+      'surface',
+      'state',
+      'host_catalog_digest',
+      'bundle_lock_digest',
+      'data',
+      'write_set',
+    ])
+    && value.runtime_surface_api_version === RUNTIME_SURFACE_API_VERSION
+    && value.surface === 'profiles'
+    && value.state === 'catalog_ready'
+    && isSha256Digest(value.host_catalog_digest)
+    && isSha256Digest(value.bundle_lock_digest)
+    && Array.isArray(value.write_set)
+  ) {
+    const catalog = extractExactProfileCatalog(value.data);
+    if (
+      !catalog
+      || catalog.active_profile_id !== null
+      || catalog.catalog_digest !== value.host_catalog_digest
+      || catalog.bundle_lock_digest !== value.bundle_lock_digest
+    ) {
+      throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
+    }
+    return value as unknown as RuntimeSurfaceEnvelope<T>;
   }
   if (value.runtime_surface_api_version === RUNTIME_SURFACE_API_VERSION && value.state === 'error') {
     const errorKeys = ['runtime_surface_api_version', 'state', 'code', 'message', 'retryable', 'write_set'];
@@ -1189,7 +1218,7 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     || !isSha256Digest(value.bundle_lock_digest)
     || !canonicalReference(value.catalog_ref)
     || value.catalog_ref !== `profile-catalog-v4://bundle/${value.catalog_digest}`
-    || !validString(value.active_profile_id)
+    || (value.active_profile_id !== null && !validString(value.active_profile_id))
     || typeof value.count !== 'number'
     || !Number.isSafeInteger(value.count)
     || value.count < 0
@@ -1208,18 +1237,19 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     if (entry.active) activeCount += 1;
     profiles.push(entry);
   }
-  if (profiles.length > 0 && (activeCount !== 1 || !profiles.some((item) => (
+  if (activeCount === 0 && value.active_profile_id !== null) return null;
+  if (activeCount === 1 && !profiles.some((item) => (
     item.active && item.profile_id === value.active_profile_id
-  )))) {
+  ))) {
     return null;
   }
-  if (profiles.length === 0 && activeCount !== 0) return null;
+  if (activeCount > 1) return null;
   return {
     catalog_api_version: value.catalog_api_version,
     catalog_digest: value.catalog_digest,
     bundle_lock_digest: value.bundle_lock_digest,
     catalog_ref: value.catalog_ref,
-    active_profile_id: value.active_profile_id,
+    active_profile_id: value.active_profile_id as string | null,
     count: value.count,
     profiles,
   };

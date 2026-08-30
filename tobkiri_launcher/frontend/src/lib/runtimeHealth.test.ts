@@ -95,6 +95,11 @@ test("the store cannot publish a contradictory health state to the dispatch gate
     runtime_ready: false,
     runtime_status: "runtime_ready",
     runtime_error: "denied",
+    host_catalog_verified: true,
+    profile_ceremony_available: true,
+    active_profile_ready: false,
+    launch_ready: false,
+    defaults_bootstrap_required: false,
   }), /contradictory/);
   assert.equal(getRuntimeDispatchStatus(), "error");
   assert.equal(useAppStore.getState().runtimeReady, false);

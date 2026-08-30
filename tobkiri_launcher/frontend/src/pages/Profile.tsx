@@ -30,12 +30,17 @@ export function Profile() {
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
-  const runtimeVerified = resolveSetupVerificationState({
+  const hostCatalogVerified = useAppStore((state) => state.hostCatalogVerified);
+  const profileCeremonyAvailable = useAppStore((state) => state.profileCeremonyAvailable);
+  const verificationState = resolveSetupVerificationState({
     isSetupDone,
     runtimeReady,
     runtimeStatus,
     runtimeDisconnected,
-  }) === 'verified';
+    hostCatalogVerified,
+    profileCeremonyAvailable,
+  });
+  const profileCeremonyVerified = verificationState === 'verified';
   const surface = useRuntimeSurface<unknown>('profile');
   const catalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.profile;
@@ -159,7 +164,7 @@ export function Profile() {
             return next;
           }, {replace: true});
         }}
-        runtimeVerified={runtimeVerified}
+        runtimeVerified={profileCeremonyVerified}
         onActivated={async () => {
           await Promise.all([
             catalogSurface.refresh(true),

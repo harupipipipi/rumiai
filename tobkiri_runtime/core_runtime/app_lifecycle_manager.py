@@ -100,7 +100,9 @@ class AppLifecycleManager:
     setup completion として扱う。
     """
 
-    base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
+    base_dir: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent
+    )
     packvm_lifecycle: Any | None = field(default=None, repr=False)
     _activation_lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False
@@ -116,13 +118,52 @@ class AppLifecycleManager:
         from .bootstrap.profile_capture import (
             active_profile_exists,
             capture_active_profile,
+            host_profile_catalog,
+            runtime_user_data_root,
         )
+        from .profile_definition_store_v4 import ProfileDefinitionStore
 
         if not active_profile_exists(base_dir=self.base_dir):
+            try:
+                catalog = host_profile_catalog(base_dir=self.base_dir)
+                del catalog
+                bootstrap = ProfileDefinitionStore(
+                    runtime_user_data_root(self.base_dir)
+                ).bootstrap_state()
+                defaults_bootstrap_required = (
+                    bootstrap.get("state") == "template_available"
+                )
+            except Exception as error:
+                logger.error("Host Profile catalog verification failed: %s", error)
+                result = {
+                    "needs_setup": True,
+                    "reason": "host_catalog_verification_failed",
+                    "setup_state": "host_verification_denied",
+                    "host_catalog_verified": False,
+                    "profile_ceremony_available": False,
+                    "active_profile_ready": False,
+                    "launch_ready": False,
+                    "defaults_bootstrap_required": False,
+                }
+                result.update(get_runtime_readiness())
+                return result
             result = {
-                "needs_setup": True,
-                "reason": "explicit_defaults_confirmation_required",
-                "setup_state": "profile_transaction_required",
+                "needs_setup": defaults_bootstrap_required,
+                "reason": (
+                    "explicit_bootstrap_confirmation_required"
+                    if defaults_bootstrap_required
+                    else "profile_activation_required"
+                ),
+                "setup_state": (
+                    "profile_transaction_required"
+                    if defaults_bootstrap_required
+                    else "profile_activation_required"
+                ),
+                "host_catalog_verified": True,
+                "profile_ceremony_available": True,
+                "active_profile_ready": False,
+                "launch_ready": False,
+                "defaults_bootstrap_required": defaults_bootstrap_required,
             }
             result.update(get_runtime_readiness())
             return result
@@ -135,6 +176,11 @@ class AppLifecycleManager:
                 "profile_id": active.resolved.profile["profile_id"],
                 "plan_digest": active.resolved.plan["plan_digest"],
                 "activation_id": active.activation["activation_id"],
+                "host_catalog_verified": True,
+                "profile_ceremony_available": True,
+                "active_profile_ready": True,
+                "launch_ready": True,
+                "defaults_bootstrap_required": False,
             }
         except Exception as error:
             from ecosystem.defaultspack.domain.runtime_v4 import (
@@ -149,6 +195,11 @@ class AppLifecycleManager:
                     "setup_state": "profile_reconfirmation_required",
                     "error_type": type(error).__name__,
                     "denial_diagnostic": str(error),
+                    "host_catalog_verified": True,
+                    "profile_ceremony_available": True,
+                    "active_profile_ready": False,
+                    "launch_ready": False,
+                    "defaults_bootstrap_required": False,
                 }
             else:
                 result = {
@@ -157,14 +208,17 @@ class AppLifecycleManager:
                     "setup_state": "profile_transaction_required",
                     "error_type": type(error).__name__,
                     "denial_diagnostic": str(error),
+                    "host_catalog_verified": False,
+                    "profile_ceremony_available": False,
+                    "active_profile_ready": False,
+                    "launch_ready": False,
+                    "defaults_bootstrap_required": False,
                 }
 
         result.update(get_runtime_readiness())
         return result
 
-    def activate_default_profile(
-        self, confirmation: Mapping[str, Any]
-    ) -> Any:
+    def activate_default_profile(self, confirmation: Mapping[str, Any]) -> Any:
         """Commit one confirmed activation and publish its Broker session."""
 
         from .authority.v4 import AuthorityStore
@@ -200,9 +254,7 @@ class AppLifecycleManager:
                 active,
                 bundle_root=bundle_root,
                 ecosystem_root=runtime_root / "ecosystem",
-                authority_store=AuthorityStore(
-                    user_data / "authority" / "v4.sqlite3"
-                ),
+                authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
                 packvm_provisioner=self.packvm_lifecycle,
                 packvm_readiness_reader=(
                     self.packvm_lifecycle.readiness_snapshot
@@ -242,6 +294,7 @@ class AppLifecycleManager:
                 "setup_state": "invalid_request",
             }
         from .bootstrap.profile_capture import capture_active_profile
+
         try:
             active = capture_active_profile(base_dir=self.base_dir)
         except Exception as error:
@@ -277,4 +330,13 @@ class AppLifecycleManager:
             "runtime_ready": status.get("runtime_ready", False),
             "runtime_status": status.get("runtime_status", "starting"),
             "runtime_error": status.get("runtime_error"),
+            "host_catalog_verified": status.get("host_catalog_verified", False),
+            "profile_ceremony_available": status.get(
+                "profile_ceremony_available", False
+            ),
+            "active_profile_ready": status.get("active_profile_ready", False),
+            "launch_ready": status.get("launch_ready", False),
+            "defaults_bootstrap_required": status.get(
+                "defaults_bootstrap_required", False
+            ),
         }

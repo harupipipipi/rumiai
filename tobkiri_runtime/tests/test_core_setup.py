@@ -9,9 +9,12 @@ import pytest
 
 from core_runtime.app_lifecycle_manager import AppLifecycleManager
 from core_runtime.bootstrap.profile_capture import (
+    _bundle_root,
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
+from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
+from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
 
 def test_legacy_profile_json_is_not_setup_authority(
@@ -39,7 +42,28 @@ def test_legacy_profile_json_is_not_setup_authority(
     status = AppLifecycleManager(base_dir=tmp_path).check_setup_status()
 
     assert status["needs_setup"] is True
-    assert status["reason"] == "explicit_defaults_confirmation_required"
+    assert status["reason"] == "explicit_bootstrap_confirmation_required"
+
+
+def test_existing_named_catalog_needs_activation_not_defaults_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    template = dict(BundledCatalog.load(_bundle_root()).profiles["defaults"])
+    template["profile_id"] = "existing-profile"
+    template["display_name"] = "Existing Profile"
+    ProfileDefinitionStore(user_data).create_profile(template)
+
+    status = AppLifecycleManager(base_dir=tmp_path).check_setup_status()
+
+    assert status["needs_setup"] is False
+    assert status["reason"] == "profile_activation_required"
+    assert status["host_catalog_verified"] is True
+    assert status["profile_ceremony_available"] is True
+    assert status["active_profile_ready"] is False
+    assert status["launch_ready"] is False
 
 
 def test_committed_v4_activation_is_the_only_setup_completion(

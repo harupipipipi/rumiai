@@ -28,7 +28,6 @@ from tobkiri_protocol.secure_persistence import (
 
 from .active_profile_store_v4 import exclusive_profile_lock
 
-
 PROFILE_STORE_SCHEMA = "io.tobkiri.profile-definition-store.v1"
 PROFILE_STORE_FILENAME = "index.json"
 _LEGACY_LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$")
@@ -172,7 +171,14 @@ class ProfileDefinitionStore:
         with self._locked():
             return self._read_state()
 
-    def list_profiles(self, *, include_tombstones: bool = False) -> tuple[StoredProfile, ...]:
+    def bootstrap_state(self) -> Mapping[str, Any]:
+        """Return generic Host metadata for the install bootstrap template."""
+
+        return dict(self.snapshot()["bootstrap"])
+
+    def list_profiles(
+        self, *, include_tombstones: bool = False
+    ) -> tuple[StoredProfile, ...]:
         """Return current Profiles in their persisted user order."""
 
         state = self.snapshot()
@@ -184,7 +190,9 @@ class ProfileDefinitionStore:
         result.sort(key=lambda item: (item.order, item.profile_id))
         return tuple(result)
 
-    def list_profile_payloads(self, *, include_tombstones: bool = False) -> list[dict[str, Any]]:
+    def list_profile_payloads(
+        self, *, include_tombstones: bool = False
+    ) -> list[dict[str, Any]]:
         """Return detached mapping payloads for API/UI adapters."""
 
         return [
@@ -233,10 +241,13 @@ class ProfileDefinitionStore:
         profile_id: str | None = None,
         display_name: str | None = None,
         expected_store_generation: int | None = None,
+        _bootstrap_template: bool = False,
     ) -> StoredProfile:
         """Create one Profile as its first immutable revision."""
 
-        candidate = _profile_document(profile, profile_id=profile_id, display_name=display_name)
+        candidate = _profile_document(
+            profile, profile_id=profile_id, display_name=display_name
+        )
         safe_id = _safe_profile_id(str(candidate["profile_id"]))
         now = self._now()
         with self._locked():
@@ -255,6 +266,12 @@ class ProfileDefinitionStore:
                 now=now,
             )
             state["profiles"].append(entry)
+            state["bootstrap"] = {
+                "state": (
+                    "template_available" if _bootstrap_template else "not_required"
+                ),
+                "template_profile_revision": revision if _bootstrap_template else None,
+            }
             state["generation"] += 1
             state["updated_at"] = now
             self._write_state(state)
@@ -268,13 +285,15 @@ class ProfileDefinitionStore:
     ) -> StoredProfile:
         """Copy the packaged Defaults template once into the normal registry."""
 
-        existing = self.get_profile("defaults", include_tombstone=True)
+        template_id = _safe_profile_id(str(template.get("profile_id") or ""))
+        existing = self.get_profile(template_id, include_tombstone=True)
         if existing is not None:
             return existing
         return self.create_profile(
             template,
-            profile_id="defaults",
+            profile_id=template_id,
             expected_store_generation=expected_store_generation,
+            _bootstrap_template=True,
         )
 
     def repair_legacy_display_names(self) -> int:
@@ -328,6 +347,10 @@ class ProfileDefinitionStore:
                     )
                 )
                 entry["updated_at"] = now
+            state["bootstrap"] = {
+                "state": "not_required",
+                "template_profile_revision": None,
+            }
             state["generation"] += len(repaired)
             state["updated_at"] = now
             self._write_state(state)
@@ -347,7 +370,9 @@ class ProfileDefinitionStore:
 
         safe_id = _safe_profile_id(profile_id)
         if profile is not None and patch is not None:
-            raise ProfileDefinitionStoreError("profile and patch cannot both be supplied")
+            raise ProfileDefinitionStoreError(
+                "profile and patch cannot both be supplied"
+            )
         with self._locked():
             state = self._read_state()
             self._check_generation(state, expected_store_generation)
@@ -377,6 +402,10 @@ class ProfileDefinitionStore:
             entry["current_revision"] = revision
             entry["revisions"].append(successor)
             entry["updated_at"] = now
+            state["bootstrap"] = {
+                "state": "not_required",
+                "template_profile_revision": None,
+            }
             state["generation"] += 1
             state["updated_at"] = now
             self._write_state(state)
@@ -426,6 +455,10 @@ class ProfileDefinitionStore:
                 legacy_ids=tuple(current.legacy_ids),
             )
             state["profiles"].append(new_entry)
+            state["bootstrap"] = {
+                "state": "not_required",
+                "template_profile_revision": None,
+            }
             state["generation"] += 1
             state["updated_at"] = now
             self._write_state(state)
@@ -475,6 +508,11 @@ class ProfileDefinitionStore:
             state["legacy"]["tombstones"] = sorted(
                 {*state["legacy"].get("tombstones", []), safe_id}
             )
+            if state["bootstrap"].get("state") == "template_available":
+                state["bootstrap"] = {
+                    "state": "empty",
+                    "template_profile_revision": None,
+                }
             self._write_state(state)
             return self._stored_from_entry(entry)
 
@@ -509,7 +547,9 @@ class ProfileDefinitionStore:
         else:
             legacy = copy.deepcopy(dict(source))
         if not isinstance(legacy, Mapping):
-            raise ProfileDefinitionStoreIntegrityError("legacy Profile collection is invalid")
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile collection is invalid"
+            )
         profiles_value = legacy.get("profiles")
         if isinstance(profiles_value, Mapping):
             profiles = []
@@ -523,7 +563,9 @@ class ProfileDefinitionStore:
                     profile["profile_id"] = str(legacy_key)
                 profiles.append(profile)
         elif isinstance(profiles_value, list):
-            profiles = [dict(value) for value in profiles_value if isinstance(value, Mapping)]
+            profiles = [
+                dict(value) for value in profiles_value if isinstance(value, Mapping)
+            ]
             if len(profiles) != len(profiles_value):
                 raise ProfileDefinitionStoreIntegrityError(
                     "legacy Profile collection contains a non-object entry"
@@ -533,15 +575,14 @@ class ProfileDefinitionStore:
                 "legacy Profile collection has no profiles array"
             )
         if not profiles:
-            raise ProfileDefinitionStoreIntegrityError("legacy Profile collection is empty")
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy Profile collection is empty"
+            )
 
         source_digest = canonical_digest(legacy)
         prepared: list[tuple[str, str, dict[str, Any], int, int]] = []
         id_map: dict[str, str] = {}
-        # The canonical Defaults ID belongs to the packaged bootstrap/safe
-        # repair template.  A legacy Profile with that ID is preserved under
-        # a deterministic successor ID instead of replacing the template.
-        used: set[str] = {"defaults"}
+        used: set[str] = set()
         for index, item in enumerate(profiles):
             legacy_id = str(item.get("profile_id") or item.get("id") or "").strip()
             if not legacy_id:
@@ -588,14 +629,21 @@ class ProfileDefinitionStore:
                 raise ProfileDefinitionStoreConflict(
                     "legacy import would overwrite an existing Profile"
                 )
-            order_offset = max(
-                (int(entry["order"]) for entry in state["profiles"]),
-                default=-1,
-            ) + 1
+            order_offset = (
+                max(
+                    (int(entry["order"]) for entry in state["profiles"]),
+                    default=-1,
+                )
+                + 1
+            )
             publication_time = self._now()
-            for offset, (legacy_id, candidate_id, document, created, updated) in enumerate(
-                prepared
-            ):
+            for offset, (
+                legacy_id,
+                candidate_id,
+                document,
+                created,
+                updated,
+            ) in enumerate(prepared):
                 document["legacy_migration"] = {
                     "source_digest": source_digest,
                     "legacy_version": str(legacy.get("version") or "3"),
@@ -632,6 +680,10 @@ class ProfileDefinitionStore:
                         now=publication_time,
                     )
                 state["profiles"].append(entry)
+            state["bootstrap"] = {
+                "state": "not_required",
+                "template_profile_revision": None,
+            }
             state["generation"] += len(prepared)
             state["updated_at"] = publication_time
             state["legacy"].update(
@@ -697,9 +749,7 @@ class ProfileDefinitionStore:
             state = self._read_state()
             legacy = state.get("legacy")
             source = (
-                legacy.get("source_document")
-                if isinstance(legacy, Mapping)
-                else None
+                legacy.get("source_document") if isinstance(legacy, Mapping) else None
             )
             repaired: list[tuple[dict[str, Any], dict[str, Any]]] = []
             for entry in state["profiles"]:
@@ -708,14 +758,15 @@ class ProfileDefinitionStore:
                 current = entry["revisions"][-1].get("profile")
                 if not isinstance(current, Mapping) or current.get(
                     "profile_api_version"
-                ) in {"io.tobkiri.profile.v4", "io.tobkiri.profile.v5"}:
+                ) in {
+                    "io.tobkiri.profile.v4",
+                    "io.tobkiri.profile.v5",
+                }:
                     continue
                 legacy_id = str(entry["legacy_ids"][0])
                 item = _legacy_source_profile(source, legacy_id) or current
                 source_path = (
-                    legacy.get("source_path")
-                    if isinstance(legacy, Mapping)
-                    else None
+                    legacy.get("source_path") if isinstance(legacy, Mapping) else None
                 )
                 successor = self._legacy_v4_successor(
                     item=item,
@@ -862,14 +913,29 @@ class ProfileDefinitionStore:
                 "Profile definition store is unreadable"
             ) from error
         if not isinstance(value, Mapping):
-            raise ProfileDefinitionStoreIntegrityError("Profile definition store is not an object")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile definition store is not an object"
+            )
         state = copy.deepcopy(dict(value))
-        self._validate_state(state)
         expected = canonical_digest(
             {key: state[key] for key in state if key != "store_digest"}
         )
         if state.get("store_digest") != expected:
-            raise ProfileDefinitionStoreIntegrityError("Profile definition store digest changed")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile definition store digest changed"
+            )
+        if "bootstrap" not in state:
+            # v1 stores created before bootstrap metadata always represent an
+            # already-established collection.  Never infer a template role
+            # from a Profile ID, name, or provenance bytes.
+            state["bootstrap"] = {
+                "state": "not_required" if state.get("profiles") else "empty",
+                "template_profile_revision": None,
+            }
+            state["store_digest"] = canonical_digest(
+                {key: state[key] for key in state if key != "store_digest"}
+            )
+        self._validate_state(state)
         return state
 
     def _write_state(self, state: Mapping[str, Any]) -> None:
@@ -888,7 +954,15 @@ class ProfileDefinitionStore:
             ) from error
 
     def _validate_state(self, state: Mapping[str, Any]) -> None:
-        expected = {"schema", "generation", "updated_at", "profiles", "legacy", "store_digest"}
+        expected = {
+            "schema",
+            "generation",
+            "updated_at",
+            "profiles",
+            "legacy",
+            "bootstrap",
+            "store_digest",
+        }
         if set(state) != expected or state.get("schema") != PROFILE_STORE_SCHEMA:
             raise ProfileDefinitionStoreIntegrityError(
                 "Profile definition store fields are invalid"
@@ -896,21 +970,71 @@ class ProfileDefinitionStore:
         if not _non_negative_int(state.get("generation")) or not _non_negative_int(
             state.get("updated_at")
         ):
-            raise ProfileDefinitionStoreIntegrityError("Profile definition store counters are invalid")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile definition store counters are invalid"
+            )
         profiles = state.get("profiles")
         if not isinstance(profiles, list):
-            raise ProfileDefinitionStoreIntegrityError("Profile definition store profiles are invalid")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile definition store profiles are invalid"
+            )
         seen: set[str] = set()
         for entry in profiles:
             if not isinstance(entry, Mapping):
-                raise ProfileDefinitionStoreIntegrityError("Profile store entry is invalid")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile store entry is invalid"
+                )
             self._validate_entry(entry)
             if entry["profile_id"] in seen:
-                raise ProfileDefinitionStoreIntegrityError("Profile store ID is duplicated")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile store ID is duplicated"
+                )
             seen.add(entry["profile_id"])
         legacy = state.get("legacy")
         if not isinstance(legacy, Mapping):
-            raise ProfileDefinitionStoreIntegrityError("Profile migration metadata is invalid")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile migration metadata is invalid"
+            )
+        bootstrap = state.get("bootstrap")
+        if (
+            not isinstance(bootstrap, Mapping)
+            or set(bootstrap) != {"state", "template_profile_revision"}
+            or bootstrap.get("state")
+            not in {"empty", "template_available", "not_required"}
+            or (
+                bootstrap.get("template_profile_revision") is not None
+                and not isinstance(bootstrap.get("template_profile_revision"), str)
+            )
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile bootstrap metadata is invalid"
+            )
+        live = [entry for entry in profiles if not entry["tombstone"]]
+        bootstrap_state = bootstrap["state"]
+        template_revision = bootstrap["template_profile_revision"]
+        if bootstrap_state == "empty" and (live or template_revision is not None):
+            raise ProfileDefinitionStoreIntegrityError(
+                "empty Profile bootstrap metadata is inconsistent"
+            )
+        if bootstrap_state == "not_required" and template_revision is not None:
+            raise ProfileDefinitionStoreIntegrityError(
+                "established Profile bootstrap metadata is inconsistent"
+            )
+        if bootstrap_state == "template_available" and (
+            not isinstance(template_revision, str)
+            or len(live) != 1
+            or live[0]["current_revision"] != template_revision
+            or sum(
+                1
+                for revision in live[0]["revisions"]
+                if revision["profile_revision"] == template_revision
+                and not revision["tombstone"]
+            )
+            != 1
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile bootstrap template binding is inconsistent"
+            )
 
     @staticmethod
     def _validate_entry(entry: Mapping[str, Any]) -> None:
@@ -925,12 +1049,16 @@ class ProfileDefinitionStore:
             "legacy_ids",
         }
         if set(entry) != expected:
-            raise ProfileDefinitionStoreIntegrityError("Profile store entry fields are invalid")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile store entry fields are invalid"
+            )
         if not isinstance(entry["profile_id"], str):
             raise ProfileDefinitionStoreIntegrityError("Profile ID is invalid")
         profile_id = _safe_profile_id(entry["profile_id"])
         try:
-            validate_artifact_digest(entry["current_revision"], field="current_revision")
+            validate_artifact_digest(
+                entry["current_revision"], field="current_revision"
+            )
         except Exception as error:
             raise ProfileDefinitionStoreIntegrityError(str(error)) from error
         if not _non_negative_int(entry["order"]):
@@ -938,7 +1066,9 @@ class ProfileDefinitionStore:
         if not isinstance(entry["tombstone"], bool):
             raise ProfileDefinitionStoreIntegrityError("Profile tombstone is invalid")
         if not isinstance(entry["revisions"], list) or not entry["revisions"]:
-            raise ProfileDefinitionStoreIntegrityError("Profile revision history is empty")
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile revision history is empty"
+            )
         if not isinstance(entry["legacy_ids"], list) or any(
             not isinstance(item, str) or not item for item in entry["legacy_ids"]
         ):
@@ -948,12 +1078,19 @@ class ProfileDefinitionStore:
         ):
             raise ProfileDefinitionStoreIntegrityError("Profile timestamps are invalid")
         latest = entry["revisions"][-1]
-        if not isinstance(latest, Mapping) or latest.get("profile_revision") != entry["current_revision"]:
-            raise ProfileDefinitionStoreIntegrityError("Profile current revision is inconsistent")
+        if (
+            not isinstance(latest, Mapping)
+            or latest.get("profile_revision") != entry["current_revision"]
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "Profile current revision is inconsistent"
+            )
         previous_revision: str | None = None
         for index, revision in enumerate(entry["revisions"]):
             if not isinstance(revision, Mapping):
-                raise ProfileDefinitionStoreIntegrityError("Profile revision is invalid")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile revision is invalid"
+                )
             fields = {
                 "profile_revision",
                 "parent_revision",
@@ -963,13 +1100,19 @@ class ProfileDefinitionStore:
                 "tombstone",
             }
             if set(revision) != fields:
-                raise ProfileDefinitionStoreIntegrityError("Profile revision fields are invalid")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile revision fields are invalid"
+                )
             if not _non_negative_int(revision["created_at"]) or not _non_negative_int(
                 revision["updated_at"]
             ):
-                raise ProfileDefinitionStoreIntegrityError("Profile revision timestamp is invalid")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile revision timestamp is invalid"
+                )
             if not isinstance(revision["tombstone"], bool):
-                raise ProfileDefinitionStoreIntegrityError("Profile revision tombstone is invalid")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile revision tombstone is invalid"
+                )
             try:
                 validate_artifact_digest(
                     revision["profile_revision"],
@@ -1040,7 +1183,9 @@ class ProfileDefinitionStore:
                 ),
                 None,
             )
-            profile = dict(prior["profile"]) if prior else {"profile_id": entry["profile_id"]}
+            profile = (
+                dict(prior["profile"]) if prior else {"profile_id": entry["profile_id"]}
+            )
         else:
             profile = dict(revision["profile"])
         return StoredProfile(
@@ -1056,7 +1201,9 @@ class ProfileDefinitionStore:
         )
 
     @staticmethod
-    def _entry_for_id(state: Mapping[str, Any], profile_id: str) -> dict[str, Any] | None:
+    def _entry_for_id(
+        state: Mapping[str, Any], profile_id: str
+    ) -> dict[str, Any] | None:
         return next(
             (entry for entry in state["profiles"] if entry["profile_id"] == profile_id),
             None,
@@ -1101,6 +1248,7 @@ def _empty_state() -> dict[str, Any]:
         "generation": 0,
         "updated_at": 0,
         "profiles": [],
+        "bootstrap": {"state": "empty", "template_profile_revision": None},
         "legacy": {
             "source_digest": None,
             "source_path": None,
@@ -1116,6 +1264,7 @@ def _empty_state() -> dict[str, Any]:
                 "generation": 0,
                 "updated_at": 0,
                 "profiles": [],
+                "bootstrap": {"state": "empty", "template_profile_revision": None},
                 "legacy": {
                     "source_digest": None,
                     "source_path": None,
@@ -1209,11 +1358,15 @@ def _profile_document(
     display_name: str | None = None,
 ) -> dict[str, Any]:
     if not isinstance(profile, Mapping):
-        raise ProfileDefinitionStoreIntegrityError("Profile definition must be an object")
+        raise ProfileDefinitionStoreIntegrityError(
+            "Profile definition must be an object"
+        )
     document = copy.deepcopy(dict(profile))
     candidate_id = profile_id or document.get("profile_id")
     if not isinstance(candidate_id, str) or not candidate_id:
-        raise ProfileDefinitionStoreIntegrityError("Profile definition lacks profile_id")
+        raise ProfileDefinitionStoreIntegrityError(
+            "Profile definition lacks profile_id"
+        )
     safe_id = _safe_profile_id(candidate_id)
     document["profile_id"] = safe_id
     if display_name is not None:
@@ -1396,17 +1549,23 @@ def _copy_tree_without_symlinks(source: Path, destination: Path) -> None:
     for current, directories, files in __import__("os").walk(source, followlinks=False):
         current_path = Path(current)
         if current_path.is_symlink():
-            raise ProfileDefinitionStoreIntegrityError("legacy workspace contains a symlink")
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace contains a symlink"
+            )
         relative = current_path.relative_to(source)
         target = destination / relative
         target.mkdir(parents=True, exist_ok=True)
         for directory in directories:
             if (current_path / directory).is_symlink():
-                raise ProfileDefinitionStoreIntegrityError("legacy workspace contains a symlink")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace contains a symlink"
+                )
         for filename in files:
             source_file = current_path / filename
             if source_file.is_symlink():
-                raise ProfileDefinitionStoreIntegrityError("legacy workspace contains a symlink")
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace contains a symlink"
+                )
             target_file = target / filename
             target_file.write_bytes(source_file.read_bytes())
 
