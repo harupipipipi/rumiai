@@ -68,10 +68,10 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
     def require_reconfirmation() -> None:
         raise ProfileReconfirmationRequired(diagnostic)
 
-    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: True)
+    monkeypatch.setattr(runtime_bootstrap, "active_profile_exists", lambda: True)
     monkeypatch.setattr(
         runtime_bootstrap,
-        "capture_default_profile",
+        "capture_active_profile",
         require_reconfirmation,
     )
     monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
@@ -119,7 +119,7 @@ def test_kernel_bootstrap_publishes_and_reuses_desktop_api_token(
     user_data = tmp_path / "user_data"
     token_cache = tmp_path / ".desktop_api_token"
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
-    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: False)
+    monkeypatch.setattr(runtime_bootstrap, "active_profile_exists", lambda: False)
     monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
     monkeypatch.setattr(
         runtime_bootstrap,
@@ -174,7 +174,7 @@ def test_kernel_bootstrap_refreshes_desktop_api_token_after_hmac_rotation(
     user_data = tmp_path / "user_data"
     token_cache = tmp_path / ".desktop_api_token"
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
-    monkeypatch.setattr(runtime_bootstrap, "active_default_profile_exists", lambda: False)
+    monkeypatch.setattr(runtime_bootstrap, "active_profile_exists", lambda: False)
     monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
     monkeypatch.setattr(
         runtime_bootstrap,
@@ -215,7 +215,7 @@ def test_kernel_bootstrap_fails_closed_when_token_cache_cannot_be_published(
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     monkeypatch.setattr(
         runtime_bootstrap,
-        "active_default_profile_exists",
+        "active_profile_exists",
         lambda: False,
     )
 

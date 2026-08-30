@@ -231,7 +231,7 @@ def test_desktop_panel_auth_fails_closed_without_host_contract(
     monkeypatch.setattr(
         desktop_app,
         "_restore_active_profile_contracts",
-        lambda: (None, ()),
+        lambda _packvm_lifecycle: (None, ()),
     )
     monkeypatch.setattr(desktop_app, "_write_launch_event", lambda *_args, **_kwargs: None)
 

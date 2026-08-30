@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     from core_runtime.panel_auth import PanelAuthManager
@@ -253,14 +253,97 @@ def _surface_url(url: str) -> str:
     return url.partition("#")[0]
 
 
+def _active_application_manifest(
+    catalog: Any,
+    active: Any,
+) -> Mapping[str, Any]:
+    """Return the application artifact bound to the active resolved plan."""
+
+    from tobkiri_protocol.canonical import canonical_digest
+
+    resolved = getattr(active, "resolved", None)
+    plan = getattr(resolved, "plan", None)
+    lock = getattr(resolved, "lock", None)
+    if not isinstance(plan, Mapping) or not isinstance(lock, Mapping):
+        raise RuntimeError("active Profile resolution is incomplete")
+    application_binding = plan.get("application")
+    if not isinstance(application_binding, Mapping):
+        raise RuntimeError("active Profile has no resolved Application binding")
+    if lock.get("application") != application_binding:
+        raise RuntimeError("active Profile Application binding is stale")
+    application_id = application_binding.get("pack_id")
+    artifact_digest = application_binding.get("artifact_digest")
+    executable_digest = application_binding.get("executable_artifact_digest")
+    definition_digest = application_binding.get("definition_digest")
+    if not all(
+        isinstance(value, str) and value
+        for value in (
+            application_id,
+            artifact_digest,
+            executable_digest,
+            definition_digest,
+        )
+    ):
+        raise RuntimeError("active Profile Application binding is invalid")
+
+    packs = getattr(catalog, "packs", None)
+    if not isinstance(packs, Mapping):
+        raise RuntimeError("active Profile Application inventory is unavailable")
+    application = packs.get(application_id)
+    if not isinstance(application, Mapping):
+        raise RuntimeError("active Profile Application artifact is unavailable")
+    pack = application.get("pack")
+    if (
+        not isinstance(pack, Mapping)
+        or pack.get("id") != application_id
+        or pack.get("kind") != "application"
+    ):
+        raise RuntimeError("active Profile Application artifact is not an application")
+    if pack.get("artifact_digest") != artifact_digest:
+        raise RuntimeError("active Profile Application artifact digest is stale")
+    if canonical_digest(application) != definition_digest:
+        raise RuntimeError("active Profile Application definition is stale")
+
+    effective_set = plan.get("effective_set")
+    effective_application = (
+        [
+            item
+            for item in effective_set
+            if isinstance(item, Mapping)
+            and item.get("identity") == application_id
+            and item.get("role") == "pack"
+        ]
+        if isinstance(effective_set, list)
+        else []
+    )
+    if (
+        len(effective_application) != 1
+        or effective_application[0].get("artifact_digest") != artifact_digest
+    ):
+        raise RuntimeError("active Profile Application is outside the resolved closure")
+
+    artifacts = application.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise RuntimeError("active Profile Application artifact inventory is invalid")
+    executable_artifacts = [
+        item
+        for item in artifacts
+        if isinstance(item, Mapping)
+        and item.get("kind") == "executable"
+        and item.get("entrypoint_digest") == executable_digest
+    ]
+    if len(executable_artifacts) != 1:
+        raise RuntimeError("active Profile Application executable is not verified")
+    return application
+
+
 def _restore_active_profile_contracts(packvm_lifecycle: Any):
-    """Capture and verify the exact persisted Defaults activation and UI map."""
+    """Capture the active Profile and verify its Application contract map."""
 
     from core_runtime.authority.v4 import AuthorityStore
     from core_runtime.bootstrap.production_v4 import capture_production_dispatch
     from core_runtime.bootstrap.profile_capture import (
         _bundle_root,
-        active_default_profile_exists,
         capture_active_profile,
         runtime_user_data_root,
     )
@@ -271,15 +354,11 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
     from tobkiri_host.runtime import install_dispatch_session
 
-    if not active_default_profile_exists():
-        raise RuntimeError("Defaults v4 activation is not committed")
     bundle_root = _bundle_root()
     ecosystem_root = _pack_root().parent
     active = capture_active_profile()
     catalog = BundledCatalog.load(bundle_root)
-    application = catalog.packs.get("runtime.tauri.application.default")
-    if application is None:
-        raise RuntimeError("Defaults application Pack is not selected")
+    application = _active_application_manifest(catalog, active)
     bindings = load_frontend_contract_bindings(
         Path(__file__).with_name("frontend_contract_map.v4.json"),
         application,
