@@ -34,15 +34,22 @@ jobs:
         run: |
           pip install pytest
 
+      - name: Test compact runner directly
+        run: python -m pytest scripts/quality/test_compact_test_runner.py -q
+
       - name: Run root pytest
         id: root_pytest
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+            python scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/ -v
           else
-            pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py tests/test_ci_python_dependency_contract.py -v 2>&1 | tee "$PYTEST_LOG"
+            python scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py tests/test_ci_python_dependency_contract.py -v
           fi
 
       - name: Upload root pytest log
@@ -52,6 +59,7 @@ jobs:
           name: root-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/root-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   tobkiri-contract-checks:
     runs-on: ubuntu-latest
@@ -97,9 +105,10 @@ jobs:
         id: contract_pytest
         working-directory: tobkiri_runtime
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
-          pytest -m contract -v 2>&1 | tee "$PYTEST_LOG"
+          python ../scripts/quality/compact_test_runner.py \
+            --log-dir "$RUNNER_TEMP" \
+            --log-file "contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log" \
+            -- pytest -m contract -v
 
       - name: Upload contract pytest log
         if: failure() && steps.contract_pytest.outcome == 'failure'
@@ -108,6 +117,7 @@ jobs:
           name: contract-pytest-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/contract-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   task-d-cross-platform-smoke:
     strategy:
@@ -134,6 +144,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
+
+      - name: Test compact runner cross-platform
+        run: python -m pytest scripts/quality/test_compact_test_runner.py -q
 
       - name: Run Task D smoke tests
         working-directory: tobkiri_runtime
@@ -598,12 +611,16 @@ jobs:
         id: package_pytest
         working-directory: tobkiri_runtime
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_contract_facade.py -v 2>&1 | tee "$PYTEST_LOG"
+            python ../scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_contract_facade.py -v
           else
-            pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v 2>&1 | tee "$PYTEST_LOG"
+            python ../scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v
           fi
 
       - name: Upload package pytest log
@@ -613,6 +630,7 @@ jobs:
           name: package-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/package-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   desktop-contract-smoke:
     name: Desktop contracts (baseline)

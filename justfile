@@ -10,19 +10,26 @@ health:
 
 # Run root-level contract tests.
 root-test *args:
-    pytest tests/ {{args}}
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "root-test-{run}.log" -- pytest tests/ {{args}}
 
 # Run tobkiri_runtime tests. Pass pytest selectors after the recipe name.
 test *args:
-    cd tobkiri_runtime && python -m pytest {{args}}
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "runtime-test-{run}.log" --cwd tobkiri_runtime -- python -m pytest {{args}}
 
 # Run the focused defaultspack coding/tooling regression cluster.
 tooling-test:
-    cd tobkiri_runtime && python -m pytest \
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "tooling-test-{run}.log" --cwd tobkiri_runtime -- python -m pytest \
         tests/test_defaultspack_provider_tool_schema.py \
         tests/test_defaultspack_tool_protocol_v2.py \
         tests/test_defaultspack_terminal_policy.py \
         tests/test_defaultspack_coding_hardening.py -q
+
+# Test the compact runner directly; never wrap this recipe with the runner itself.
+compact-runner-test:
+    python -m pytest scripts/quality/test_compact_test_runner.py -q
 
 # Run Python static checks over the backend surfaces guarded in CI.
 lint:
@@ -31,7 +38,8 @@ lint:
 
 # Run defaultspack frontend checks.
 frontend-check:
-    cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm test
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "frontend-test-{run}.log" --cwd tobkiri_runtime/ecosystem/defaultspack/webapp -- npm test
     cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run lint
     cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run build
 
