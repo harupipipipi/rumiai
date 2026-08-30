@@ -233,6 +233,8 @@ def _v4_provider_fixture(
         providers={"tobkiri.resource.ai.provider.registry.v1": provider_metadata},
         profile_id=active.resolved.profile["profile_id"],
         plan_digest=active.resolved.plan["plan_digest"],
+        profile_revision=active.resolved.plan["profile_revision"],
+        activation_id=active.activation["activation_id"],
     )
     fixture = _V4ProviderFixture(
         profile=active.resolved.profile,

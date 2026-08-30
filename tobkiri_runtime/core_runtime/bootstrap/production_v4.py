@@ -2173,6 +2173,8 @@ def capture_production_dispatch(
             )
             return snapshot.to_mapping(
                 profile_id=dispatch.profile_id,
+                profile_revision=dispatch.profile_revision,
+                activation_id=dispatch.activation_id,
                 plan_digest=dispatch.plan_digest,
             )
 

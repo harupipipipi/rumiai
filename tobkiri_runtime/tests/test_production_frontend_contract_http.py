@@ -315,9 +315,15 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     )
     assert status == 200
     dynamic_host = ui_catalog["data"]["dynamic_host"]
+    assert dynamic_host["profile_revision"] != dynamic_host["plan_hash"]
+    assert dynamic_host["activation_id"] == session.activation_id
     status_contribution = next(
         item for item in dynamic_host["contributions"] if item["label"] == "pack.status"
     )
+    assert status_contribution["resolved_profile_id"] == session.profile_id
+    assert status_contribution["resolved_profile_revision"] == session.profile_revision
+    assert status_contribution["resolved_activation_id"] == session.activation_id
+    assert status_contribution["resolved_plan_hash"] == session.plan_digest
 
     mutation_headers = {
         "Cookie": cookie,
@@ -334,6 +340,8 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
             "request_id": str(uuid.uuid4()),
             "expires_at": time.time() + 30,
             "profile_id": dynamic_host["profile_id"],
+            "profile_revision": dynamic_host["profile_revision"],
+            "activation_id": dynamic_host["activation_id"],
             "plan_hash": dynamic_host["plan_hash"],
             "catalog_hash": dynamic_host["catalog_hash"],
             "contribution_id": status_contribution["contribution_id"],
@@ -427,6 +435,8 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
             "request_id": str(uuid.uuid4()),
             "expires_at": time.time() + 30,
             "profile_id": refreshed_host["profile_id"],
+            "profile_revision": refreshed_host["profile_revision"],
+            "activation_id": refreshed_host["activation_id"],
             "plan_hash": refreshed_host["plan_hash"],
             "catalog_hash": refreshed_host["catalog_hash"],
             "contribution_id": refreshed_status["contribution_id"],
@@ -915,6 +925,8 @@ def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
         "request_id": str(uuid.uuid4()),
         "expires_at": time.time() + 30,
         "profile_id": envelope["profile_id"],
+        "profile_revision": envelope["profile_revision"],
+        "activation_id": envelope["records"]["activation_record"]["activation_id"],
         "plan_hash": envelope["plan_digest"],
         "catalog_hash": operation["invocation_catalog_hash"],
         "contribution_id": operation["invocation_contribution_id"],

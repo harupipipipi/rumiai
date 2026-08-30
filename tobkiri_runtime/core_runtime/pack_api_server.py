@@ -269,6 +269,14 @@ class DispatchSession(Protocol):
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
 
+    @property
+    def profile_revision(self) -> str:
+        """Return the exact captured Profile revision."""
+
+    @property
+    def activation_id(self) -> str:
+        """Return the exact captured activation identity."""
+
 
 def _load_production_capture_inputs(
     active: Any | None = None,
@@ -910,7 +918,10 @@ class PackAPIHandler(
             body = self._parse_object_body()
             if body is None:
                 return True
-            if len(route_binding.targets) == 1:
+            if (
+                len(route_binding.targets) == 1
+                and route_binding.path != "/api/ui/capability/invoke"
+            ):
                 payload = {**resolved.query, **body}
             else:
                 outer_body = body
@@ -1499,12 +1510,18 @@ class PackAPIHandler(
     ) -> FrontendContractTarget | None:
         """Select only a contribution committed in the captured application map."""
 
-        if len(binding.targets) == 1 and not body:
+        if (
+            len(binding.targets) == 1
+            and not body
+            and binding.path != "/api/ui/capability/invoke"
+        ):
             return binding.targets[0]
         expected_fields = {
             "request_id",
             "expires_at",
             "profile_id",
+            "profile_revision",
+            "activation_id",
             "plan_hash",
             "catalog_hash",
             "contribution_id",
@@ -1532,8 +1549,16 @@ class PackAPIHandler(
         if not valid_request_id or not valid_expiry:
             return None
         session = self._dispatch_session
-        if session is None or (
+        if session is None:
+            return None
+        try:
+            session.assert_current()
+        except Exception:
+            return None
+        if (
             body.get("profile_id") != session.profile_id
+            or body.get("profile_revision") != session.profile_revision
+            or body.get("activation_id") != session.activation_id
             or body.get("plan_hash") != session.plan_digest
             or body.get("catalog_hash") != self._frontend_catalog_hash(binding)
         ):
@@ -1576,6 +1601,8 @@ class PackAPIHandler(
                 catalog_hash=canonical_digest(
                     {
                         "profile_id": "",
+                        "profile_revision": "",
+                        "activation_id": "",
                         "plan_digest": "",
                         "contributions": [],
                     }
@@ -1633,6 +1660,10 @@ class PackAPIHandler(
                     if (
                         provider.get("provider_id") == provider_id
                         and provider.get("operation_id") == operation_id
+                        and provider.get("profile_id") == session.profile_id
+                        and provider.get("profile_revision") == session.profile_revision
+                        and provider.get("activation_id") == session.activation_id
+                        and provider.get("plan_digest") == session.plan_digest
                         and provider.get("backend_unavailable_reason")
                     ):
                         diagnostics.append(
@@ -1675,7 +1706,10 @@ class PackAPIHandler(
             "dynamic_host": {
                 "version": "rumi.ui.contribution.v1",
                 "profile_id": session.profile_id if session is not None else "",
-                "profile_revision": session.plan_digest if session is not None else "",
+                "profile_revision": (
+                    session.profile_revision if session is not None else ""
+                ),
+                "activation_id": session.activation_id if session is not None else "",
                 "plan_hash": session.plan_digest if session is not None else "",
                 "contributions": [
                     self._capability_contribution(target, index, session)
@@ -1708,8 +1742,12 @@ class PackAPIHandler(
             "owner_pack_hash": target.artifact_digest
             or (session.plan_digest if session is not None else ""),
             "build_identity": target.function_id,
+            "resolved_profile_id": session.profile_id if session is not None else "",
             "resolved_profile_revision": (
-                session.plan_digest if session is not None else ""
+                session.profile_revision if session is not None else ""
+            ),
+            "resolved_activation_id": (
+                session.activation_id if session is not None else ""
             ),
             "resolved_plan_hash": session.plan_digest if session is not None else "",
             "descriptor_hash": canonical_digest(
@@ -2501,7 +2539,12 @@ class PackAPIServer:
                 or not session.plan_digest.startswith("sha256:")
             ):
                 raise RuntimeError("Host Profile control identity is invalid")
-        elif not session.profile_id or not session.plan_digest.startswith("sha256:"):
+        elif (
+            not session.profile_id
+            or not session.profile_revision.startswith("sha256:")
+            or not session.activation_id.strip()
+            or not session.plan_digest.startswith("sha256:")
+        ):
             raise RuntimeError("frontend contracts require an exact active Profile")
         for binding in routes.values():
             for target in binding.targets:
@@ -2522,6 +2565,9 @@ class PackAPIServer:
                         or (
                             not host_profile_control
                             and provider.get("profile_id") == session.profile_id
+                            and provider.get("profile_revision")
+                            == session.profile_revision
+                            and provider.get("activation_id") == session.activation_id
                             and provider.get("plan_digest") == session.plan_digest
                         )
                     )

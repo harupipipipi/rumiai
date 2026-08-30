@@ -122,7 +122,9 @@ class _CapturedConversationSession:
     """Finite captured Broker fixture with controllable readiness evidence."""
 
     profile_id = "defaults"
+    profile_revision = "sha256:" + "3" * 64
     plan_digest = "sha256:" + "1" * 64
+    activation_id = "activation:conversation-test"
 
     def __init__(self, targets: tuple[FrontendContractTarget, ...]) -> None:
         self._providers: dict[str, tuple[Mapping[str, object], ...]] = {}
@@ -137,6 +139,8 @@ class _CapturedConversationSession:
                     "function_id": target.function_id,
                     "operation_id": target.operation_id,
                     "profile_id": self.profile_id,
+                    "profile_revision": self.profile_revision,
+                    "activation_id": self.activation_id,
                     "plan_digest": self.plan_digest,
                     "artifact_digest": "sha256:" + "2" * 64,
                 },
@@ -228,6 +232,9 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         )
         assert status == 200, catalog_response
         host = catalog_response["data"]["dynamic_host"]
+        assert host["profile_revision"] == session.profile_revision
+        assert host["profile_revision"] != host["plan_hash"]
+        assert host["activation_id"] == session.activation_id
         contribution = next(
             item
             for item in host["contributions"]
@@ -237,6 +244,10 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         assert contribution["mode"] == "declarative"
         assert contribution["route"] == "/chat"
         assert contribution["action_contract"] == _CONVERSATION_CONTRACT
+        assert contribution["resolved_profile_id"] == session.profile_id
+        assert contribution["resolved_profile_revision"] == session.profile_revision
+        assert contribution["resolved_activation_id"] == session.activation_id
+        assert contribution["resolved_plan_hash"] == session.plan_digest
         assert contribution["view"]["type"] == "conversation_v4"
         assert contribution["view"]["title"] == "Tobkiri Conversation"
         assert contribution["view"]["body"]
@@ -245,6 +256,8 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
             "request_id": str(uuid.uuid4()),
             "expires_at": time.time() + 45,
             "profile_id": host["profile_id"],
+            "profile_revision": host["profile_revision"],
+            "activation_id": host["activation_id"],
             "plan_hash": host["plan_hash"],
             "catalog_hash": host["catalog_hash"],
             "contribution_id": contribution["contribution_id"],
@@ -319,6 +332,38 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         )
         assert payload["messages"] == [{"role": "user", "content": "hello"}]
         assert set(payload) == {"messages", "_session_id"}
+
+        rotated_activation, rotated_response, _ = _request(
+            server,
+            "POST",
+            route,
+            body={
+                **capability_request,
+                "request_id": str(uuid.uuid4()),
+                "activation_id": "activation:rotated",
+            },
+            headers={
+                **mutation_headers,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert rotated_activation == 404, rotated_response
+        assert len(session.broker_invocations) == before + 1
+
+        missing_revision = dict(capability_request)
+        del missing_revision["profile_revision"]
+        missing_revision_status, missing_revision_response, _ = _request(
+            server,
+            "POST",
+            route,
+            body={**missing_revision, "request_id": str(uuid.uuid4())},
+            headers={
+                **mutation_headers,
+                "X-Tobkiri-Request-ID": str(uuid.uuid4()),
+            },
+        )
+        assert missing_revision_status == 404, missing_revision_response
+        assert len(session.broker_invocations) == before + 1
 
         before_legacy = len(session.broker_invocations)
         legacy_status, _, _ = _request(

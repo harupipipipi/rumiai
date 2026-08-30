@@ -130,8 +130,8 @@ class V4DispatchSession:
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
-    profile_revision: str = ""
-    activation_id: str = ""
+    profile_revision: str
+    activation_id: str
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
@@ -201,12 +201,10 @@ class V4DispatchSession:
             "backend_id": backend.status.backend_id,
             "backend_digest": backend.status.backend_digest,
             "profile_id": self.profile_id,
+            "profile_revision": self.profile_revision,
+            "activation_id": self.activation_id,
             "plan_digest": self.plan_digest,
         }
-        if self.profile_revision:
-            expected["profile_revision"] = self.profile_revision
-        if self.activation_id:
-            expected["activation_id"] = self.activation_id
         if any(provider.get(key) != value for key, value in expected.items()):
             raise RuntimeError("selected Provider/backend metadata is stale or wrong")
 
@@ -276,6 +274,14 @@ class CapturedDispatchSession(Protocol):
     def plan_digest(self) -> str:
         """Return the exact captured ResolvedPlan digest."""
 
+    @property
+    def profile_revision(self) -> str:
+        """Return the exact captured Profile revision."""
+
+    @property
+    def activation_id(self) -> str:
+        """Return the exact captured activation identity."""
+
 
 def install_dispatch_session(
     container: DispatchContainer, session: CapturedDispatchSession
@@ -285,6 +291,10 @@ def install_dispatch_session(
         raise ValueError("v4 dispatch session profile_id must be non-empty")
     if not session.plan_digest.startswith("sha256:"):
         raise ValueError("v4 dispatch session plan_digest must be canonical")
+    if not session.profile_revision.startswith("sha256:"):
+        raise ValueError("v4 dispatch session profile_revision must be canonical")
+    if not session.activation_id.strip():
+        raise ValueError("v4 dispatch session activation_id must be non-empty")
     container.set_instance("v4_dispatch_session", session)
 
 

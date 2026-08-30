@@ -365,6 +365,8 @@ def _dynamic_request(
         "request_id": str(uuid.uuid4()),
         "expires_at": time.time() + 30,
         "profile_id": host["profile_id"],
+        "profile_revision": host["profile_revision"],
+        "activation_id": host["activation_id"],
         "plan_hash": host["plan_hash"],
         "catalog_hash": host["catalog_hash"],
         "contribution_id": target["contribution_id"],
