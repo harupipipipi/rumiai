@@ -23,6 +23,10 @@ from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner impor
     _file_digest,
     _parse_image_descriptor,
 )
+from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
+    PackVMLimaProvisioner,
+)
+from core_runtime.bootstrap.production_v4 import _authenticated_packvm_backend
 from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 from tobkiri_host.errors import BackendUnavailableError
 from tobkiri_host.macos_vz_supervisor import (
@@ -441,12 +445,60 @@ def test_transport_accepts_one_mebibyte_protocol_lines_not_state_limit() -> None
         _helper_process_for_test(oversized)._exchange_line({"request": "ok"})
 
 
-def test_lifecycle_never_selects_lima_as_its_default() -> None:
-    """A normal lifecycle chooses direct VZ and fails closed off supported hosts."""
+def test_lifecycle_ignores_ambient_limactl_and_reports_direct_vz_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A PATH-visible Lima install never changes production lifecycle selection."""
+
+    limactl = _private_file(tmp_path / "limactl", b"#!/bin/sh\nexit 99\n", 0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(
+        macos_vz_provisioner,
+        "_default_state_dir",
+        lambda: tmp_path / "direct-vz-state",
+    )
+    monkeypatch.setattr(
+        macos_vz_provisioner,
+        "_packaged_packvm_bundle_binding",
+        lambda: None,
+    )
 
     lifecycle = PackVMLifecycleV4()
 
+    assert shutil.which("limactl") == str(limactl)
     assert isinstance(lifecycle._provisioner, MacOSVZProvisioner)
+    plan = lifecycle.prepare()
+    assert plan["limactl"] is None
+    assert "macOS VZ" in str(plan["launcher_reason"])
+    readiness = lifecycle.readiness_snapshot()
+    assert readiness["ready"] is False
+    assert readiness["platform"] == "macos-arm64"
+    assert "PackVM VZ" in str(readiness["reason"])
+    assert _authenticated_packvm_backend(lifecycle) is None
+
+
+def test_explicit_lima_injection_stays_out_of_production_composition(
+    tmp_path: Path,
+) -> None:
+    """Lima remains injectable for tests but cannot become a production backend."""
+
+    invocation_marker = tmp_path / "limactl-invoked"
+    limactl = _private_file(
+        tmp_path / "limactl",
+        f"#!/bin/sh\ntouch {invocation_marker}\nexit 0\n".encode(),
+        0o700,
+    )
+    lima = PackVMLimaProvisioner(
+        command_path=str(limactl),
+        state_dir=tmp_path / "lima-state",
+        machine="arm64",
+    )
+    lifecycle = PackVMLifecycleV4(provisioner=lima)
+
+    assert lifecycle._provisioner is lima
+    assert _authenticated_packvm_backend(lifecycle) is None
+    assert not invocation_marker.exists()
 
 
 def _helper_process_for_test(response: bytes) -> _MacOSVZHelperProcess:

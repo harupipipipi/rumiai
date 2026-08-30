@@ -19,6 +19,7 @@ from core_runtime.authority.v4 import (
 )
 from core_runtime.global_contract_dispatch import GlobalContractInvocationError
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 from core_runtime import credential_transport as credential_transport_module
 from core_runtime.credential_transport import CredentialMaterialStoreBinding
 from core_runtime.bootstrap.profile_capture import (
@@ -353,14 +354,27 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     assert not (user_data / "settings" / "startup_profiles.json").exists()
 
 
-def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
+def test_direct_vz_auth_failure_never_falls_back_to_path_lima_or_mints_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The required baseline remains hidden until an exact PackVM is live."""
+    """Production exposes direct-VZ failure and leaves baseline authority absent."""
+
+    import ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner as vz
 
     user_data = tmp_path / "unavailable-packvm"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    invocation_marker = tmp_path / "limactl-invoked"
+    limactl = tmp_path / "limactl"
+    limactl.write_text(
+        f"#!/bin/sh\ntouch '{invocation_marker}'\nexit 0\n",
+        encoding="utf-8",
+    )
+    limactl.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(vz, "_default_state_dir", lambda: user_data / "packvm-vz")
+    monkeypatch.setattr(vz, "_packaged_packvm_bundle_binding", lambda: None)
+    lifecycle = PackVMLifecycleV4()
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     binding = next(
         item
@@ -375,8 +389,14 @@ def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
+        packvm_provisioner=lifecycle,
     )
     try:
+        readiness = lifecycle.readiness_snapshot()
+        assert readiness["ready"] is False
+        assert "PackVM VZ" in str(readiness["reason"])
+        assert "backend_substrate" not in readiness
+        assert not invocation_marker.exists()
         context = session.context_for(
             "conversation.turn.v1",
             "complete",
@@ -387,11 +407,17 @@ def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
         assert all(
             item.provider != target for item in store.list_provider_authorities()
         )
+        assert all(
+            target.principal_id not in json.dumps(event, sort_keys=True)
+            for event in store.audit_events()
+        )
         metadata = session.provider_metadata("conversation.turn.v1")
         assert len(metadata) == 1
-        assert "authenticated PackVM supervisor" in metadata[0][
-            "backend_unavailable_reason"
-        ]
+        assert (
+            "authenticated PackVM supervisor"
+            in metadata[0]["backend_unavailable_reason"]
+        )
+        assert not invocation_marker.exists()
     finally:
         session.broker.close()
 
