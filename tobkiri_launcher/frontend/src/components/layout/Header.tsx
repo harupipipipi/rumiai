@@ -18,6 +18,7 @@ export function Header() {
   const runtimeError = useAppStore(state => state.runtimeError);
   const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
   const lastRuntimeHealthyAt = useAppStore(state => state.lastRuntimeHealthyAt);
+  const devtoolsEnabled = useAppStore(state => state.devtoolsEnabled);
   const location = useLocation();
   const runtimeBadge = describeRuntimeBadge({
     runtimeReady,
@@ -72,9 +73,16 @@ export function Header() {
             </PopoverTrigger>
             <PopoverContent align="left" className="w-64" role="dialog" aria-label={t('nav.mobile_navigation')}>
               <nav aria-label={t('nav.mobile_navigation')} className="max-h-[70vh] overflow-y-auto p-1">
-                {viewerNavGroups.map((group) => (
-                  <div key={group.id} className="py-1">
-                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70">
+                {viewerNavGroups(devtoolsEnabled).map((group) => (
+                  <section
+                    key={group.id}
+                    className="py-1"
+                    aria-labelledby={`mobile-nav-group-${group.id}`}
+                  >
+                    <div
+                      id={`mobile-nav-group-${group.id}`}
+                      className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70"
+                    >
                       {t(group.labelKey)}
                     </div>
                     <div className="flex flex-col gap-1">
@@ -96,7 +104,7 @@ export function Header() {
                         );
                       })}
                     </div>
-                  </div>
+                  </section>
                 ))}
               </nav>
             </PopoverContent>

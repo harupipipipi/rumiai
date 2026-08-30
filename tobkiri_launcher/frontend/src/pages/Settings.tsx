@@ -1,10 +1,11 @@
-import {Check, Moon, Palette, Sun} from 'lucide-react';
+import {Check, Moon, Palette, Sun, Wrench} from 'lucide-react';
 
 import {AdvancedSurfaceFrame} from '@/src/components/advanced/AdvancedSurfaceFrame';
 import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
+import {Switch} from '@/src/components/ui/Switch';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {VALID_COLOR_MODES, VALID_THEMES} from '@/src/lib/appearance';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
@@ -15,9 +16,11 @@ export function Settings() {
   const theme = useAppStore((state) => state.theme);
   const colorMode = useAppStore((state) => state.colorMode);
   const language = useAppStore((state) => state.profile.language);
+  const devtoolsEnabled = useAppStore((state) => state.devtoolsEnabled);
   const setTheme = useAppStore((state) => state.setTheme);
   const setColorMode = useAppStore((state) => state.setColorMode);
   const updateLocalProfile = useAppStore((state) => state.updateLocalProfile);
+  const setDevtoolsEnabled = useAppStore((state) => state.setDevtoolsEnabled);
   const surface = useRuntimeSurface<unknown>('settings');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.settings;
   const runtimeSettings = surface.data
@@ -90,6 +93,41 @@ export function Settings() {
               </select>
               <span className="text-xs font-normal text-text-muted">Stored locally; this does not change runtime Profile policy.</span>
             </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="flex items-center gap-2"><Wrench className="h-4 w-4" aria-hidden="true" />Devtools</CardTitle>
+              <Badge variant="warning">source: launcher_local</Badge>
+            </div>
+            <CardDescription>
+              Show diagnostic and raw Contract-operation tools in a separate navigation group.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex min-h-11 items-center justify-between gap-4 rounded-lg border border-border bg-bg-main px-4 py-3">
+              <div className="min-w-0">
+                <label htmlFor="devtools-visibility" className="text-sm font-medium text-text-main">
+                  Show Devtools
+                </label>
+                <p id="devtools-visibility-description" className="mt-1 text-xs leading-5 text-text-muted">
+                  Includes Graph, Flow, API &amp; Route Map, AI Input, Node Manager,
+                  Profile Files, and Profile Wiring.
+                </p>
+              </div>
+              <Switch
+                id="devtools-visibility"
+                checked={devtoolsEnabled}
+                onCheckedChange={setDevtoolsEnabled}
+                aria-describedby="devtools-visibility-description devtools-authority-note"
+              />
+            </div>
+            <p id="devtools-authority-note" className="mt-3 text-xs leading-5 text-text-muted">
+              This local presentation preference does not grant runtime authority,
+              change the active Profile, alter Pack closure, or bypass Host approval.
+            </p>
           </CardContent>
         </Card>
 

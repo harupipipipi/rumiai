@@ -56,6 +56,10 @@ import {
   readSafeStorageValue,
   writeSafeStorageValue,
 } from './lib/safeStorage';
+import {
+  DEVTOOLS_PREFERENCE_STORAGE_KEY,
+  normalizeDevtoolsEnabled,
+} from './lib/devtoolsPreference';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -165,6 +169,8 @@ interface AppState {
   setSetupDone: (done: boolean) => void;
   isSidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  devtoolsEnabled: boolean;
+  setDevtoolsEnabled: (enabled: boolean) => void;
   toasts: Toast[];
   addToast: (message: string, type: 'success' | 'error') => void;
   removeToast: (id: string) => void;
@@ -617,6 +623,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSidebarOpen: (open) => {
     writeLocalStorage(SIDEBAR_STORAGE_KEY, String(open));
     set({isSidebarOpen: open});
+  },
+
+  devtoolsEnabled: normalizeDevtoolsEnabled(
+    readLocalStorage(DEVTOOLS_PREFERENCE_STORAGE_KEY),
+  ),
+  setDevtoolsEnabled: (enabled) => {
+    writeLocalStorage(DEVTOOLS_PREFERENCE_STORAGE_KEY, String(enabled));
+    set({devtoolsEnabled: enabled});
   },
 
   toasts: [],

@@ -1,4 +1,11 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import {
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router';
 import {
   cancelPackMutationReconciliation,
@@ -147,6 +154,12 @@ export interface SetupVerificationBannerProps {
 
 export interface HomeRouteProps {
   verificationBanner: ReactNode;
+}
+
+export interface DevtoolsRouteGateProps {
+  children: ReactNode;
+  /** Test seam; production always reads the Launcher-local preference. */
+  enabled?: boolean;
 }
 
 type SetupVerificationCopy = {
@@ -324,6 +337,56 @@ export function HomeRoute({verificationBanner}: HomeRouteProps) {
 }
 
 /**
+ * Hide diagnostic routes and raw invocation UI without changing their stable
+ * URLs. This local presentation gate is deliberately independent from runtime
+ * Profile, Pack closure, and authority checks.
+ */
+export function DevtoolsRouteGate({children, enabled}: DevtoolsRouteGateProps) {
+  const storedPreference = useAppStore((state) => state.devtoolsEnabled);
+  const devtoolsEnabled = enabled ?? storedPreference;
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!devtoolsEnabled) {
+      headingRef.current?.focus({preventScroll: true});
+    }
+  }, [devtoolsEnabled]);
+
+  if (devtoolsEnabled) return <>{children}</>;
+
+  return (
+    <section
+      className="m-auto w-full max-w-xl rounded-2xl border border-border bg-bg-card p-7 shadow-sm"
+      aria-labelledby="devtools-route-gate-title"
+      data-testid="devtools-route-gate"
+    >
+      <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">
+        Launcher preference
+      </p>
+      <h2
+        ref={headingRef}
+        id="devtools-route-gate-title"
+        tabIndex={-1}
+        className="mt-3 text-2xl font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+      >
+        Devtools are hidden
+      </h2>
+      <p className="mt-3 text-sm leading-6 text-text-muted">
+        Enable Devtools in Settings to open this diagnostic surface. The
+        preference changes Launcher presentation only and does not grant
+        runtime authority or alter the active Profile or Pack closure.
+      </p>
+      <Link
+        className="mt-6 inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-bg-main px-4 py-2 text-sm font-medium transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2"
+        to={panelRoutes.settings}
+      >
+        Open Settings
+      </Link>
+    </section>
+  );
+}
+
+/**
  * Keep every runtime route behind the same health and authority decision.
  * Setup remains reachable because it is the recovery surface for unresolved
  * or stale runtime state.
@@ -427,6 +490,9 @@ function DeferredRouteTree({
       {element}
     </SetupVerificationGate>
   );
+  const gateDevtoolsRoute = (element: ReactNode) => (
+    <DevtoolsRouteGate>{gateRuntimeRoute(element)}</DevtoolsRouteGate>
+  );
 
   return (
     <>
@@ -443,13 +509,13 @@ function DeferredRouteTree({
           <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={gateRuntimeRoute(<LazyPackDetail />)} />
           <Route path={panelRoutes.profile.slice(1)} element={<LazyProfile />} />
           <Route path={panelRoutes.settings.slice(1)} element={<LazySettings />} />
-          <Route path={panelRoutes.profileWiring.slice(1)} element={gateRuntimeRoute(<LazyProfileWiring />)} />
-          <Route path={panelRoutes.profileFiles.slice(1)} element={gateRuntimeRoute(<LazyProfileFiles />)} />
-          <Route path={panelRoutes.flow.slice(1)} element={gateRuntimeRoute(<LazyFlow />)} />
-          <Route path={panelRoutes.graph.slice(1)} element={gateRuntimeRoute(<LazyGraph />)} />
-          <Route path={panelRoutes.aiInput.slice(1)} element={gateRuntimeRoute(<LazyAiInput />)} />
-          <Route path={panelRoutes.apiMap.slice(1)} element={gateRuntimeRoute(<LazyApiMap />)} />
-          <Route path={panelRoutes.nodeManager.slice(1)} element={gateRuntimeRoute(<LazyNodeManager />)} />
+          <Route path={panelRoutes.profileWiring.slice(1)} element={gateDevtoolsRoute(<LazyProfileWiring />)} />
+          <Route path={panelRoutes.profileFiles.slice(1)} element={gateDevtoolsRoute(<LazyProfileFiles />)} />
+          <Route path={panelRoutes.flow.slice(1)} element={gateDevtoolsRoute(<LazyFlow />)} />
+          <Route path={panelRoutes.graph.slice(1)} element={gateDevtoolsRoute(<LazyGraph />)} />
+          <Route path={panelRoutes.aiInput.slice(1)} element={gateDevtoolsRoute(<LazyAiInput />)} />
+          <Route path={panelRoutes.apiMap.slice(1)} element={gateDevtoolsRoute(<LazyApiMap />)} />
+          <Route path={panelRoutes.nodeManager.slice(1)} element={gateDevtoolsRoute(<LazyNodeManager />)} />
         </Route>
       </Routes>
       {routePending && (

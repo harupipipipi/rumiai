@@ -6,7 +6,12 @@ import test from 'node:test';
 import {MemoryRouter, Route, Routes} from 'react-router';
 import {renderToStaticMarkup} from 'react-dom/server';
 
-import {HomeRoute, SetupVerificationBanner, SetupVerificationGate} from './App';
+import {
+  DevtoolsRouteGate,
+  HomeRoute,
+  SetupVerificationBanner,
+  SetupVerificationGate,
+} from './App';
 
 function gateProps(overrides: Partial<ComponentProps<typeof SetupVerificationGate>> = {}) {
   return {
@@ -150,6 +155,73 @@ test('embedded verification gate blocks runtime route content inside the Home la
   assert.match(html, /Open Setup/);
   assert.doesNotMatch(html, /unsafe runtime route/);
   assert.doesNotMatch(html, /<main/);
+});
+
+test('disabled Devtools deep links keep their URL contract but do not mount raw tools', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/flows']}>
+      <Routes>
+        <Route
+          path="/flows"
+          element={(
+            <DevtoolsRouteGate enabled={false}>
+              <p data-testid="raw-invocation">raw invocation controls</p>
+            </DevtoolsRouteGate>
+          )}
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  assert.match(html, /data-testid="devtools-route-gate"/);
+  assert.match(html, /Devtools are hidden/);
+  assert.match(html, /href="\/settings"/);
+  assert.match(html, /does not grant runtime authority/);
+  assert.doesNotMatch(html, /raw invocation controls/);
+});
+
+test('enabled legacy Devtools deep links render their original route content', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <DevtoolsRouteGate enabled>
+        <p data-testid="legacy-devtools-surface">original Graph surface</p>
+      </DevtoolsRouteGate>
+    </MemoryRouter>,
+  );
+
+  assert.match(html, /data-testid="legacy-devtools-surface"/);
+  assert.doesNotMatch(html, /devtools-route-gate/);
+});
+
+test('disabled Devtools gate moves focus to its visible explanation', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const {dom, container, root} = createDom();
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <DevtoolsRouteGate enabled={false}>
+            <p>hidden tool</p>
+          </DevtoolsRouteGate>
+        </MemoryRouter>,
+      );
+    });
+    const heading = container.querySelector<HTMLElement>('#devtools-route-gate-title');
+    assert.ok(heading);
+    assert.equal(heading.tabIndex, -1);
+    assert.equal(dom.window.document.activeElement, heading);
+    assert.equal(container.querySelector('a[href="/settings"]')?.textContent, 'Open Settings');
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+    });
+  }
 });
 
 test('verified health renders the selected route and retry action is interactive', async () => {
