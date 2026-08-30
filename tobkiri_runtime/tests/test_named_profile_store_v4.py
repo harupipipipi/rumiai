@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -780,32 +781,90 @@ def test_legacy_workspace_failure_rolls_back_registry(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "legacy_id",
-    ("../escape", "../../escape", "/absolute/escape", "nested/profile", r"..\escape"),
+    (
+        "../escape",
+        "../../escape",
+        "/absolute/escape",
+        "nested/profile",
+        r"..\escape",
+        r"C:\absolute\escape",
+        "C:/absolute/escape",
+    ),
+)
+@pytest.mark.parametrize(
+    "source_case",
+    ("copy-disabled", "source-none", "profiles-missing"),
 )
 def test_legacy_workspace_path_lookup_rejects_unsafe_ids_without_commit(
     tmp_path: Path,
     legacy_id: str,
+    source_case: str,
 ) -> None:
-    """A legacy ID must never control traversal outside the profiles root."""
+    """Raw IDs fail before copy policy or missing-root early returns."""
 
     store = ProfileDefinitionStore(tmp_path / "user-data")
     legacy_root = tmp_path / "legacy"
-    (legacy_root / "profiles").mkdir(parents=True)
+    if source_case == "profiles-missing":
+        legacy_root.mkdir()
     outside = tmp_path / "escape"
     outside.mkdir()
     secret = outside / "secret.txt"
     secret.write_text("must-not-copy", encoding="utf-8")
 
+    import_kwargs: dict[str, object] = {}
+    if source_case == "copy-disabled":
+        import_kwargs["copy_workspaces"] = False
+    elif source_case == "source-none":
+        import_kwargs["legacy_workspace_root"] = None
+    else:
+        import_kwargs["legacy_workspace_root"] = legacy_root
     with pytest.raises(ProfileDefinitionStoreIntegrityError, match="unsafe"):
         store.import_legacy_collection(
             {"profiles": [{"profile_id": legacy_id, "name": "Attacker"}]},
-            legacy_workspace_root=legacy_root,
+            **import_kwargs,
         )
 
     assert not store.exists()
     assert store.list_profiles() == ()
     assert not (tmp_path / "user-data" / "workspaces").exists()
     assert secret.read_text(encoding="utf-8") == "must-not-copy"
+
+
+@pytest.mark.parametrize("symlink_kind", ("root", "ancestor"))
+def test_legacy_workspace_source_ancestor_symlinks_fail_closed(
+    tmp_path: Path,
+    symlink_kind: str,
+) -> None:
+    """Every source ancestor is opened from the filesystem root with no-follow."""
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    real_parent = tmp_path / "real-parent"
+    real_root = real_parent / "legacy"
+    workspace = real_root / "profiles" / "profile-a"
+    workspace.mkdir(parents=True)
+    (workspace / "state.db").write_text("must-not-copy", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.txt"
+    secret.write_text("unchanged", encoding="utf-8")
+
+    if symlink_kind == "root":
+        source_root = tmp_path / "legacy-alias"
+        source_root.symlink_to(real_root, target_is_directory=True)
+    else:
+        parent_alias = tmp_path / "parent-alias"
+        parent_alias.symlink_to(real_parent, target_is_directory=True)
+        source_root = parent_alias / "legacy"
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="root"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=source_root,
+        )
+
+    assert not store.exists()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+    assert secret.read_text(encoding="utf-8") == "unchanged"
 
 
 def test_legacy_workspace_profiles_root_symlink_fails_closed_without_commit(
@@ -874,6 +933,126 @@ def test_legacy_workspace_copy_rejects_path_replacement_without_commit(
     assert not store.exists()
     assert store.list_profiles() == ()
     assert not (tmp_path / "user-data" / "workspaces").exists()
+
+
+@pytest.mark.parametrize("swap_kind", ("user-data", "workspaces"))
+def test_legacy_workspace_publication_parent_swap_cannot_escape_or_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    swap_kind: str,
+) -> None:
+    """A parent rename/symlink swap is detected after descriptor-safe publication."""
+
+    from core_runtime import profile_definition_store_v4 as store_module
+
+    user_data = tmp_path / "user-data"
+    store = ProfileDefinitionStore(user_data)
+    legacy_root = tmp_path / "legacy"
+    source_workspace = legacy_root / "profiles" / "profile-a"
+    source_workspace.mkdir(parents=True)
+    (source_workspace / "state.db").write_text("original", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_text("unchanged", encoding="utf-8")
+
+    original_rename = store_module.os.rename
+    swapped = False
+
+    def racing_rename(source, destination, *args, **kwargs):
+        nonlocal swapped
+        if not swapped and kwargs.get("src_dir_fd") is not None:
+            swapped = True
+            if swap_kind == "user-data":
+                moved = tmp_path / "user-data-held"
+                original_rename(user_data, moved)
+                user_data.symlink_to(outside, target_is_directory=True)
+            else:
+                workspaces = user_data / "workspaces"
+                moved = tmp_path / "workspaces-held"
+                original_rename(workspaces, moved)
+                workspaces.symlink_to(outside, target_is_directory=True)
+        return original_rename(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(store_module.os, "rename", racing_rename)
+    with pytest.raises(ProfileDefinitionStoreError):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert swapped
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
+    if swap_kind == "user-data":
+        held = tmp_path / "user-data-held"
+        assert not (held / "profiles" / "index.json").exists()
+        assert not (held / "workspaces").exists()
+    else:
+        held = tmp_path / "workspaces-held"
+        assert not (user_data / "profiles" / "index.json").exists()
+        assert not (held / "profile-a" / "state.db").exists()
+
+
+def test_legacy_workspace_copy_rejects_hardlinks_without_commit(
+    tmp_path: Path,
+) -> None:
+    """Workspace files with st_nlink > 1 never enter the staging tree."""
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    legacy_root = tmp_path / "legacy"
+    workspace = legacy_root / "profiles" / "profile-a"
+    workspace.mkdir(parents=True)
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("must-not-copy", encoding="utf-8")
+    os.link(outside_file, workspace / "hardlink.txt")
+
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="multiple links"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert not store.exists()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+    assert outside_file.read_text(encoding="utf-8") == "must-not-copy"
+
+
+def test_legacy_workspace_copy_rejects_in_place_source_mutation_without_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source file changing while it is read invalidates the whole import."""
+
+    from core_runtime import profile_definition_store_v4 as store_module
+
+    store = ProfileDefinitionStore(tmp_path / "user-data")
+    legacy_root = tmp_path / "legacy"
+    workspace = legacy_root / "profiles" / "profile-a"
+    workspace.mkdir(parents=True)
+    source_file = workspace / "state.db"
+    source_file.write_text("original", encoding="utf-8")
+    original_read = store_module.os.read
+    mutated = False
+
+    def racing_read(descriptor, size):
+        nonlocal mutated
+        chunk = original_read(descriptor, size)
+        if chunk and not mutated:
+            mutated = True
+            source_file.write_text("tamper!!", encoding="utf-8")
+        return chunk
+
+    monkeypatch.setattr(store_module.os, "read", racing_read)
+    with pytest.raises(ProfileDefinitionStoreIntegrityError, match="changed"):
+        store.import_legacy_collection(
+            {"profiles": [{"profile_id": "profile-a", "name": "A"}]},
+            legacy_workspace_root=legacy_root,
+        )
+
+    assert mutated
+    assert not store.exists()
+    assert not (tmp_path / "user-data" / "workspaces").exists()
+    assert source_file.read_text(encoding="utf-8") == "tamper!!"
 
 
 def test_real_disk_named_profiles_keep_execution_and_workspace_state_isolated(

@@ -11,15 +11,15 @@ for all other Profiles.
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import re
-import shutil
 import stat
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.ids import validate_artifact_digest, validate_canonical_id
@@ -27,12 +27,22 @@ from tobkiri_protocol.secure_persistence import (
     SecureDirectory,
     SecurePersistenceError,
 )
+from tobkiri_protocol.platform_paths import canonical_platform_path
 
 from .active_profile_store_v4 import exclusive_profile_lock
 
 PROFILE_STORE_SCHEMA = "io.tobkiri.profile-definition-store.v1"
 PROFILE_STORE_FILENAME = "index.json"
 _LEGACY_LOCALE_RE = re.compile(r"^[A-Za-z]{2,8}(?:[-_][A-Za-z0-9]{1,8})*$")
+_DESCRIPTOR_OPERATIONS_AVAILABLE = (
+    os.name != "nt"
+    and bool(getattr(os, "O_NOFOLLOW", 0))
+    and hasattr(os, "supports_dir_fd")
+    and all(
+        getattr(os, name, None) in os.supports_dir_fd
+        for name in ("open", "mkdir", "stat", "rename", "unlink", "rmdir")
+    )
+)
 
 
 class ProfileDefinitionStoreError(RuntimeError):
@@ -109,6 +119,36 @@ class LegacyMigrationResult:
             "last_launched_profile_id": self.last_launched_profile_id,
             "copied_workspaces": dict(self.copied_workspaces),
         }
+
+
+@dataclass(frozen=True)
+class _StagedLegacyWorkspace:
+    """One staged workspace whose names are safe descriptor-relative names."""
+
+    candidate_id: str
+    staged_identity: tuple[int, int]
+    destination_path: Path
+
+
+@dataclass
+class _LegacyWorkspaceStage:
+    """Pinned descriptors kept alive from staging through publication."""
+
+    source_profiles_descriptor: int
+    source_profiles_path: Path
+    source_profiles_identity: tuple[int, int]
+    user_data_descriptor: int
+    user_data_path: Path
+    workspaces_descriptor: int
+    workspaces_path: Path
+    workspaces_identity: tuple[int, int]
+    workspaces_created: bool
+    staging_descriptor: int
+    staging_name: str
+    staging_path: Path
+    staging_identity: tuple[int, int]
+    workspaces: list[_StagedLegacyWorkspace]
+    closed: bool = False
 
 
 class ProfileDefinitionStore:
@@ -560,6 +600,7 @@ class ProfileDefinitionStore:
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy Profile collection contains a non-object entry"
                     )
+                _safe_legacy_workspace_id(str(legacy_key))
                 profile = dict(value)
                 if not profile.get("profile_id") and not profile.get("id"):
                     profile["profile_id"] = str(legacy_key)
@@ -580,6 +621,10 @@ class ProfileDefinitionStore:
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy Profile collection is empty"
             )
+
+        # Validate the source identity before any canonicalization, ID mapping,
+        # workspace-root lookup, or early return can discard path semantics.
+        _validate_legacy_workspace_ids(profiles)
 
         source_digest = canonical_digest(legacy)
         prepared: list[tuple[str, str, dict[str, Any], int, int]] = []
@@ -608,14 +653,14 @@ class ProfileDefinitionStore:
             if legacy_workspace_root
             else _guess_workspace_root(source_path)
         )
-        staged_workspaces, staging_root = self._stage_legacy_workspaces(
+        stage = self._stage_legacy_workspaces(
             prepared,
             source_root=source_root,
             source_digest=source_digest,
             copy_workspaces=copy_workspaces,
         )
         copied: dict[str, str] = {}
-        with self._migration_lock(staged_workspaces, staging_root):
+        with self._migration_lock(stage):
             previous_exists = self._directory.exists(PROFILE_STORE_FILENAME)
             previous_raw = (
                 self._directory.read_bytes(PROFILE_STORE_FILENAME)
@@ -627,7 +672,6 @@ class ProfileDefinitionStore:
             existing_ids = {entry["profile_id"] for entry in state["profiles"]}
             prepared_ids = {item[1] for item in prepared}
             if existing_ids.intersection(prepared_ids):
-                self._cleanup_staging(staged_workspaces, staging_root)
                 raise ProfileDefinitionStoreConflict(
                     "legacy import would overwrite an existing Profile"
                 )
@@ -699,26 +743,38 @@ class ProfileDefinitionStore:
                     "source_document": copy.deepcopy(dict(legacy)),
                 }
             )
-            published: list[tuple[Path, str]] = []
+            published: list[_StagedLegacyWorkspace] = []
             try:
+                if stage is not None:
+                    self._assert_legacy_stage_paths(stage)
+                if stage is not None:
+                    for workspace in stage.workspaces:
+                        self._publish_staged_workspace(stage, workspace)
+                        published.append(workspace)
+                        copied[workspace.candidate_id] = str(workspace.destination_path)
+                    self._assert_legacy_stage_paths(stage)
+                    self._remove_staging_root(stage)
                 self._write_state(state)
-                for staged, destination, candidate_id in staged_workspaces:
-                    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                    if destination.exists() or destination.is_symlink():
-                        raise ProfileDefinitionStoreIntegrityError(
-                            "legacy workspace destination appeared during publication"
-                        )
-                    staged.replace(destination)
-                    published.append((destination, candidate_id))
-                    copied[candidate_id] = str(destination)
-                if staging_root is not None:
-                    staging_root.rmdir()
             except Exception as error:
-                for destination, candidate_id in published:
-                    if destination.exists() and not destination.is_symlink():
-                        shutil.rmtree(destination, ignore_errors=True)
-                    copied.pop(candidate_id, None)
-                self._cleanup_staging(staged_workspaces, staging_root)
+                rollback_error: Exception | None = None
+                for workspace in reversed(published):
+                    try:
+                        if stage is None:
+                            raise ProfileDefinitionStoreError(
+                                "legacy workspace stage disappeared during rollback"
+                            )
+                        _remove_tree_at(
+                            stage.workspaces_descriptor,
+                            workspace.candidate_id,
+                            missing_ok=True,
+                        )
+                    except Exception as cleanup_error:
+                        rollback_error = cleanup_error
+                    copied.pop(workspace.candidate_id, None)
+                if rollback_error is not None:
+                    raise ProfileDefinitionStoreError(
+                        "legacy migration failed and workspace rollback failed"
+                    ) from rollback_error
                 try:
                     if previous_exists and previous_raw is not None:
                         self._directory.write_bytes_atomic(
@@ -727,10 +783,10 @@ class ProfileDefinitionStore:
                         )
                     else:
                         self._directory.unlink(PROFILE_STORE_FILENAME, missing_ok=True)
-                except (OSError, SecurePersistenceError) as rollback_error:
+                except (OSError, SecurePersistenceError) as rollback_registry_error:
                     raise ProfileDefinitionStoreError(
                         "legacy migration failed and registry rollback failed"
-                    ) from rollback_error
+                    ) from rollback_registry_error
                 raise ProfileDefinitionStoreError(
                     "legacy workspace publication failed; migration was rolled back"
                 ) from error
@@ -817,95 +873,389 @@ class ProfileDefinitionStore:
         source_root: Path | None,
         source_digest: str,
         copy_workspaces: bool,
-    ) -> tuple[list[tuple[Path, Path, str]], Path | None]:
+    ) -> _LegacyWorkspaceStage | None:
         """Copy and validate legacy workspaces before changing the registry."""
 
         if not copy_workspaces or source_root is None:
-            return [], None
-        source_root = Path(source_root).expanduser().absolute()
-        if source_root.is_symlink():
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace root must not be symlinked"
-            )
-        profiles_root = source_root / "profiles"
-        if profiles_root.is_symlink():
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace profiles root must not be symlinked"
-            )
-        if not profiles_root.exists():
-            return [], None
-        if not profiles_root.is_dir():
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace profiles root is not a directory"
-            )
+            return None
+
+        source_root = _canonical_absolute_path(Path(source_root).expanduser())
         try:
-            resolved_profiles_root = profiles_root.resolve(strict=True)
-        except (OSError, RuntimeError) as error:
+            source_root_descriptor = _open_directory_chain(source_root)
+        except ProfileDefinitionStoreIntegrityError as error:
             raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace profiles root is unavailable"
+                "legacy workspace root could not be opened safely"
             ) from error
-        if not resolved_profiles_root.is_dir():
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace profiles root is not a directory"
-            )
-        staging_root = self.user_data_root / (
-            ".profile-migration-staging-" + source_digest.removeprefix("sha256:")[:24]
-        )
-        if staging_root.exists() or staging_root.is_symlink():
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace staging path already exists"
-            )
-        staging_root.mkdir(mode=0o700, parents=True)
-        staged_workspaces: list[tuple[Path, Path, str]] = []
+        if source_root_descriptor is None:
+            return None
+
+        profiles_root = source_root / "profiles"
+        try:
+            try:
+                source_profiles_descriptor = _open_directory_at(
+                    source_root_descriptor,
+                    "profiles",
+                    required=False,
+                )
+            except ProfileDefinitionStoreIntegrityError as error:
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace profiles root could not be opened safely"
+                ) from error
+        finally:
+            os.close(source_root_descriptor)
+        if source_profiles_descriptor is None:
+            return None
+
+        source_profiles_snapshot = os.fstat(source_profiles_descriptor)
+        source_profiles_identity = _directory_identity(source_profiles_snapshot)
+        source_candidates: list[tuple[str, str, os.stat_result]] = []
         try:
             for legacy_id, candidate_id, _document, _created, _updated in prepared:
                 safe_legacy_id = _safe_legacy_workspace_id(legacy_id)
-                old = profiles_root / safe_legacy_id
-                destination = self._workspace_destination(candidate_id)
-                if old.is_symlink() or destination.is_symlink():
+                metadata = _stat_directory_entry(
+                    source_profiles_descriptor,
+                    safe_legacy_id,
+                )
+                if metadata is None:
+                    continue
+                if stat.S_ISLNK(metadata.st_mode):
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace copy is unsafe"
                     )
-                if not old.exists():
-                    continue
-                try:
-                    resolved_old = old.resolve(strict=True)
-                    resolved_old.relative_to(resolved_profiles_root)
-                except (OSError, RuntimeError, ValueError) as error:
-                    raise ProfileDefinitionStoreIntegrityError(
-                        "legacy workspace escapes the profiles root"
-                    ) from error
-                old_metadata = old.stat(follow_symlinks=False)
-                if not stat.S_ISDIR(old_metadata.st_mode):
+                if not stat.S_ISDIR(metadata.st_mode):
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace is not a directory"
                     )
-                if destination.exists():
+                source_candidates.append((legacy_id, candidate_id, metadata))
+        except Exception:
+            _close_descriptor(source_profiles_descriptor)
+            raise
+        if not source_candidates:
+            os.close(source_profiles_descriptor)
+            return None
+
+        user_data_path = _canonical_absolute_path(self._directory.root.parent)
+        user_data_descriptor: int | None = None
+        workspaces_descriptor: int | None = None
+        workspaces_created = False
+        staging_descriptor: int | None = None
+        stage: _LegacyWorkspaceStage | None = None
+        try:
+            user_data_descriptor = _open_directory_chain(user_data_path)
+            if user_data_descriptor is None:
+                raise ProfileDefinitionStoreIntegrityError(
+                    "Profile store user-data root is unavailable"
+                )
+            workspaces_descriptor, workspaces_created = _ensure_directory_at(
+                user_data_descriptor,
+                "workspaces",
+            )
+            workspaces_path = user_data_path / "workspaces"
+            for _legacy_id, candidate_id, _metadata in source_candidates:
+                destination_metadata = _stat_directory_entry(
+                    workspaces_descriptor,
+                    candidate_id,
+                )
+                if destination_metadata is not None:
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace destination already exists"
                     )
-                staged = staging_root / candidate_id
-                _copy_tree_without_symlinks(resolved_old, staged)
-                if not staged.is_dir() or staged.is_symlink():
-                    raise ProfileDefinitionStoreIntegrityError(
-                        "legacy workspace staging copy is invalid"
+
+            staging_name = (
+                ".profile-migration-staging-"
+                + source_digest.removeprefix("sha256:")[:24]
+            )
+            if _stat_directory_entry(user_data_descriptor, staging_name) is not None:
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace staging path already exists"
+                )
+            try:
+                staging_descriptor = _create_directory_at(
+                    user_data_descriptor,
+                    staging_name,
+                )
+            except ProfileDefinitionStoreIntegrityError:
+                raise
+            staging_path = user_data_path / staging_name
+            stage = _LegacyWorkspaceStage(
+                source_profiles_descriptor=source_profiles_descriptor,
+                source_profiles_path=profiles_root,
+                source_profiles_identity=source_profiles_identity,
+                user_data_descriptor=user_data_descriptor,
+                user_data_path=user_data_path,
+                workspaces_descriptor=workspaces_descriptor,
+                workspaces_path=workspaces_path,
+                workspaces_identity=_directory_identity(
+                    os.fstat(workspaces_descriptor)
+                ),
+                workspaces_created=workspaces_created,
+                staging_descriptor=staging_descriptor,
+                staging_name=staging_name,
+                staging_path=staging_path,
+                staging_identity=_directory_identity(os.fstat(staging_descriptor)),
+                workspaces=[],
+            )
+
+            for legacy_id, candidate_id, expected in source_candidates:
+                safe_legacy_id = _safe_legacy_workspace_id(legacy_id)
+                try:
+                    source_descriptor = _open_directory_at(
+                        source_profiles_descriptor,
+                        safe_legacy_id,
+                        required=True,
                     )
-                staged_workspaces.append((staged, destination, candidate_id))
+                except ProfileDefinitionStoreIntegrityError as error:
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace source changed during validation"
+                    ) from error
+                assert source_descriptor is not None
+                try:
+                    opened = os.fstat(source_descriptor)
+                    if not _same_directory_identity(expected, opened):
+                        raise ProfileDefinitionStoreIntegrityError(
+                            "legacy workspace source changed during validation"
+                        )
+                    staged_descriptor = _create_directory_at(
+                        staging_descriptor,
+                        candidate_id,
+                    )
+                    try:
+                        _copy_directory_from_descriptor(
+                            source_descriptor,
+                            staged_descriptor,
+                        )
+                        final_source = os.fstat(source_descriptor)
+                        if not _same_directory_snapshot(opened, final_source):
+                            raise ProfileDefinitionStoreIntegrityError(
+                                "legacy workspace source changed during copy"
+                            )
+                        current_source = _stat_directory_entry(
+                            source_profiles_descriptor,
+                            safe_legacy_id,
+                        )
+                        if current_source is None or not _same_directory_identity(
+                            expected,
+                            current_source,
+                        ):
+                            raise ProfileDefinitionStoreIntegrityError(
+                                "legacy workspace source path changed during copy"
+                            )
+                        staged_identity = _directory_identity(
+                            os.fstat(staged_descriptor)
+                        )
+                    finally:
+                        os.close(staged_descriptor)
+                finally:
+                    os.close(source_descriptor)
+                stage.workspaces.append(
+                    _StagedLegacyWorkspace(
+                        candidate_id=candidate_id,
+                        staged_identity=staged_identity,
+                        destination_path=workspaces_path / candidate_id,
+                    )
+                )
+
+            _assert_pinned_directory(
+                profiles_root,
+                source_profiles_descriptor,
+                "legacy workspace profiles root changed during copy",
+            )
+            if not _same_directory_snapshot(
+                source_profiles_snapshot,
+                os.fstat(source_profiles_descriptor),
+            ):
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace profiles root changed during copy"
+                )
+            return stage
         except Exception:
-            shutil.rmtree(staging_root, ignore_errors=True)
+            if stage is not None:
+                self._cleanup_staging(stage)
+            else:
+                if staging_descriptor is not None:
+                    _close_descriptor(staging_descriptor)
+                if workspaces_descriptor is not None:
+                    _close_descriptor(workspaces_descriptor)
+                if workspaces_created and user_data_descriptor is not None:
+                    _remove_empty_directory_at(user_data_descriptor, "workspaces")
+                if user_data_descriptor is not None:
+                    _close_descriptor(user_data_descriptor)
+                _close_descriptor(source_profiles_descriptor)
             raise
-        return staged_workspaces, staging_root
+
+    @staticmethod
+    def _assert_legacy_stage_paths(stage: _LegacyWorkspaceStage) -> None:
+        """Require every retained pathname to still name its pinned directory."""
+
+        _assert_pinned_directory(
+            stage.source_profiles_path,
+            stage.source_profiles_descriptor,
+            "legacy workspace source path changed",
+        )
+        _assert_pinned_directory(
+            stage.user_data_path,
+            stage.user_data_descriptor,
+            "Profile store user-data path changed",
+        )
+        _assert_pinned_directory(
+            stage.workspaces_path,
+            stage.workspaces_descriptor,
+            "legacy workspace destination path changed",
+        )
+        _assert_pinned_directory(
+            stage.staging_path,
+            stage.staging_descriptor,
+            "legacy workspace staging path changed",
+        )
+
+    @staticmethod
+    def _publish_staged_workspace(
+        stage: _LegacyWorkspaceStage,
+        workspace: _StagedLegacyWorkspace,
+    ) -> None:
+        """Publish one staged tree with descriptor-relative rename operations."""
+
+        staged_descriptor = _open_directory_at(
+            stage.staging_descriptor,
+            workspace.candidate_id,
+            required=True,
+        )
+        assert staged_descriptor is not None
+        try:
+            if _directory_identity(os.fstat(staged_descriptor)) != (
+                workspace.staged_identity
+            ):
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace staging entry changed before publication"
+                )
+        finally:
+            os.close(staged_descriptor)
+
+        if (
+            _stat_directory_entry(
+                stage.workspaces_descriptor,
+                workspace.candidate_id,
+            )
+            is not None
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace destination appeared during publication"
+            )
+        renamed = False
+        try:
+            os.rename(
+                workspace.candidate_id,
+                workspace.candidate_id,
+                src_dir_fd=stage.staging_descriptor,
+                dst_dir_fd=stage.workspaces_descriptor,
+            )
+            renamed = True
+            published_descriptor = _open_directory_at(
+                stage.workspaces_descriptor,
+                workspace.candidate_id,
+                required=True,
+            )
+            assert published_descriptor is not None
+            try:
+                if _directory_identity(os.fstat(published_descriptor)) != (
+                    workspace.staged_identity
+                ):
+                    raise ProfileDefinitionStoreIntegrityError(
+                        "legacy workspace publication target changed"
+                    )
+            finally:
+                os.close(published_descriptor)
+        except OSError as error:
+            if renamed:
+                _remove_tree_at(
+                    stage.workspaces_descriptor,
+                    workspace.candidate_id,
+                    missing_ok=True,
+                )
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace publication failed"
+                ) from error
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace publication failed"
+            ) from error
+        except Exception:
+            if renamed:
+                _remove_tree_at(
+                    stage.workspaces_descriptor,
+                    workspace.candidate_id,
+                    missing_ok=True,
+                )
+            raise
+
+    @staticmethod
+    def _remove_staging_root(stage: _LegacyWorkspaceStage) -> None:
+        """Remove the empty staging root through its retained parent descriptor."""
+
+        current = _stat_directory_entry(
+            stage.user_data_descriptor,
+            stage.staging_name,
+        )
+        if current is None or not _same_directory_identities(
+            _directory_identity(current),
+            stage.staging_identity,
+        ):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace staging path changed before cleanup"
+            )
+        if not stat.S_ISDIR(current.st_mode):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace staging path is not a directory"
+            )
+        try:
+            os.rmdir(stage.staging_name, dir_fd=stage.user_data_descriptor)
+        except OSError as error:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace staging cleanup failed"
+            ) from error
 
     @staticmethod
     def _cleanup_staging(
-        staged_workspaces: list[tuple[Path, Path, str]],
-        staging_root: Path | None,
+        stage: _LegacyWorkspaceStage | None,
     ) -> None:
         """Remove unpublished staged workspace trees after a failed import."""
 
-        del staged_workspaces
-        if staging_root is not None and staging_root.exists():
-            shutil.rmtree(staging_root, ignore_errors=True)
+        if stage is None or stage.closed:
+            return
+        try:
+            try:
+                _remove_directory_contents(stage.staging_descriptor)
+            except Exception:
+                pass
+            try:
+                current_staging = _stat_directory_entry(
+                    stage.user_data_descriptor,
+                    stage.staging_name,
+                )
+                if current_staging is not None and _same_directory_identities(
+                    stage.staging_identity,
+                    _directory_identity(current_staging),
+                ):
+                    os.rmdir(
+                        stage.staging_name,
+                        dir_fd=stage.user_data_descriptor,
+                    )
+            except Exception:
+                pass
+            if stage.workspaces_created:
+                _remove_empty_directory_at(
+                    stage.user_data_descriptor,
+                    "workspaces",
+                    expected_identity=stage.workspaces_identity,
+                )
+        finally:
+            for descriptor in (
+                stage.staging_descriptor,
+                stage.workspaces_descriptor,
+                stage.user_data_descriptor,
+                stage.source_profiles_descriptor,
+            ):
+                _close_descriptor(descriptor)
+            stage.closed = True
 
     migrate_legacy_collection = import_legacy_collection
 
@@ -931,8 +1281,7 @@ class ProfileDefinitionStore:
     @contextmanager
     def _migration_lock(
         self,
-        staged_workspaces: list[tuple[Path, Path, str]],
-        staging_root: Path | None,
+        stage: _LegacyWorkspaceStage | None,
     ) -> Iterator[None]:
         """Hold the registry lock and always clean an unfinished staging tree."""
 
@@ -940,7 +1289,7 @@ class ProfileDefinitionStore:
             with self._locked():
                 yield
         finally:
-            self._cleanup_staging(staged_workspaces, staging_root)
+            self._cleanup_staging(stage)
 
     def _read_state(self) -> dict[str, Any]:
         try:
@@ -1584,31 +1933,108 @@ def _guess_workspace_root(source_path: Path | None) -> Path | None:
     return source_path.parent.parent
 
 
+def _validate_legacy_workspace_ids(
+    profiles: Sequence[Mapping[str, Any]],
+) -> None:
+    """Validate every selected raw legacy ID before migration normalization."""
+
+    for item in profiles:
+        for key in ("profile_id", "id"):
+            raw_id = item.get(key)
+            if raw_id:
+                _safe_legacy_workspace_id(str(raw_id))
+
+
 def _safe_legacy_workspace_id(value: str) -> str:
     """Accept only one legacy ID component for workspace path lookup."""
 
+    raw_value = str(value)
+    lookup_value = raw_value.strip()
     if (
-        not value
-        or value in {".", ".."}
-        or "\x00" in value
-        or "/" in value
-        or "\\" in value
-        or Path(value).is_absolute()
+        not lookup_value
+        or lookup_value in {".", ".."}
+        or "\x00" in raw_value
+        or "/" in lookup_value
+        or "\\" in lookup_value
+        or Path(lookup_value).is_absolute()
+        or re.match(r"^[A-Za-z]:", lookup_value) is not None
     ):
         raise ProfileDefinitionStoreIntegrityError(
             "legacy Profile ID is unsafe for workspace lookup"
         )
-    return value
+    return raw_value
 
 
-def _open_directory_without_symlinks(path: Path) -> int:
-    """Open one directory without following its final symlink component."""
+def _canonical_absolute_path(path: Path) -> Path:
+    """Normalize only lexical path syntax and approved platform aliases."""
 
-    flags = os.O_RDONLY
-    flags |= getattr(os, "O_DIRECTORY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
+    requested = canonical_platform_path(Path(path).expanduser())
+    if not requested.is_absolute():
+        requested = requested.absolute()
+    return Path(os.path.normpath(os.fspath(requested)))
+
+
+def _require_directory_operations() -> None:
+    """Require the descriptor-relative primitives used by migration."""
+
+    if not _DESCRIPTOR_OPERATIONS_AVAILABLE:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace descriptor operations are unavailable"
+        )
+
+
+def _open_directory_chain(path: Path) -> int | None:
+    """Open every path component from the filesystem root without following links."""
+
+    _require_directory_operations()
+    requested = _canonical_absolute_path(path)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
+    descriptor: int | None = None
     try:
-        descriptor = os.open(path, flags)
+        descriptor = os.open(requested.anchor or "/", flags)
+        for component in requested.parts[1:]:
+            try:
+                next_descriptor = os.open(
+                    component,
+                    flags,
+                    dir_fd=descriptor,
+                )
+            except FileNotFoundError:
+                return None
+            os.close(descriptor)
+            descriptor = next_descriptor
+        result = descriptor
+        descriptor = None
+        return result
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace directory chain could not be opened safely"
+        ) from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _open_directory_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    required: bool,
+) -> int | None:
+    """Open one directory relative to a pinned parent without following links."""
+
+    _require_directory_operations()
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except FileNotFoundError:
+        if required:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace directory is unavailable"
+            ) from None
+        return None
     except OSError as error:
         raise ProfileDefinitionStoreIntegrityError(
             "legacy workspace directory could not be opened safely"
@@ -1623,6 +2049,114 @@ def _open_directory_without_symlinks(path: Path) -> int:
     except Exception:
         os.close(descriptor)
         raise
+
+
+def _stat_directory_entry(
+    parent_descriptor: int,
+    name: str,
+) -> os.stat_result | None:
+    """Inspect one child without following a final symlink."""
+
+    _require_directory_operations()
+    try:
+        return os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace entry could not be inspected safely"
+        ) from error
+
+
+def _ensure_directory_at(parent_descriptor: int, name: str) -> tuple[int, bool]:
+    """Open or create one private directory below a pinned parent."""
+
+    metadata = _stat_directory_entry(parent_descriptor, name)
+    if metadata is not None:
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace directory is unsafe"
+            )
+        descriptor = _open_directory_at(parent_descriptor, name, required=True)
+        assert descriptor is not None
+        return descriptor, False
+
+    created = False
+    try:
+        os.mkdir(name, mode=0o700, dir_fd=parent_descriptor)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace directory could not be created safely"
+        ) from error
+    try:
+        descriptor = _open_directory_at(parent_descriptor, name, required=True)
+    except Exception:
+        if created:
+            _remove_empty_directory_at(parent_descriptor, name)
+        raise
+    assert descriptor is not None
+    return descriptor, created
+
+
+def _create_directory_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    mode: int = 0o700,
+) -> int:
+    """Create and reopen one directory using only its pinned parent descriptor."""
+
+    _require_directory_operations()
+    try:
+        os.mkdir(name, mode=mode, dir_fd=parent_descriptor)
+    except FileExistsError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace directory already exists"
+        ) from error
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace directory could not be created safely"
+        ) from error
+    try:
+        descriptor = _open_directory_at(parent_descriptor, name, required=True)
+    except Exception:
+        _remove_empty_directory_at(parent_descriptor, name)
+        raise
+    assert descriptor is not None
+    return descriptor
+
+
+def _close_descriptor(descriptor: int | None) -> None:
+    """Close a descriptor while keeping best-effort cleanup non-throwing."""
+
+    if descriptor is None:
+        return
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+
+
+def _directory_identity(metadata: os.stat_result) -> tuple[int, int]:
+    """Return the stable identity of one opened directory."""
+
+    return int(metadata.st_dev), int(metadata.st_ino)
+
+
+def _same_directory_identities(
+    first: tuple[int, int],
+    second: tuple[int, int],
+) -> bool:
+    """Compare two captured directory identities."""
+
+    return first == second
 
 
 def _same_file_identity(
@@ -1667,6 +2201,132 @@ def _same_directory_identity(
     )
 
 
+def _same_directory_snapshot(
+    first: os.stat_result,
+    second: os.stat_result,
+) -> bool:
+    """Compare a directory identity and mutation-sensitive metadata."""
+
+    return _same_directory_identity(first, second) and (
+        first.st_nlink,
+        first.st_size,
+        first.st_mtime_ns,
+        first.st_ctime_ns,
+    ) == (
+        second.st_nlink,
+        second.st_size,
+        second.st_mtime_ns,
+        second.st_ctime_ns,
+    )
+
+
+def _assert_pinned_directory(
+    path: Path,
+    descriptor: int,
+    message: str,
+) -> None:
+    """Require a pathname to still resolve to an already-open directory."""
+
+    try:
+        current_descriptor = _open_directory_chain(path)
+        if current_descriptor is None:
+            raise ProfileDefinitionStoreIntegrityError(message)
+        try:
+            if _directory_identity(os.fstat(current_descriptor)) != (
+                _directory_identity(os.fstat(descriptor))
+            ):
+                raise ProfileDefinitionStoreIntegrityError(message)
+        finally:
+            os.close(current_descriptor)
+    except ProfileDefinitionStoreIntegrityError as error:
+        if str(error) == message:
+            raise
+        raise ProfileDefinitionStoreIntegrityError(message) from error
+
+
+def _remove_empty_directory_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    expected_identity: tuple[int, int] | None = None,
+) -> None:
+    """Remove an empty child directory without following a replacement link."""
+
+    try:
+        metadata = _stat_directory_entry(parent_descriptor, name)
+        if metadata is None or not stat.S_ISDIR(metadata.st_mode):
+            return
+        if expected_identity is not None and not _same_directory_identities(
+            _directory_identity(metadata),
+            expected_identity,
+        ):
+            return
+        os.rmdir(name, dir_fd=parent_descriptor)
+    except Exception:
+        # This helper is used while unwinding an already failed transaction.
+        # It never follows a replacement path and must not mask the original
+        # integrity failure.
+        return
+
+
+def _remove_tree_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    missing_ok: bool,
+) -> None:
+    """Remove one tree using only descriptor-relative, no-follow operations."""
+
+    metadata = _stat_directory_entry(parent_descriptor, name)
+    if metadata is None:
+        if missing_ok:
+            return
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace cleanup target is unavailable"
+        )
+    if stat.S_ISDIR(metadata.st_mode):
+        child_descriptor = _open_directory_at(
+            parent_descriptor,
+            name,
+            required=True,
+        )
+        assert child_descriptor is not None
+        try:
+            opened = os.fstat(child_descriptor)
+            if not _same_directory_identity(metadata, opened):
+                raise ProfileDefinitionStoreIntegrityError(
+                    "legacy workspace cleanup target changed"
+                )
+            _remove_directory_contents(child_descriptor)
+        finally:
+            os.close(child_descriptor)
+        try:
+            os.rmdir(name, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            if not missing_ok:
+                raise
+    else:
+        try:
+            os.unlink(name, dir_fd=parent_descriptor)
+        except FileNotFoundError:
+            if not missing_ok:
+                raise
+
+
+def _remove_directory_contents(directory_descriptor: int) -> None:
+    """Remove every direct child of an opened directory without following links."""
+
+    try:
+        with os.scandir(directory_descriptor) as entries:
+            names = [entry.name for entry in entries]
+    except OSError as error:
+        raise ProfileDefinitionStoreIntegrityError(
+            "legacy workspace cleanup enumeration failed"
+        ) from error
+    for name in names:
+        _remove_tree_at(directory_descriptor, name, missing_ok=True)
+
+
 def _write_all(descriptor: int, content: bytes) -> None:
     """Write all bytes to a descriptor without reopening its path."""
 
@@ -1683,12 +2343,12 @@ def _write_all(descriptor: int, content: bytes) -> None:
 def _copy_regular_file_from_directory(
     source_directory: int,
     filename: str,
-    destination: Path,
+    destination_directory: int,
     expected: os.stat_result,
 ) -> None:
-    """Copy one regular file through a no-follow descriptor and recheck it."""
+    """Copy one regular file through pinned descriptors and recheck its bytes."""
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | os.O_NOFOLLOW
     try:
         source_descriptor = os.open(filename, flags, dir_fd=source_directory)
     except OSError as error:
@@ -1698,34 +2358,70 @@ def _copy_regular_file_from_directory(
     destination_descriptor: int | None = None
     try:
         opened = os.fstat(source_descriptor)
-        if (
-            not stat.S_ISREG(opened.st_mode)
-            or opened.st_nlink != 1
-            or not _same_file_identity(expected, opened)
-        ):
+        if not stat.S_ISREG(opened.st_mode):
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace file changed during validation"
             )
-        destination_flags = (
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        )
+        if not _same_file_identity(expected, opened):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during validation"
+            )
+        if opened.st_nlink != 1:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file has multiple links"
+            )
+        destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         try:
             destination_descriptor = os.open(
-                destination,
+                filename,
                 destination_flags,
                 stat.S_IMODE(opened.st_mode) & 0o777,
+                dir_fd=destination_directory,
             )
         except OSError as error:
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace destination could not be created safely"
             ) from error
+        copied_digest = hashlib.sha256()
         while True:
             chunk = os.read(source_descriptor, 1024 * 1024)
             if not chunk:
                 break
+            copied_digest.update(chunk)
             _write_all(destination_descriptor, chunk)
         final = os.fstat(source_descriptor)
         if not _same_file_identity(opened, final):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during copy"
+            )
+        current = _stat_directory_entry(source_directory, filename)
+        if current is None or not _same_file_identity(opened, current):
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during copy"
+            )
+        try:
+            os.lseek(source_descriptor, 0, os.SEEK_SET)
+        except OSError as error:
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file could not be verified"
+            ) from error
+        verify_digest = hashlib.sha256()
+        while True:
+            chunk = os.read(source_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            verify_digest.update(chunk)
+        if verify_digest.digest() != copied_digest.digest():
+            raise ProfileDefinitionStoreIntegrityError(
+                "legacy workspace file changed during copy"
+            )
+        final = os.fstat(source_descriptor)
+        current = _stat_directory_entry(source_directory, filename)
+        if (
+            not _same_file_identity(opened, final)
+            or current is None
+            or not _same_file_identity(opened, current)
+        ):
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace file changed during copy"
             )
@@ -1742,10 +2438,11 @@ def _copy_regular_file_from_directory(
 
 def _copy_directory_from_descriptor(
     source_descriptor: int,
-    destination: Path,
+    destination_descriptor: int,
 ) -> None:
     """Recursively copy a directory while pinning every source descriptor."""
 
+    source_before = os.fstat(source_descriptor)
     try:
         with os.scandir(source_descriptor) as entries:
             children = list(entries)
@@ -1753,9 +2450,6 @@ def _copy_directory_from_descriptor(
         raise ProfileDefinitionStoreIntegrityError(
             "legacy workspace could not be enumerated safely"
         ) from error
-    child_flags = (
-        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    )
     for entry in children:
         try:
             expected = entry.stat(follow_symlinks=False)
@@ -1767,98 +2461,54 @@ def _copy_directory_from_descriptor(
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace contains a symlink"
             )
-        target = destination / entry.name
         if stat.S_ISDIR(expected.st_mode):
-            try:
-                child_descriptor = os.open(
-                    entry.name,
-                    child_flags,
-                    dir_fd=source_descriptor,
-                )
-            except OSError as error:
-                raise ProfileDefinitionStoreIntegrityError(
-                    "legacy workspace directory changed during copy"
-                ) from error
+            child_descriptor = _open_directory_at(
+                source_descriptor,
+                entry.name,
+                required=True,
+            )
+            assert child_descriptor is not None
             try:
                 opened = os.fstat(child_descriptor)
                 if not _same_directory_identity(expected, opened):
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace directory changed during validation"
                     )
-                target.mkdir(
+                target_descriptor = _create_directory_at(
+                    destination_descriptor,
+                    entry.name,
                     mode=stat.S_IMODE(opened.st_mode) & 0o777,
-                    parents=False,
-                    exist_ok=False,
                 )
-                _copy_directory_from_descriptor(child_descriptor, target)
+                try:
+                    _copy_directory_from_descriptor(
+                        child_descriptor,
+                        target_descriptor,
+                    )
+                finally:
+                    os.close(target_descriptor)
                 final = os.fstat(child_descriptor)
-                if not _same_directory_identity(opened, final):
+                if not _same_directory_snapshot(opened, final):
                     raise ProfileDefinitionStoreIntegrityError(
                         "legacy workspace directory changed during copy"
                     )
-            except OSError as error:
-                raise ProfileDefinitionStoreIntegrityError(
-                    "legacy workspace copy could not be published safely"
-                ) from error
             finally:
                 os.close(child_descriptor)
         elif stat.S_ISREG(expected.st_mode):
             _copy_regular_file_from_directory(
                 source_descriptor,
                 entry.name,
-                target,
+                destination_descriptor,
                 expected,
             )
         else:
             raise ProfileDefinitionStoreIntegrityError(
                 "legacy workspace contains an unsupported entry"
             )
-
-
-def _copy_tree_without_symlinks(source: Path, destination: Path) -> None:
-    """Copy a legacy workspace without following symlinks or races."""
-
-    if source.is_symlink() or not source.is_dir():
+    source_after = os.fstat(source_descriptor)
+    if not _same_directory_snapshot(source_before, source_after):
         raise ProfileDefinitionStoreIntegrityError(
-            "legacy workspace source is not a real directory"
+            "legacy workspace directory changed during copy"
         )
-    if destination.exists() or destination.is_symlink():
-        raise ProfileDefinitionStoreIntegrityError(
-            "legacy workspace staging destination already exists"
-        )
-    destination.parent.mkdir(mode=0o700, parents=False, exist_ok=True)
-    destination.mkdir(mode=0o700, parents=False, exist_ok=False)
-    try:
-        source_metadata = source.stat(follow_symlinks=False)
-    except OSError as error:
-        destination.rmdir()
-        raise ProfileDefinitionStoreIntegrityError(
-            "legacy workspace source is unavailable"
-        ) from error
-    try:
-        source_descriptor = _open_directory_without_symlinks(source)
-    except Exception:
-        destination.rmdir()
-        raise
-    try:
-        opened = os.fstat(source_descriptor)
-        if not _same_directory_identity(source_metadata, opened):
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace source changed during validation"
-            )
-        _copy_directory_from_descriptor(source_descriptor, destination)
-        final = os.fstat(source_descriptor)
-        if not _same_directory_identity(opened, final):
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace source changed during copy"
-            )
-        current = source.stat(follow_symlinks=False)
-        if not _same_file_identity(source_metadata, current):
-            raise ProfileDefinitionStoreIntegrityError(
-                "legacy workspace source path changed during copy"
-            )
-    finally:
-        os.close(source_descriptor)
 
 
 __all__ = [
