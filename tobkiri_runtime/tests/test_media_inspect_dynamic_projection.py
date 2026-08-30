@@ -183,7 +183,13 @@ class _MediaBackend:
         self.binding = dict(binding)
         self.session: Any = None
         self.target_domains: dict[str, str] = {}
+        self.artifact_resolver: Any = None
         self.calls: list[tuple[str, str]] = []
+
+    def bind_artifact_resolver(self, resolver: Any) -> None:
+        """Accept the activation-bound artifact resolver used by Production."""
+
+        self.artifact_resolver = resolver
 
     def materialize(self, binding: Any, reservation_id: str) -> RuntimeEvidence:
         del reservation_id
