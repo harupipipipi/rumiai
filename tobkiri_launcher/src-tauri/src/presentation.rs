@@ -511,7 +511,13 @@ fn launch_selected_presentation_serialized(
         |target| launch_verified_target_once(app, config, target, deadline),
     )?;
 
-    Ok(PresentationLaunchResponse {
+    Ok(successful_shell_launch_response(&target))
+}
+
+fn successful_shell_launch_response(
+    target: &VerifiedPresentationTarget,
+) -> PresentationLaunchResponse {
+    PresentationLaunchResponse {
         // Preserve the existing command response discriminator. The message
         // states the narrower admission guarantee introduced by the receipt.
         status: "launched".to_string(),
@@ -521,7 +527,7 @@ fn launch_selected_presentation_serialized(
             "{} admitted the verified Profile binding; bootstrap and page readiness are not asserted.",
             target.shell.display_name
         ),
-    })
+    }
 }
 
 fn run_shell_rotation_sequence<T, R, S, L>(
@@ -3140,6 +3146,59 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("missing receipt"));
         assert_eq!(process.observations, vec![Some(true)]);
+    }
+
+    #[test]
+    fn successful_shell_launch_response_preserves_exact_public_contract() {
+        let catalog = sample_catalog();
+        let mut shell = catalog.shell_providers[0].clone();
+        shell.display_name = "Tobkiri Shell".into();
+        let target = VerifiedPresentationTarget {
+            execution_identity: crate::host_contract::ExecutionProfileIdentity::new(
+                "defaults",
+                format!("sha256:{}", "1".repeat(64)),
+                "activation:test-fixture",
+                format!("sha256:{}", "2".repeat(64)),
+            )
+            .unwrap(),
+            catalog,
+            catalog_revision: format!("sha256:{}", "3".repeat(64)),
+            selection: PresentationSelection {
+                base_pack_id: "defaults-basepack".into(),
+                shell_provider_id: "shell.tauri.default".into(),
+            },
+            shell,
+            artifact: PresentationArtifact {
+                artifact_id: "shell.tauri.default.macos-arm64".into(),
+                variant: "macos-arm64".into(),
+                platform: "macos".into(),
+                architecture: "arm64".into(),
+                path: Some("bundled/Tobkiri Shell.app".into()),
+                sha256: Some(format!("sha256:{}", "4".repeat(64))),
+                size: Some(1),
+                source_identity: None,
+                source_revision: None,
+                prebuilt: true,
+                production: true,
+                development_command: None,
+                bundle_identifier: Some(crate::shell_handoff::SHELL_BUNDLE_IDENTIFIER.into()),
+                status: "verified".into(),
+                status_detail: "test fixture".into(),
+            },
+            artifact_path: PathBuf::from("/Applications/Tobkiri Shell.app"),
+            entrypoint_digest: format!("sha256:{}", "5".repeat(64)),
+        };
+        let response = successful_shell_launch_response(&target);
+
+        assert_eq!(
+            serde_json::to_value(response).unwrap(),
+            serde_json::json!({
+                "status": "launched",
+                "provider_id": "shell.tauri.default",
+                "artifact_id": "shell.tauri.default.macos-arm64",
+                "message": "Tobkiri Shell admitted the verified Profile binding; bootstrap and page readiness are not asserted.",
+            })
+        );
     }
 
     #[test]
