@@ -48,6 +48,14 @@ def _bundle_root() -> Path:
 class _Dispatch:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, Mapping[str, object]]] = []
+        self.profile_id = "defaults"
+        self.profile_revision = "sha256:" + "1" * 64
+        self.activation_id = "activation:test-pack-api"
+        self.plan_digest = "sha256:" + "2" * 64
+        self.security_epoch = 1
+
+    def assert_current(self) -> None:
+        """Keep this explicit test capture current for handler auth tests."""
 
     def invoke(
         self,
@@ -418,6 +426,7 @@ def test_packvm_lifecycle_routes_require_auth_csrf_and_fresh_request_id() -> Non
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-desktop"),
+        dispatch_session=_Dispatch(),
         packvm_lifecycle=lifecycle,
     )
     refreshed: list[object] = []

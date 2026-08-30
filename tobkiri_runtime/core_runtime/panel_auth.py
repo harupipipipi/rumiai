@@ -14,9 +14,21 @@ import hmac
 import secrets
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from .host_contract import host_contract_value
+
+
+@dataclass(frozen=True, slots=True)
+class PanelAuthBinding:
+    """Host-captured authority identity for one panel credential generation."""
+
+    profile_id: str
+    profile_revision: str
+    activation_id: str
+    plan_digest: str
+    security_epoch: int
 
 
 class PanelAuthManager:
@@ -69,7 +81,7 @@ class PanelAuthManager:
             return False
         return hmac.compare_digest(candidate, self._bootstrap_secret)
 
-    def issue_login_code(self) -> Dict[str, Any]:
+    def issue_login_code(self, binding: PanelAuthBinding) -> Dict[str, Any]:
         now = time.time()
         code = self._generate_secret_token()
         code_hash = self._hash_value(code)
@@ -79,22 +91,30 @@ class PanelAuthManager:
             self._active_codes[code_hash] = {
                 "issued_at": now,
                 "expires_at": expires_at,
+                "binding": binding,
             }
         return {
             "code": code,
             "expires_in": self._code_ttl_seconds,
         }
 
-    def exchange_code(self, code: str) -> Optional[Dict[str, Any]]:
+    def exchange_code(
+        self,
+        code: str,
+        binding: PanelAuthBinding,
+    ) -> Optional[Dict[str, Any]]:
         if not code:
             return None
         now = time.time()
         code_hash = self._hash_value(code)
         with self._lock:
             self._cleanup_locked(now)
-            code_info = self._active_codes.pop(code_hash, None)
+            code_info = self._active_codes.get(code_hash)
             if code_info is None or code_info.get("expires_at", 0.0) <= now:
                 return None
+            if code_info.get("binding") != binding:
+                return None
+            del self._active_codes[code_hash]
 
             session_id = self._generate_secret_token()
             csrf_token = self._generate_secret_token()
@@ -104,6 +124,7 @@ class PanelAuthManager:
                 "csrf_token": csrf_token,
                 "issued_at": now,
                 "expires_at": expires_at,
+                "binding": binding,
             }
         return {
             "session_id": session_id,
@@ -111,7 +132,11 @@ class PanelAuthManager:
             "expires_in": self._session_ttl_seconds,
         }
 
-    def verify_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def verify_session(
+        self,
+        session_id: str,
+        binding: PanelAuthBinding,
+    ) -> Optional[Dict[str, Any]]:
         if not session_id:
             return None
         now = time.time()
@@ -120,6 +145,8 @@ class PanelAuthManager:
             self._cleanup_locked(now)
             session_info = self._active_sessions.get(session_hash)
             if session_info is None:
+                return None
+            if session_info.get("binding") != binding:
                 return None
             session_info["expires_at"] = now + self._session_ttl_seconds
             return {

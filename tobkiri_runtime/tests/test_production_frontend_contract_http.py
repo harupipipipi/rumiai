@@ -461,7 +461,19 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     enable_status, enabled = post("/api/pack-control/enable", {"pack_id": target_pack})
     assert enable_status == 200, enabled
     assert enabled["data"]["enabled"] is True
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
     assert post("/api/pack-control/restart", {})[0] == 200
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
     status, refreshed_catalog, _ = _request(
         server,
         "GET",
@@ -495,11 +507,29 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
     assert status == 200, persisted
     assert persisted["data"]["enabled"] is True
     assert post("/api/pack-control/disable", {"pack_id": target_pack})[0] == 200
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
     revoke_status, revoked = post("/api/pack-control/approval-revoke", {"pack_id": target_pack})
     assert revoke_status == 200, revoked
     assert revoked["data"]["approved"] is False
     assert revoked["data"]["approval_status"] == "revoked"
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
     assert post("/api/pack-control/restart", {})[0] == 200
+    cookie, csrf, origin = _authenticate(server)
+    mutation_headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
     catalog_status, after_revoke, _ = _request(
         server,
         "GET",
@@ -878,6 +908,7 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     )
     contract_path.chmod(0o600)
     refresh(None)
+    cookie, _csrf, _origin = _authenticate(server)
 
     status, refreshed_profile, _ = _request(
         server,
@@ -1173,8 +1204,8 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         activation_body,
         request_id=activation_request_id,
     )
-    assert status == 200, replayed
-    assert replayed["data"] == activated["data"]
+    assert status == 401, replayed
+    assert replayed["error"] == "Unauthorized"
     assert replay_mutating_calls == []
 
 
@@ -1469,9 +1500,9 @@ def test_stale_fresh_mutation_has_no_journal_admission_side_effects(
         },
     )
 
-    assert status == 503, rejected
-    assert rejected["data"]["code"] == "API_FAILURE"
-    assert len(lookup_calls) == 1
+    assert status == 401, rejected
+    assert rejected["error"] == "Unauthorized"
+    assert lookup_calls == []
     assert mutating_calls == []
     assert not journal.path.exists()
 

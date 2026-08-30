@@ -52,7 +52,7 @@ from .host_contract import (
     host_contract_value,
     validate_host_contract,
 )
-from .panel_auth import PanelAuthManager, get_panel_auth_manager
+from .panel_auth import PanelAuthBinding, PanelAuthManager, get_panel_auth_manager
 from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
 from .authority.v4_models import AuthorityDenied
 from tobkiri_host.errors import HostCoreError
@@ -285,6 +285,10 @@ class DispatchSession(Protocol):
     @property
     def activation_id(self) -> str:
         """Return the exact captured activation identity."""
+
+    @property
+    def security_epoch(self) -> int:
+        """Return the exact captured Authority security epoch."""
 
 
 def _load_production_capture_inputs(
@@ -1966,11 +1970,43 @@ class PackAPIHandler(
             ).hexdigest()
         self._send_response(APIResponse(True, data=health))
 
+    @classmethod
+    def _current_panel_auth_binding(cls) -> PanelAuthBinding | None:
+        """Capture the current host-owned identity for panel authentication."""
+
+        session = cls._dispatch_session
+        if session is None:
+            return None
+        try:
+            session.assert_current()
+            security_epoch = int(getattr(session, "security_epoch"))
+            if security_epoch < 1:
+                return None
+            return PanelAuthBinding(
+                profile_id=str(session.profile_id),
+                profile_revision=str(session.profile_revision),
+                activation_id=str(session.activation_id),
+                plan_digest=str(session.plan_digest),
+                security_epoch=security_epoch,
+            )
+        except (
+            AttributeError,
+            HostCoreError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            return None
+
     def _handle_panel_bootstrap(self) -> None:
         manager = self._panel_auth_manager
         secret = self.headers.get("X-Rumi-Desktop-Bootstrap", "")
+        binding = self._current_panel_auth_binding()
         if (
             manager is None
+            or binding is None
             or not self._is_loopback_client(self.client_address)
             or not manager.validate_bootstrap_secret(secret)
         ):
@@ -1978,7 +2014,9 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         self._discard_request_body()
-        self._send_response(APIResponse(True, data=manager.issue_login_code()))
+        self._send_response(
+            APIResponse(True, data=manager.issue_login_code(binding))
+        )
 
     def _handle_panel_exchange(self, body: Mapping[str, object]) -> None:
         manager = self._panel_auth_manager
@@ -1990,7 +2028,12 @@ class PackAPIHandler(
             return
         code_value = body.get("code")
         code = code_value.strip() if isinstance(code_value, str) else ""
-        exchange = manager.exchange_code(code) if manager is not None else None
+        binding = self._current_panel_auth_binding()
+        exchange = (
+            manager.exchange_code(code, binding)
+            if manager is not None and binding is not None
+            else None
+        )
         if exchange is None:
             self._send_response(
                 APIResponse(False, error="Invalid or expired code"), 401
@@ -2544,6 +2587,18 @@ class PackAPIServer:
             self._lifecycle_state = "running"
             thread.start()
         logger.info("Pack v4 API server started on http://%s:%s", self.host, self.port)
+
+    def issue_panel_login_code(self) -> Mapping[str, object]:
+        """Issue a desktop handoff code bound to the current server capture."""
+
+        with self._lifecycle_lock:
+            handler = self.handler_class
+            if self._lifecycle_state != "running" or handler is None:
+                raise RuntimeError("Pack v4 API server is not running")
+            binding = handler._current_panel_auth_binding()
+            if binding is None:
+                raise RuntimeError("current panel authentication capture is unavailable")
+            return self._panel_auth_manager.issue_login_code(binding)
 
     def _runtime_refresh_callback(
         self,

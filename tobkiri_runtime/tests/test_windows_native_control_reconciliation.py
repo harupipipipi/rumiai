@@ -208,7 +208,14 @@ def test_native_windows_prepare_post_status_and_replays(
         )
         assert status == 200
         assert initial["data"] == {"state": "succeeded", "value": "persisted"}
-        panel_session = auth.verify_session(cookie.split("=", 1)[1])
+        handler = server.handler_class
+        assert handler is not None
+        panel_auth_binding = handler._current_panel_auth_binding()
+        assert panel_auth_binding is not None
+        panel_session = auth.verify_session(
+            cookie.split("=", 1)[1],
+            panel_auth_binding,
+        )
         assert panel_session is not None
         operation = server._operation_journal.operation_status(
             request_id,

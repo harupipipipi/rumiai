@@ -167,6 +167,12 @@ class HostProfileControlSession:
             if user_data_root is not None
             else runtime_user_data_root()
         )
+        from .authority.v4 import AuthorityStore
+
+        with AuthorityStore(
+            self._user_data_root / "authority" / "v4.sqlite3"
+        ) as authority:
+            self._security_epoch = authority.security_epoch
 
         def load_catalog() -> Any:
             return (
@@ -213,10 +219,17 @@ class HostProfileControlSession:
 
         return ""
 
+    @property
+    def security_epoch(self) -> int:
+        """Return the Authority epoch captured for this Host control session."""
+
+        return self._security_epoch
+
     def assert_current(self) -> None:
         """Fence the session to the same catalog and an empty active pointer."""
 
         from .active_profile_store_v4 import ActiveProfileStore
+        from .authority.v4 import AuthorityStore
         from .profile_catalog_v4 import profile_catalog_digest
 
         if (
@@ -224,6 +237,11 @@ class HostProfileControlSession:
             is not None
         ):
             raise PackControlStaleRevision("Host active Profile is no longer empty")
+        with AuthorityStore(
+            self._user_data_root / "authority" / "v4.sqlite3"
+        ) as authority:
+            if authority.security_epoch != self._security_epoch:
+                raise PackControlStaleRevision("Host Authority epoch changed")
         if not hmac.compare_digest(
             profile_catalog_digest(self._catalog_loader()), self._catalog_digest
         ):

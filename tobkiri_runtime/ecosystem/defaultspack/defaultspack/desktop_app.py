@@ -743,7 +743,16 @@ def main(argv: list[str] | None = None) -> int:
 
     from defaultspack.native_webview import open_desktop_surface
 
-    login_code = str(auth.issue_login_code()["code"])
+    try:
+        login_code = str(server.issue_panel_login_code()["code"])
+    except RuntimeError:
+        server.stop()
+        _write_launch_event(
+            "panel_auth_capture_unavailable",
+            port=port,
+            url=url,
+        )
+        raise
     launch_url = f"{url}?{urllib.parse.urlencode({'code': login_code})}"
     surface_result = open_desktop_surface(launch_url, title="Tobkiri")
     _write_launch_event(
