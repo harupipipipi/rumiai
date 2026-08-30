@@ -1168,14 +1168,14 @@
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
       "size": 84550,
-      "sha256": "5c735dc1b7ee1f3fd5818ffbb8636e6676a5bc8cdcc194fd4521c2fb3ea645e6",
+      "sha256": "50c73f7566a93dd2f5b5dcb18d65fc45bab98b76bd41d719d321a067d54a41e6",
       "executable": false
     },
     {
       "path": "scripts/quality/evidence/pack_migration_proof.v1.json",
       "type": "regular-file",
       "size": 860991,
-      "sha256": "6337266a1fb651cf2dcff731ad23e9c8574b36c4c10213e6ceddb94045dc45a4",
+      "sha256": "b4d6d30efe062bb07229c8d25f689e6505e4d6b2a38723b809430d91fad414d6",
       "executable": false
     },
     {

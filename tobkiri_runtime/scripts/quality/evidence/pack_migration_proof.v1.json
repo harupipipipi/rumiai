@@ -12104,7 +12104,7 @@
   "source": {
     "attestation": "none",
     "authority": "evidence-only",
-    "content_digest": "sha256:88a51add6fb7fab40b8bdee84a3e53b343cf8d0811290bf65249fed0cc564a37",
+    "content_digest": "sha256:3df1ac32ba054723d460357c62136e3861eb8dcc145c397942b18a8d12c469a0",
     "feasibility_audit": {
       "semantically_reviewed": {
         "count": 45,
@@ -12330,7 +12330,7 @@
     "freshness_basis": "exact-input-digests-and-deterministic-recomputation",
     "generator_id": "tobkiri.quality.migration-proof-generator",
     "generator_version": "2.1.0",
-    "input_digest": "sha256:6274baf3c83eb3c3df5d44156ef998514d4d91936fd1fe98e2c8da93d6902720",
+    "input_digest": "sha256:8dab2cf44f72de8b1d0828e564195c16404ad6fc6fd2b68831e7086766c316d8",
     "input_paths": [
       "tobkiri_runtime/core_runtime/profile_definition_store_v4.py",
       "tobkiri_runtime/ecosystem/defaults/artifact-index.v4.json",
@@ -13267,7 +13267,7 @@
     ],
     "inputs": [
       {
-        "digest": "sha256:f15058ec1ea3b2acc737fdf5f105fa68e8abc7005eb003da6662b18954475a14",
+        "digest": "sha256:9209054dcdbff07e2914fff73612f6a2945314d0931d430f33211d6c647c2624",
         "kind": "profile-import-algorithm",
         "path": "tobkiri_runtime/core_runtime/profile_definition_store_v4.py"
       },
@@ -17933,7 +17933,7 @@
       "release-verified": 0,
       "semantically-reviewed": 45
     },
-    "observed_head_sha": "d0b515616316133f16f4ab1faf28218635b203e6",
+    "observed_head_sha": "59b8066df5dfa1c7159767aa0cf7fb37d77e3308",
     "pack_count": 143,
     "profile_collection_proof": {
       "identity_proof": {
@@ -17975,7 +17975,7 @@
       },
       "transaction": {
         "algorithm": "profile-definition-store.import_legacy_collection.v1",
-        "committed_store_digest": "sha256:ef3c540b8399bb6fb74bf583c1f20dfb77ad43ee97284473f74f8fa270a69419",
+        "committed_store_digest": "sha256:24bcbddf66feb10270116bf4760b492e13ba6638b2a6973564faa84a1a39d335",
         "failure_injection": {
           "state_write": {
             "committed_state": false,
@@ -17988,7 +17988,7 @@
         },
         "identity_proof_digest": "sha256:fafc1c5bd09b162423b231b7e7e344df80bf1793a87dafbb1b87929f12f1538f",
         "lossless": true,
-        "receipt_digest": "sha256:47c9e6ad0f7368a4d7f31d93bed6265b71283abe03c89c9227211d826c742c38",
+        "receipt_digest": "sha256:017ff1f888e3d5f36ff3a8154b60f9200e0ca0538345123781206bbb49f498c2",
         "replay_rejected_without_mutation": true,
         "restart_verified": true,
         "source_digest": "sha256:7c3e35630e2bd38d3dd6ca36bab31b8f93a8235143dec93a012b57392cb8fcd3",
