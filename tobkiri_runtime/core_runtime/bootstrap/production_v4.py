@@ -934,6 +934,30 @@ def _packvm_approval_provenance(
     return True, next(iter(approval_pack_ids), None)
 
 
+def _static_profile_pack_ids(
+    catalog: BundledCatalog,
+    profile_id: str,
+) -> frozenset[str]:
+    """Return the canonical Profile closure before optional Pack additions."""
+
+    definition = catalog.profiles.get(profile_id)
+    if definition is None:
+        raise AuthorityDenied("selected Profile is absent from the verified catalog")
+    selected = [str(item["pack_id"]) for item in definition["packs"]]
+    pending = list(selected)
+    while pending:
+        pack_id = pending.pop(0)
+        manifest = catalog.packs.get(pack_id)
+        if manifest is None:
+            raise AuthorityDenied("selected Profile dependency is absent from the verified catalog")
+        for dependency_id in manifest["requirements"]["pack_dependencies"]:
+            dependency = str(dependency_id)
+            if dependency not in selected:
+                selected.append(dependency)
+                pending.append(dependency)
+    return frozenset(selected)
+
+
 def _bridge_targets_by_outer_edge(
     edges: tuple[_CapturedPlanEdge, ...],
 ) -> dict[
@@ -1303,10 +1327,11 @@ def capture_production_dispatch(
     captured_dynamic_approvals: dict[str, str] = {}
     approved_host_binding_keys: set[tuple[str, str, str]] = set()
     dynamic_domain_ids: dict[tuple[str, str, str], str] = {}
+    static_profile_pack_ids = _static_profile_pack_ids(catalog, profile_id)
     optional_pack_ids = {
         str(item["pack_id"])
         for item in profile.get("packs", ())
-        if str(item["pack_id"]) not in catalog.packs
+        if str(item["pack_id"]) not in static_profile_pack_ids
     }
     pack_ids_by_artifact_digest: dict[str, set[str]] = {}
     for item in lock["effective_set"]:
