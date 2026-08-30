@@ -685,7 +685,7 @@ def resolve_default_profile(
         "Profile Shell artifact pin",
     )
     _require_optional_pin(
-        shell_request["executable_artifact_digest"],
+        shell_request.get("executable_artifact_digest"),
         str(selected_variant["entrypoint_digest"]),
         "Profile Shell executable pin",
     )

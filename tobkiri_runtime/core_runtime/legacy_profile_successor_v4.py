@@ -106,7 +106,7 @@ def build_legacy_profile_successor(
     )
     successor.update(
         {
-            "profile_api_version": "io.tobkiri.profile.v5",
+            "profile_api_version": "io.tobkiri.profile.v4",
             "profile_id": profile_id,
             "state": "needs_resolution",
             "mode": "interactive",
@@ -121,7 +121,6 @@ def build_legacy_profile_successor(
                 "provider_id": str(shell["provider_id"]),
                 "pack_id": str(shell["pack_id"]),
                 "artifact_digest": None,
-                "executable_artifact_digest": None,
                 "definition_revision": None,
                 "contract_id": str(shell["contract_id"]),
                 "platform": str(variant["platform"]),
