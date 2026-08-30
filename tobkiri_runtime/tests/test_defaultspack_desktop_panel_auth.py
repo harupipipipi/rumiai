@@ -13,6 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.conformance_support.host_contract import host_contract
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -58,11 +60,9 @@ def _write_host_contract(root: Path, secret: str) -> Path:
     path = root / "host_contract.json"
     path.write_text(
         json.dumps(
-            {
-                "schema_version": "tobkiri.host-contract.v1",
-                "profile_id": "defaults",
-                "values": {"panel_bootstrap_secret": secret},
-            }
+            host_contract(
+                values={"panel_bootstrap_secret": secret},
+            )
         ),
         encoding="utf-8",
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -32,6 +33,7 @@ from core_runtime.panel_auth import PanelAuthManager
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from tobkiri_host.backends import BackendRegistry
 from tobkiri_host.errors import BackendUnavailableError
+from tests.conformance_support.host_contract import host_contract
 
 
 pytestmark = pytest.mark.contract
@@ -104,7 +106,23 @@ def _authenticate(server: PackAPIServer) -> tuple[str, str, str]:
 def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
+    contract_path = user_data / "host_contract.json"
+    contract_path.write_text(
+        json.dumps(
+            host_contract(
+                profile_id=str(active.resolved.profile["profile_id"]),
+                profile_revision=str(active.resolved.plan["profile_revision"]),
+                activation_id=str(active.activation["activation_id"]),
+                plan_digest=str(active.resolved.plan["plan_digest"]),
+                values={"panel_bootstrap_secret": "desktop-bootstrap"},
+            )
+        ),
+        encoding="utf-8",
+    )
+    contract_path.chmod(0o600)
+    monkeypatch.setenv("TOBKIRI_HOST_CONTRACT_PATH", str(contract_path))
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
     from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
 
@@ -127,6 +145,35 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         dispatch_session=session,
         contract_bindings=bindings,
     )
+
+    def publish_current_host_contract() -> None:
+        """Model the Launcher writer at an explicit runtime refresh boundary."""
+
+        current = profile_capture.capture_active_profile()
+        contract_path.write_text(
+            json.dumps(
+                host_contract(
+                    profile_id=str(current.resolved.profile["profile_id"]),
+                    profile_revision=str(current.resolved.plan["profile_revision"]),
+                    activation_id=str(current.activation["activation_id"]),
+                    plan_digest=str(current.resolved.plan["plan_digest"]),
+                    values={"panel_bootstrap_secret": "desktop-bootstrap"},
+                )
+            ),
+            encoding="utf-8",
+        )
+        contract_path.chmod(0o600)
+
+    original_refresh = server._refresh_runtime_capture
+
+    def refresh(session: object | None = None) -> None:
+        publish_current_host_contract()
+        original_refresh(
+            session,  # type: ignore[arg-type]
+            lifecycle_generation=server._lifecycle_generation,
+        )
+
+    monkeypatch.setattr(server, "_refresh_runtime_capture", refresh)
     server.start()
     try:
         yield server, session, authority
@@ -800,6 +847,11 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     approval = approved["data"]["authority_approval"]
     assert approval["decision"] == "approved"
     assert authority.get_approval(approval["approval_id"]) is not None
+    handler = server.handler_class
+    assert handler is not None
+    refresh = handler._runtime_refresh
+    assert refresh is not None
+    monkeypatch.setattr(handler, "_runtime_refresh", staticmethod(lambda _session: None))
     status, activated, _ = post(
         "/api/runtime-surface/profile-change/activate",
         {
@@ -809,6 +861,23 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
     )
     assert status == 200, activated
     assert activated["data"]["state"] == "active"
+    contract_path = Path(os.environ["TOBKIRI_HOST_CONTRACT_PATH"])
+    contract_path.write_text(
+        json.dumps(
+            host_contract(
+                profile_id=str(activated["data"]["profile_id"]),
+                profile_revision=str(
+                    resolved["data"]["review"]["resolved_plan"]["profile_revision"]
+                ),
+                activation_id=str(activated["data"]["activation_id"]),
+                plan_digest=str(activated["data"]["plan_digest"]),
+                values={"panel_bootstrap_secret": "desktop-bootstrap"},
+            )
+        ),
+        encoding="utf-8",
+    )
+    contract_path.chmod(0o600)
+    refresh(None)
 
     status, refreshed_profile, _ = _request(
         server,

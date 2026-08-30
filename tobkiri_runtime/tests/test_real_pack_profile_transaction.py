@@ -111,6 +111,38 @@ def _capture():
         dispatch_session=session,
         contract_bindings=bindings,
     )
+
+    def publish_current_host_contract() -> None:
+        current = capture_default_profile()
+        contract_path = Path(os.environ["TOBKIRI_HOST_CONTRACT_PATH"])
+        payload = json.loads(contract_path.read_text(encoding="utf-8"))
+        payload.update(
+            {
+                "schema_version": "tobkiri.host-contract.v1",
+                "profile_id": str(current.resolved.profile["profile_id"]),
+                "profile_revision": str(current.resolved.plan["profile_revision"]),
+                "activation_id": str(current.activation["activation_id"]),
+                "plan_digest": str(current.resolved.plan["plan_digest"]),
+            }
+        )
+        replacement = contract_path.with_suffix(".replacement")
+        replacement.write_text(
+            json.dumps(payload, sort_keys=True),
+            encoding="utf-8",
+        )
+        replacement.chmod(0o600)
+        os.replace(replacement, contract_path)
+
+    original_refresh = server._refresh_runtime_capture
+
+    def refresh(session=None) -> None:
+        publish_current_host_contract()
+        original_refresh(
+            session,
+            lifecycle_generation=server._lifecycle_generation,
+        )
+
+    server._refresh_runtime_capture = refresh
     server.start()
     return server, active, manager
 
@@ -147,17 +179,21 @@ _close(server)
 """
 
 
-def _write_host_contract(user_data: Path) -> Path:
-    user_data.mkdir(mode=0o700)
+def _write_host_contract(user_data: Path, active: ActiveDefaultProfile) -> Path:
+    from tests.conformance_support.host_contract import host_contract
+
+    user_data.mkdir(mode=0o700, exist_ok=True)
     user_data.chmod(0o700)
     path = user_data / "host_contract.json"
     path.write_text(
         json.dumps(
-            {
-                "schema_version": "tobkiri.host-contract.v1",
-                "profile_id": "defaults",
-                "values": {"panel_bootstrap_secret": BOOTSTRAP_SECRET},
-            },
+            host_contract(
+                profile_id=str(active.resolved.profile["profile_id"]),
+                profile_revision=str(active.resolved.plan["profile_revision"]),
+                activation_id=str(active.activation["activation_id"]),
+                plan_digest=str(active.resolved.plan["plan_digest"]),
+                values={"panel_bootstrap_secret": BOOTSTRAP_SECRET},
+            ),
             sort_keys=True,
         ),
         encoding="utf-8",
@@ -479,7 +515,16 @@ def _exercise_real_pack_profile_transaction(
     """Exercise one Pack approval/activation transaction over real loopback HTTP."""
 
     user_data = tmp_path / "user-data"
-    contract_path = _write_host_contract(user_data)
+    from core_runtime.bootstrap.profile_capture import (
+        capture_default_profile,
+        prepare_default_profile_confirmation,
+    )
+
+    active = capture_default_profile(
+        base_dir=user_data,
+        confirmation=prepare_default_profile_confirmation(base_dir=user_data),
+    )
+    contract_path = _write_host_contract(user_data, active)
     log_dir = tmp_path / "logs"
     env = os.environ.copy()
     env.update(

@@ -514,15 +514,53 @@ def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
     return False
 
 
-def _require_host_panel_auth_manager() -> PanelAuthManager:
+def _capture_launch_host_contract(
+    dispatch_session: object | None,
+) -> Mapping[str, Any] | None:
+    """Capture the Launcher contract before any child-facing server starts."""
+
+    from core_runtime.host_contract import (
+        HostContractError,
+        capture_host_contract_from_file,
+    )
+
+    try:
+        return capture_host_contract_from_file(expected_identity=dispatch_session)
+    except HostContractError as error:
+        if dispatch_session is None:
+            # Reconfirmation/browsing mode has no execution identity to bind.
+            # Let the panel-auth boundary report the missing secret while the
+            # unauthenticated health surface remains available to diagnostics.
+            return None
+        raise RuntimeError(
+            "Launcher-owned Host contract does not match the active execution"
+        ) from error
+
+
+def _require_host_panel_auth_manager(
+    host_contract: Mapping[str, Any] | None = None,
+) -> PanelAuthManager:
     """Return the singleton bound to the exact Launcher-owned Host contract."""
-    from core_runtime.host_contract import host_contract_value
+    from core_runtime.host_contract import bind_host_contract, host_contract_value
     from core_runtime.panel_auth import get_panel_auth_manager
 
-    bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+    if host_contract is None:
+        bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+    else:
+        bootstrap_secret = host_contract_value(
+            "panel_bootstrap_secret",
+            contract=host_contract,
+        )
     if not bootstrap_secret:
         raise RuntimeError("Launcher-owned panel bootstrap secret is required")
-    manager = get_panel_auth_manager()
+    if host_contract is None:
+        manager = get_panel_auth_manager()
+    else:
+        # get_panel_auth_manager() also consults the Host contract when it
+        # lazily creates the singleton.  Keep that lookup on this immutable
+        # launch snapshot instead of reopening the shared contract file.
+        with bind_host_contract(host_contract):
+            manager = get_panel_auth_manager()
     if not manager.validate_bootstrap_secret(bootstrap_secret):
         raise RuntimeError("Panel auth manager is not bound to the active Host contract")
     return manager
@@ -568,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
             port=port,
             url=url,
         )
+    host_contract = _capture_launch_host_contract(dispatch_session)
     try:
         from domain.integrations.secrets import load_integration_secrets_into_env
 
@@ -594,7 +633,7 @@ def main(argv: list[str] | None = None) -> int:
             "auth_required": True,
         },
     )
-    auth = _require_host_panel_auth_manager()
+    auth = _require_host_panel_auth_manager(host_contract)
     server = PackAPIServer(
         host="127.0.0.1",
         port=int(port),
@@ -604,6 +643,7 @@ def main(argv: list[str] | None = None) -> int:
         contract_bindings=contract_bindings,
         web_mounts=web_mounts,
         packvm_lifecycle=packvm_lifecycle,
+        host_contract=host_contract,
     )
     _write_launch_event("server_start_attempt", port=port, url=url)
     try:

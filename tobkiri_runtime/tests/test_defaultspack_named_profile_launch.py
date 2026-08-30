@@ -119,6 +119,7 @@ def test_named_profile_launch_has_no_defaults_activation_prerequisite(
     from tests.conformance_support.packaged_profile import (
         packaged_profile_bundle_root,
     )
+    from tests.conformance_support.host_contract import host_contract
 
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
@@ -145,6 +146,22 @@ def test_named_profile_launch_has_no_defaults_activation_prerequisite(
     assert ActiveProfileStore(user_data).require(verify_snapshot=True).profile_id == (
         "profile-a"
     )
+    contract_path = user_data / "host_contract.json"
+    contract_path.write_text(
+        json.dumps(
+            host_contract(
+                profile_id=str(active.resolved.profile["profile_id"]),
+                profile_revision=str(active.resolved.plan["profile_revision"]),
+                activation_id=str(active.activation["activation_id"]),
+                plan_digest=str(active.resolved.plan["plan_digest"]),
+                values={
+                    "panel_bootstrap_secret": "named-profile-launch-test-secret"
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+    contract_path.chmod(0o600)
 
     environment = os.environ.copy()
     environment.update(
@@ -158,6 +175,7 @@ def test_named_profile_launch_has_no_defaults_activation_prerequisite(
             ),
             "PYTHONDONTWRITEBYTECODE": "1",
             "TOBKIRI_TEST_RUNTIME_ROOT": str(ROOT),
+            "TOBKIRI_HOST_CONTRACT_PATH": str(contract_path),
         }
     )
     process = subprocess.Popen(

@@ -28,6 +28,7 @@ from core_runtime.frontend_contract_routes import (
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from tobkiri_protocol.canonical import canonical_digest
+from tests.conformance_support.host_contract import host_contract_for_session
 
 
 def _hold_posix_lock(path_value: str, ready: object, release: object) -> None:
@@ -234,6 +235,7 @@ def test_32_pack_api_requests_return_503_and_server_restarts_after_lock_release(
         panel_auth_manager=auth,
         dispatch_session=dispatch,
         contract_bindings=(_binding(),),
+        host_contract=host_contract_for_session(dispatch),
     )
     server._operation_journal._open_retry_seconds = 0.1  # noqa: SLF001
     server._operation_journal.prepare_for_operation()

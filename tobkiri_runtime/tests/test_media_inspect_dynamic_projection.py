@@ -56,6 +56,7 @@ from tobkiri_host.models import (
     RuntimeEvidence,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tests.conformance_support.host_contract import host_contract_for_session
 
 
 def _bundle_root() -> Path:
@@ -289,6 +290,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         panel_auth_manager=PanelAuthManager(bootstrap_secret="media-test-secret"),
         dispatch_session=session,
         contract_bindings=bindings,
+        host_contract=host_contract_for_session(session),
         workspace_binding_resolver=lambda profile_id: capture_selected_workspace_binding(
             profile_id,
             user_data_root=user_data,

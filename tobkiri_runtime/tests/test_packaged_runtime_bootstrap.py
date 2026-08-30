@@ -269,6 +269,26 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
         refresh_entered.set()
         assert release_refresh.wait(timeout=coordination_timeout_seconds)
         try:
+            from tests.conformance_support.host_contract import host_contract
+
+            active = capture_default_profile()
+            contract_path = Path(os.environ["RUMI_USER_DATA"]) / "host_contract.json"
+            contract_path.write_text(
+                json.dumps(
+                    host_contract(
+                        profile_id=str(active.resolved.profile["profile_id"]),
+                        profile_revision=str(active.resolved.plan["profile_revision"]),
+                        activation_id=str(active.activation["activation_id"]),
+                        plan_digest=str(active.resolved.plan["plan_digest"]),
+                        values={
+                            "panel_bootstrap_secret": "first-request-bootstrap"
+                        },
+                    )
+                ),
+                encoding="utf-8",
+            )
+            contract_path.chmod(0o600)
+            monkeypatch.setenv("TOBKIRI_HOST_CONTRACT_PATH", str(contract_path))
             original_refresh(
                 server,
                 activated_session,
@@ -413,12 +433,30 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     """A fresh Host persists one exact Defaults activation and reloads it."""
     user_data = tmp_path / "clean-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     from core_runtime.bootstrap.profile_capture import (
         prepare_default_profile_confirmation,
     )
 
     first = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     restarted = capture_default_profile()
+
+    from tests.conformance_support.host_contract import host_contract
+
+    contract_path = user_data / "host_contract.json"
+    contract_path.write_text(
+        json.dumps(
+            host_contract(
+                profile_id=str(first.resolved.profile["profile_id"]),
+                profile_revision=str(first.resolved.plan["profile_revision"]),
+                activation_id=str(first.activation["activation_id"]),
+                plan_digest=str(first.resolved.plan["plan_digest"]),
+            )
+        ),
+        encoding="utf-8",
+    )
+    contract_path.chmod(0o600)
+    monkeypatch.setenv("TOBKIRI_HOST_CONTRACT_PATH", str(contract_path))
 
     assert first.activation == restarted.activation
     assert first.resolved.plan == restarted.resolved.plan

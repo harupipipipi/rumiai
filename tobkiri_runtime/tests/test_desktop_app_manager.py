@@ -15,6 +15,7 @@ import pytest
 
 from core_runtime.desktop_app_manager import DesktopAppManager
 import core_runtime.desktop_app_manager as desktop_app_manager
+from tests.conformance_support.host_contract import host_contract
 
 
 @pytest.fixture
@@ -86,11 +87,10 @@ class TestLaunchAppArguments:
 
         with mock.patch.dict(os.environ, {"RUMI_API_TOKEN": "ambient-token"}):
             with bind_host_contract(
-                {
-                    "schema_version": "tobkiri.host-contract.v1",
-                    "profile_id": "default",
-                    "values": {"desktop_api_token": "secret-token-xyz"},
-                }
+                host_contract(
+                    profile_id="default",
+                    values={"desktop_api_token": "secret-token-xyz"},
+                )
             ):
                 result = manager.launch_app("test-pack-001")
 
@@ -126,11 +126,10 @@ class TestLaunchAppArguments:
 
         with mock.patch.dict(os.environ, {"RUMI_API_TOKEN": "ambient-token"}):
             with bind_host_contract(
-                {
-                    "schema_version": "tobkiri.host-contract.v1",
-                    "profile_id": "default",
-                    "values": {"desktop_api_token": "secret-token-xyz"},
-                }
+                host_contract(
+                    profile_id="default",
+                    values={"desktop_api_token": "secret-token-xyz"},
+                )
             ):
                 result = manager.launch_app("test-pack-001")
 
@@ -341,11 +340,10 @@ class TestLaunchAppArguments:
 
         with mock.patch.dict(os.environ, {"RUMI_API_TOKEN": "ambient-token"}):
             with bind_host_contract(
-                {
-                    "schema_version": "tobkiri.host-contract.v1",
-                    "profile_id": "default",
-                    "values": {"desktop_api_token": "secret-token-xyz"},
-                }
+                host_contract(
+                    profile_id="default",
+                    values={"desktop_api_token": "secret-token-xyz"},
+                )
             ):
                 result = manager.launch_app("test-pack-001")
 

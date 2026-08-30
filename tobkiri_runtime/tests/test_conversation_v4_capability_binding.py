@@ -20,6 +20,7 @@ from core_runtime.frontend_contract_routes import (
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+from tests.conformance_support.host_contract import host_contract_for_session
 
 
 pytestmark = pytest.mark.contract
@@ -215,6 +216,7 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         ),
         dispatch_session=session,
         contract_bindings=(capability_binding, catalog_binding),
+        host_contract=host_contract_for_session(session),
     )
     server.start()
     try:
@@ -433,6 +435,7 @@ def test_unready_conversation_is_omitted_without_blocking_packapi_start(
                 targets=(catalog,),
             ),
         ),
+        host_contract=host_contract_for_session(session),
     )
 
     server.start()

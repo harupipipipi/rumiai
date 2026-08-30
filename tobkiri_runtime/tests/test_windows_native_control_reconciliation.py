@@ -29,6 +29,7 @@ from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from core_runtime.secure_sqlite_path import SecurePathError, secure_parent
 from tobkiri_protocol.canonical import canonical_digest
+from tests.conformance_support.host_contract import host_contract_for_session
 
 
 pytestmark = pytest.mark.skipif(
@@ -182,6 +183,7 @@ def test_native_windows_prepare_post_status_and_replays(
         panel_auth_manager=auth,
         dispatch_session=dispatch,
         contract_bindings=(binding,),
+        host_contract=host_contract_for_session(dispatch),
     )
     server._operation_journal.prepare_for_operation()
     server.start()
@@ -228,6 +230,7 @@ def test_native_windows_prepare_post_status_and_replays(
         panel_auth_manager=auth,
         dispatch_session=dispatch,
         contract_bindings=(binding,),
+        host_contract=host_contract_for_session(dispatch),
     )
     restarted.start()
     restart_headers = {**headers, "Origin": f"http://127.0.0.1:{restarted.port}"}

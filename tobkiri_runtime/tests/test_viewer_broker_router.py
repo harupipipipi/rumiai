@@ -17,6 +17,8 @@ if str(ROOT) not in sys.path:
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+from tests.conformance_support.host_contract import host_contract
+
 
 def test_debug_status_rejects_fake_broker_with_same_bearer_token():
     import hashlib
@@ -147,14 +149,13 @@ def test_viewer_broker_client_reads_env_url_and_token(monkeypatch):
     monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_TOKEN", "ambient-token")
 
     with bind_host_contract(
-        {
-            "schema_version": "tobkiri.host-contract.v1",
-            "profile_id": "default",
-            "values": {
+        host_contract(
+            profile_id="default",
+            values={
                 "viewer_broker_url": "http://127.0.0.1:8770",
                 "viewer_broker_token": "secret-token",
             },
-        }
+        )
     ):
         client = ViewerBrokerClient.from_environment()
 
@@ -253,11 +254,10 @@ def test_viewer_broker_client_does_not_fallback_when_explicit_url_pair_is_incomp
     monkeypatch.setenv("RUMI_VIEWER_HOST_BROKER_CONNECTION", str(connection))
 
     with bind_host_contract(
-        {
-            "schema_version": "tobkiri.host-contract.v1",
-            "profile_id": "default",
-            "values": {"viewer_broker_url": "http://127.0.0.1:8771"},
-        }
+        host_contract(
+            profile_id="default",
+            values={"viewer_broker_url": "http://127.0.0.1:8771"},
+        )
     ):
         assert ViewerBrokerClient.from_environment().available() is False
 

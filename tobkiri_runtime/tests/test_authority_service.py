@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conformance_support.host_contract import host_contract
+
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -29,15 +31,14 @@ def _bind_canonical_host_contract(tmp_path, monkeypatch):
     contract_path = user_data / "host_contract.json"
     contract_path.write_text(
         json.dumps(
-            {
-                "schema_version": "tobkiri.host-contract.v1",
-                "profile_id": "profile:work",
-                "values": {
+            host_contract(
+                profile_id="profile:work",
+                values={
                     "panel_bootstrap_secret": (
                         "panel-bootstrap-test-secret-" + ("p" * 32)
                     )
                 },
-            }
+            )
         ),
         encoding="utf-8",
     )

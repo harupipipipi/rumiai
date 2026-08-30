@@ -6,6 +6,7 @@ import hashlib
 import heapq
 import hmac
 import logging
+import os
 import re
 import threading
 import time
@@ -44,7 +45,13 @@ from .frontend_contract_routes import (
     resolve_contract_route,
 )
 from tobkiri_protocol.canonical import canonical_digest
-from .host_contract import host_contract_value
+from .host_contract import (
+    HostContractError,
+    capture_host_contract,
+    capture_host_contract_from_file,
+    host_contract_value,
+    validate_host_contract,
+)
 from .panel_auth import PanelAuthManager, get_panel_auth_manager
 from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
 from .authority.v4_models import AuthorityDenied
@@ -75,6 +82,8 @@ _PUBLIC_ERROR_STATUS: Mapping[str, int] = {
     RuntimeSurfaceErrorCode.TIMEOUT.value: 504,
     RuntimeSurfaceErrorCode.API_FAILURE.value: 503,
 }
+
+_HOST_CONTRACT_UNSET = object()
 
 _ERROR_CODE_ALIASES: Mapping[str, str] = {
     "denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
@@ -661,6 +670,7 @@ class PackAPIHandler(
     _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
     _packvm_lifecycle: PackVMLifecyclePort | None = None
     _workspace_binding_resolver: WorkspaceBindingResolver | None = None
+    _host_contract_snapshot: Mapping[str, Any] | None = None
     _instance_web_mounts: tuple[WebMountEntry, ...] | None = None
     app_lifecycle_manager: LifecyclePort | None = None
     _runtime_port = 8765
@@ -684,6 +694,7 @@ class PackAPIHandler(
         runtime_refresh: Callable[[DispatchSession | None], None] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
+        host_contract: Mapping[str, Any] | None = None,
     ) -> type["PackAPIHandler"]:
         """Create an isolated handler bound to one captured runtime session."""
 
@@ -697,6 +708,20 @@ class PackAPIHandler(
         bound_runtime_refresh = runtime_refresh
         bound_workspace_binding_resolver = workspace_binding_resolver
         bound_packvm_lifecycle = packvm_lifecycle
+        bound_host_contract = (
+            validate_host_contract(
+                host_contract,
+                expected_identity=(
+                    bound_dispatch
+                    if bound_dispatch is not None
+                    and getattr(bound_dispatch, "session_kind", None)
+                    != "host_profile_control"
+                    else None
+                ),
+            )
+            if host_contract is not None
+            else None
+        )
 
         class BoundPackAPIHandler(PackAPIHandler):
             _panel_auth_manager = bound_panel_auth
@@ -706,6 +731,7 @@ class PackAPIHandler(
             _contract_replay_guard = bound_replay_guard
             _operation_journal = bound_operation_journal
             _packvm_lifecycle = bound_packvm_lifecycle
+            _host_contract_snapshot = bound_host_contract
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
                 staticmethod(bound_runtime_refresh)
@@ -751,6 +777,18 @@ class PackAPIHandler(
 
         BoundPackAPIHandler.__name__ = "PackAPIHandlerV4Instance"
         return BoundPackAPIHandler
+
+    def handle(self) -> None:
+        """Serve this connection from one immutable Host contract snapshot."""
+
+        snapshot = self._host_contract_snapshot
+        if snapshot is None:
+            super().handle()
+            return
+        from .host_contract import bind_host_contract
+
+        with bind_host_contract(snapshot):
+            super().handle()
 
     def log_message(self, format: str, *args: object) -> None:
         """Write request logs after removing bootstrap query material."""
@@ -1900,7 +1938,26 @@ class PackAPIHandler(
             if hasattr(self, "headers")
             else ""
         )
-        bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+        snapshot = self.__class__._host_contract_snapshot
+        bootstrap_secret = (
+            host_contract_value(
+                "panel_bootstrap_secret",
+                contract=snapshot,
+                expected_identity=(
+                    self.__class__._dispatch_session
+                    if self.__class__._dispatch_session is not None
+                    and getattr(
+                        self.__class__._dispatch_session,
+                        "session_kind",
+                        None,
+                    )
+                    != "host_profile_control"
+                    else None
+                ),
+            )
+            if snapshot is not None
+            else ""
+        )
         if challenge and bootstrap_secret:
             health["desktop_challenge_response"] = hmac.new(
                 bootstrap_secret.encode("utf-8"),
@@ -2397,6 +2454,7 @@ class PackAPIServer:
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
+        host_contract: Mapping[str, Any] | None = None,
     ) -> None:
         self.config = RuntimeHTTPConfig.verify(host, port)
         self.host = self.config.host
@@ -2411,6 +2469,11 @@ class PackAPIServer:
         self._contract_routes = contract_binding_map(contract_bindings)
         self._web_mounts = web_mounts
         self._workspace_binding_resolver = workspace_binding_resolver
+        self._host_contract_snapshot = (
+            validate_host_contract(host_contract)
+            if host_contract is not None
+            else None
+        )
         if packvm_lifecycle is None:
             from .packvm_lifecycle_v4 import PackVMLifecycleV4
 
@@ -2464,6 +2527,7 @@ class PackAPIServer:
                     ),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
+                    host_contract=self._host_contract_snapshot,
                 )
                 server = _PackThreadingHTTPServer((self.host, self.port), handler)
             except Exception:
@@ -2515,23 +2579,63 @@ class PackAPIServer:
     def _validate_contract_runtime(self) -> None:
         """Verify the exact capture and route ownership before binding a socket."""
 
-        self._validate_contract_capture(self._dispatch_session, self._contract_routes)
+        self._host_contract_snapshot = self._validate_contract_capture(
+            self._dispatch_session,
+            self._contract_routes,
+        )
 
     def _validate_contract_capture(
         self,
         session: DispatchSession | None,
         routes: Mapping[tuple[str, str], FrontendContractBinding],
-    ) -> None:
+        *,
+        host_contract: object = _HOST_CONTRACT_UNSET,
+    ) -> Mapping[str, Any] | None:
         """Validate a complete session/map pair before publishing either value."""
 
+        snapshot = (
+            getattr(self, "_host_contract_snapshot", None)
+            if host_contract is _HOST_CONTRACT_UNSET
+            else host_contract
+        )
+        if snapshot is not None and not isinstance(snapshot, Mapping):
+            raise RuntimeError("Host contract snapshot is invalid")
         if not routes:
-            return
+            if snapshot is None:
+                return None
+            expected_session_identity: DispatchSession | None = None
+            if session is not None:
+                session.assert_current()
+                if getattr(session, "session_kind", None) != "host_profile_control":
+                    expected_session_identity = session
+            try:
+                return validate_host_contract(
+                    snapshot,
+                    expected_identity=expected_session_identity,
+                )
+            except HostContractError as error:
+                raise RuntimeError("Host contract snapshot is invalid") from error
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
         host_profile_control = (
             getattr(session, "session_kind", None) == "host_profile_control"
         )
+        expected_identity: DispatchSession | None = (
+            None if host_profile_control else session
+        )
+        try:
+            if snapshot is None and not host_profile_control:
+                snapshot = capture_host_contract(expected_identity=expected_identity)
+            elif snapshot is not None:
+                snapshot = validate_host_contract(
+                    snapshot,
+                    expected_identity=expected_identity,
+                )
+        except HostContractError as error:
+            raise RuntimeError(
+                "the captured execution requires a Host contract bound to the capture"
+            ) from error
         if host_profile_control:
             if (
                 getattr(session, "execution_profile_id", object()) is not None
@@ -2586,6 +2690,7 @@ class PackAPIServer:
                 root = mount["web_root"]
                 if not root.is_dir() or not (root / mount["index_file"]).is_file():
                     raise RuntimeError("frontend contract web mount is unavailable")
+        return snapshot
 
     def _refresh_runtime_capture(
         self,
@@ -2617,6 +2722,7 @@ class PackAPIServer:
 
         session = activated_session
         server_captured_session = session is None
+        host_contract = getattr(self, "_host_contract_snapshot", None)
         try:
             if session is None:
                 active = capture_active_profile()
@@ -2646,7 +2752,39 @@ class PackAPIServer:
                     _load_production_capture_inputs()
                 )
             routes = contract_binding_map(bindings)
-            self._validate_contract_capture(session, routes)
+            if routes:
+                host_profile_control = (
+                    getattr(session, "session_kind", None)
+                    == "host_profile_control"
+                )
+                expected_identity = (
+                    None
+                    if host_profile_control
+                    else session
+                )
+                if not host_profile_control and os.getenv(
+                    "TOBKIRI_HOST_CONTRACT_PATH", ""
+                ).strip():
+                    # A lifecycle refresh is an explicit authority boundary:
+                    # capture the Launcher-published replacement once, then
+                    # bind the resulting snapshot to the new handler.
+                    host_contract = capture_host_contract_from_file(
+                        expected_identity=expected_identity
+                    )
+                elif not host_profile_control and host_contract is None:
+                    host_contract = capture_host_contract_from_file(
+                        expected_identity=expected_identity
+                    )
+                elif host_contract is not None:
+                    host_contract = validate_host_contract(
+                        host_contract,
+                        expected_identity=expected_identity,
+                    )
+            host_contract = self._validate_contract_capture(
+                session,
+                routes,
+                host_contract=host_contract,
+            )
         except Exception:
             self._close_unpublished_session(session, base_session=base_session)
             raise
@@ -2674,11 +2812,13 @@ class PackAPIServer:
                     ),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
+                    host_contract=host_contract,
                 )
                 handler._runtime_port = self.port
                 self._dispatch_session = session
                 self._dispatch_session_owned_by_server = server_captured_session
                 self._contract_routes = routes
+                self._host_contract_snapshot = host_contract
                 self.handler_class = handler
                 if self.server is not None:
                     self.server.RequestHandlerClass = handler
@@ -2829,6 +2969,7 @@ def initialize_pack_api_server(
     web_mounts: tuple[WebMountEntry, ...] | None = None,
     workspace_binding_resolver: WorkspaceBindingResolver | None = None,
     packvm_lifecycle: PackVMLifecyclePort | None = None,
+    host_contract: Mapping[str, Any] | None = None,
 ) -> PackAPIServer:
     """Replace the process-local server with one verified v4 instance."""
 
@@ -2845,6 +2986,7 @@ def initialize_pack_api_server(
         web_mounts=web_mounts,
         workspace_binding_resolver=workspace_binding_resolver,
         packvm_lifecycle=packvm_lifecycle,
+        host_contract=host_contract,
     )
     server.start()
     _api_server = server

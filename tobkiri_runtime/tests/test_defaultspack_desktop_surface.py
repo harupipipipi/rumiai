@@ -65,6 +65,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             capture_default_profile,
             prepare_default_profile_confirmation,
         )
+        from tests.conformance_support.host_contract import host_contract
 
         with patch.dict(
             os.environ,
@@ -74,22 +75,24 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             },
             clear=False,
         ):
-            capture_default_profile(
+            active = capture_default_profile(
                 confirmation=prepare_default_profile_confirmation()
             )
         user_data.chmod(0o700)
         contract_path = user_data / "host_contract.json"
         contract_path.write_text(
             json.dumps(
-                {
-                    "schema_version": "tobkiri.host-contract.v1",
-                    "profile_id": "defaults",
-                    "values": {
+                host_contract(
+                    profile_id=str(active.resolved.profile["profile_id"]),
+                    profile_revision=str(active.resolved.plan["profile_revision"]),
+                    activation_id=str(active.activation["activation_id"]),
+                    plan_digest=str(active.resolved.plan["plan_digest"]),
+                    values={
                         "panel_bootstrap_secret": (
                             TestDefaultspackDesktopSurface._PANEL_BOOTSTRAP_SECRET
                         )
                     },
-                }
+                )
             ),
             encoding="utf-8",
         )
