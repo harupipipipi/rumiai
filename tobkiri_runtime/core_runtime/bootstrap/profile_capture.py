@@ -164,7 +164,11 @@ def host_profile_catalog(
         not definitions.list_profiles(include_tombstones=True)
         and legacy_collection.is_file()
     ):
-        definitions.import_legacy_collection(legacy_collection)
+        definitions.import_legacy_collection(
+            legacy_collection,
+            migration_catalog=bundled,
+        )
+    definitions.migrate_legacy_successors(bundled)
     definitions.repair_legacy_display_names()
     try:
         definitions.bootstrap_defaults(bundled.profiles["defaults"])

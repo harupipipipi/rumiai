@@ -484,6 +484,7 @@ class ProfileDefinitionStore:
         *,
         legacy_workspace_root: Path | None = None,
         copy_workspaces: bool = True,
+        migration_catalog: object | None = None,
         expected_store_generation: int | None = None,
     ) -> LegacyMigrationResult:
         """Import every legacy startup Profile without collapsing the collection.
@@ -591,6 +592,7 @@ class ProfileDefinitionStore:
                 (int(entry["order"]) for entry in state["profiles"]),
                 default=-1,
             ) + 1
+            publication_time = self._now()
             for offset, (legacy_id, candidate_id, document, created, updated) in enumerate(
                 prepared
             ):
@@ -604,19 +606,34 @@ class ProfileDefinitionStore:
                     "command_digest": None,
                 }
                 revision = canonical_digest(document)
-                state["profiles"].append(
-                    _new_entry(
-                        candidate_id,
-                        document,
-                        revision=revision,
-                        order=order_offset + offset,
-                        now=created,
-                        updated_at=updated,
-                        legacy_ids=(legacy_id,),
-                    )
+                entry = _new_entry(
+                    candidate_id,
+                    document,
+                    revision=revision,
+                    order=order_offset + offset,
+                    now=created,
+                    updated_at=updated,
+                    legacy_ids=(legacy_id,),
                 )
+                if migration_catalog is not None:
+                    successor = self._legacy_v4_successor(
+                        item=profiles[offset],
+                        profile_id=candidate_id,
+                        catalog=migration_catalog,
+                        source_path=(
+                            str(source_path)
+                            if source_path
+                            else "legacy/startup_profiles.json"
+                        ),
+                    )
+                    _append_profile_successor(
+                        entry,
+                        successor,
+                        now=publication_time,
+                    )
+                state["profiles"].append(entry)
             state["generation"] += len(prepared)
-            state["updated_at"] = self._now()
+            state["updated_at"] = publication_time
             state["legacy"].update(
                 {
                     "source_digest": source_digest,
@@ -671,6 +688,73 @@ class ProfileDefinitionStore:
             active_profile_id=legacy_active,
             last_launched_profile_id=legacy_last,
             copied_workspaces=copied,
+        )
+
+    def migrate_legacy_successors(self, catalog: object) -> int:
+        """Append v4 successors to previously imported opaque legacy entries."""
+
+        with self._locked():
+            state = self._read_state()
+            legacy = state.get("legacy")
+            source = (
+                legacy.get("source_document")
+                if isinstance(legacy, Mapping)
+                else None
+            )
+            repaired: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for entry in state["profiles"]:
+                if entry["tombstone"] or not entry.get("legacy_ids"):
+                    continue
+                current = entry["revisions"][-1].get("profile")
+                if not isinstance(current, Mapping) or current.get(
+                    "profile_api_version"
+                ) in {"io.tobkiri.profile.v4", "io.tobkiri.profile.v5"}:
+                    continue
+                legacy_id = str(entry["legacy_ids"][0])
+                item = _legacy_source_profile(source, legacy_id) or current
+                source_path = (
+                    legacy.get("source_path")
+                    if isinstance(legacy, Mapping)
+                    else None
+                )
+                successor = self._legacy_v4_successor(
+                    item=item,
+                    profile_id=str(entry["profile_id"]),
+                    catalog=catalog,
+                    source_path=(
+                        str(source_path)
+                        if source_path
+                        else "legacy/startup_profiles.json"
+                    ),
+                )
+                repaired.append((entry, successor))
+            if not repaired:
+                return 0
+            now = self._now()
+            for entry, successor in repaired:
+                _append_profile_successor(entry, successor, now=now)
+            state["generation"] += len(repaired)
+            state["updated_at"] = now
+            self._write_state(state)
+            return len(repaired)
+
+    @staticmethod
+    def _legacy_v4_successor(
+        *,
+        item: Mapping[str, Any],
+        profile_id: str,
+        catalog: object,
+        source_path: str,
+    ) -> dict[str, Any]:
+        """Build a successor without expanding the registry module."""
+
+        from .legacy_profile_successor_v4 import build_legacy_profile_successor
+
+        return build_legacy_profile_successor(
+            item,
+            profile_id=profile_id,
+            catalog=catalog,
+            source_path=source_path,
         )
 
     def _stage_legacy_workspaces(
@@ -1096,6 +1180,28 @@ def _revision_record(
     }
 
 
+def _append_profile_successor(
+    entry: dict[str, Any],
+    profile: Mapping[str, Any],
+    *,
+    now: int,
+) -> None:
+    """Append one immutable successor inside a caller-owned transaction."""
+
+    parent_revision = str(entry["current_revision"])
+    revision = canonical_digest(profile)
+    entry["current_revision"] = revision
+    entry["revisions"].append(
+        _revision_record(
+            profile,
+            revision=revision,
+            parent_revision=parent_revision,
+            now=now,
+        )
+    )
+    entry["updated_at"] = now
+
+
 def _profile_document(
     profile: Mapping[str, Any],
     *,
@@ -1250,6 +1356,31 @@ def _legacy_ref(value: object, id_map: Mapping[str, str]) -> str | None:
     if value is None:
         return None
     return id_map.get(str(value), str(value) if str(value) in id_map.values() else None)
+
+
+def _legacy_source_profile(
+    source: object,
+    legacy_id: str,
+) -> Mapping[str, Any] | None:
+    """Find the exact audited source object for one imported legacy identity."""
+
+    if not isinstance(source, Mapping):
+        return None
+    profiles = source.get("profiles")
+    if isinstance(profiles, Mapping):
+        value = profiles.get(legacy_id)
+        return value if isinstance(value, Mapping) else None
+    if not isinstance(profiles, list):
+        return None
+    return next(
+        (
+            item
+            for item in profiles
+            if isinstance(item, Mapping)
+            and str(item.get("profile_id") or item.get("id") or "") == legacy_id
+        ),
+        None,
+    )
 
 
 def _guess_workspace_root(source_path: Path | None) -> Path | None:

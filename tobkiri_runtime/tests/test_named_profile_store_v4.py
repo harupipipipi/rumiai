@@ -34,6 +34,7 @@ from core_runtime.runtime_surface_v4 import (
     RuntimeSurfaceService,
 )
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
+from tobkiri_protocol.validation import validate_document
 
 
 def _definition(profile_id: str, name: str) -> dict[str, object]:
@@ -408,6 +409,104 @@ def test_localized_legacy_names_are_lossless_deterministic_and_restart_safe(
     for profile, source in zip(profiles, legacy["profiles"], strict=True):
         assert profile.profile["legacy_display_name"] == source["display_name"]
         assert profile.profile["display_name"] == source["display_name"]["ja"]
+
+
+def test_real_disk_legacy_profiles_publish_review_only_v4_successors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Migrate the three observed macOS Profiles without selecting one."""
+
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    settings = user_data / "settings"
+    settings.mkdir(parents=True)
+    legacy = _legacy_runtime_collection()
+    settings.joinpath("startup_profiles.json").write_bytes(
+        canonical_json(legacy) + b"\n"
+    )
+    identity_files = (
+        "packs/closure.json",
+        "conversation/history.json",
+        "credentials/provider.ref",
+    )
+    for source in legacy["profiles"]:
+        profile_id = str(source["profile_id"])
+        workspace = user_data / "profiles" / profile_id
+        for relative in identity_files:
+            path = workspace / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{relative}:{profile_id}", encoding="utf-8")
+    legacy_pointer = user_data / "profiles" / "active_profile.json"
+    legacy_pointer.write_bytes(
+        canonical_json(
+            {"version": 1, "active_profile_id": "default-profile"}
+        )
+        + b"\n"
+    )
+
+    preexisting = ProfileDefinitionStore(user_data)
+    preexisting.import_legacy_collection(settings / "startup_profiles.json")
+    opaque = preexisting.get_profile("new-custom-profile")
+    assert opaque is not None
+    assert "profile_api_version" not in opaque.profile
+    assert ActiveProfileStore(user_data).load() is None
+
+    catalog = host_profile_catalog()
+    definitions = ProfileDefinitionStore(user_data)
+    expected_ids = (
+        "default-profile",
+        "new-custom-profile",
+        "new-custom-profile-2",
+    )
+    assert tuple(
+        profile_id for profile_id in expected_ids if profile_id in catalog.profiles
+    ) == expected_ids
+    assert definitions.legacy_state()["source_document"] == legacy
+    assert definitions.legacy_state()["active_profile_id"] == "default-profile"
+    assert ActiveProfileStore(user_data).load() is None
+    assert legacy_pointer.is_file()
+    assert not (user_data / "authority" / "v4.sqlite3").exists()
+
+    snapshot = definitions.snapshot()
+    entries = {
+        str(entry["profile_id"]): entry
+        for entry in snapshot["profiles"]
+        if entry["profile_id"] in expected_ids
+    }
+    for source in legacy["profiles"]:
+        profile_id = str(source["profile_id"])
+        stored = definitions.get_profile(profile_id)
+        assert stored is not None
+        assert stored.profile["profile_api_version"] == "io.tobkiri.profile.v4"
+        assert stored.profile["profile_id"] == profile_id
+        assert stored.profile["display_name"] == source["display_name"]["ja"]
+        assert stored.profile["state"] == "needs_resolution"
+        assert [
+            item["pack_id"] for item in stored.profile["packs"]
+        ] == ["defaultspack", "runtime.tauri.application.default"]
+        assert stored.profile["authority_references"] == []
+        assert stored.profile["profile_authority_snapshot_digest"] is None
+        validate_document(stored.profile, "profile")
+
+        revisions = entries[profile_id]["revisions"]
+        assert len(revisions) == 2
+        assert revisions[1]["parent_revision"] == revisions[0]["profile_revision"]
+        assert revisions[0]["profile"]["legacy_display_name"] == source[
+            "display_name"
+        ]
+        assert revisions[0]["profile"]["display_name"] == source[
+            "display_name"
+        ]["ja"]
+        for relative in identity_files:
+            migrated = user_data / "workspaces" / profile_id / relative
+            assert migrated.read_text(encoding="utf-8") == f"{relative}:{profile_id}"
+
+    confirmation = prepare_profile_confirmation("new-custom-profile")
+    assert confirmation["profile_id"] == "new-custom-profile"
+    assert confirmation["operation_id"] == "profile.activate"
+    assert ActiveProfileStore(user_data).load() is None
+    assert not (user_data / "authority" / "v4.sqlite3").exists()
 
 
 def test_missing_optional_display_name_is_a_restart_safe_noop(
