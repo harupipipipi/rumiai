@@ -47,6 +47,9 @@ CANONICAL_PACK_FILES = {
     "rumi-file-inspect.pack.v4.json": (
         ROOT / "ecosystem" / "rumi_file_inspect_pack" / "pack.v4.json"
     ),
+    "rumi_media_inspect_service_pack.pack.v4.json": (
+        ROOT / "ecosystem" / "rumi_media_inspect_service_pack" / "pack.v4.json"
+    ),
     "rumi-host-authority-bridge.pack.v4.json": (
         ROOT / "ecosystem" / "rumi_host_authority_bridge_pack" / "pack.v4.json"
     ),
