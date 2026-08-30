@@ -20,6 +20,7 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
     BundleIntegrityError,
     BundledCatalog,
     ProfileResolutionDenied,
+    project_runtime_launch_selector,
     resolve_default_profile,
 )
 from tobkiri_protocol.canonical import canonical_digest
@@ -313,6 +314,18 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
         "executable_artifact_digest": resolved.profile["shell"]["executable_artifact_digest"],
         "definition_digest": canonical_digest(application),
     }
+    selected_variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
+    assert resolved.plan["launch_contribution"] == {
+        "provider_id": "runtime.tauri.application.default",
+        "contract_id": "runtime.tauri.application.v1",
+        "operation_id": "launch",
+        "platform": selected_variant["platform"],
+        "architecture": selected_variant["architecture"],
+        "artifact_digest": selected_variant["artifact_digest"],
+        "relative_path": selected_variant["relative_path"],
+        "entrypoint": selected_variant["entrypoint"],
+    }
+    assert "launch_contribution" not in resolved.lock
     for field in (
         "profile_definition_digest",
         "catalog_revision",
@@ -368,6 +381,74 @@ def test_lock_plan_and_activation_bind_the_complete_canonical_definition(
     assert activation["bundle_digest"] == expected_bundle_digest
     assert activation["lock_digest"] == resolved.lock["lock_digest"]
     assert activation["closure_digest"] == resolved.plan["closure_digest"]
+    selector = project_runtime_launch_selector(store.load_active_snapshot())
+    assert selector == {
+        "selector_api_version": "io.tobkiri.runtime-launch-selector.v1",
+        "profile_id": resolved.plan["profile_id"],
+        "profile_revision": resolved.plan["profile_revision"],
+        "activation_id": activation["activation_id"],
+        "plan_digest": resolved.plan["plan_digest"],
+        "launch_contribution": resolved.plan["launch_contribution"],
+    }
+
+
+def test_application_launch_contribution_must_be_unique() -> None:
+    catalog = _catalog()
+    application = copy.deepcopy(catalog.packs["runtime.tauri.application.default"])
+    application["functions"].append(copy.deepcopy(application["functions"][0]))
+    ambiguous = replace(
+        catalog,
+        packs={**catalog.packs, "runtime.tauri.application.default": application},
+    )
+
+    with pytest.raises(
+        ProfileResolutionDenied, match="launch contribution is ambiguous"
+    ):
+        _resolve(ambiguous)
+
+
+def test_runtime_launch_selector_rejects_stale_active_identity(tmp_path: Path) -> None:
+    resolved = _resolve()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = _authority(tmp_path / "authority.sqlite3")
+    store = ActivationStore(
+        tmp_path / "state", workspace, profile_id="defaults", authority=authority
+    )
+    store.activate(
+        resolved,
+        activation_id="activation:selector-stale",
+        created_at="2026-08-10T00:00:00Z",
+    )
+    active = store.load_active_snapshot()
+    stale_activation = {
+        **active.activation,
+        "plan_digest": "sha256:" + "0" * 64,
+    }
+
+    with pytest.raises(ProfileResolutionDenied, match="activation is stale"):
+        project_runtime_launch_selector(replace(active, activation=stale_activation))
+
+    missing_plan = dict(active.resolved.plan)
+    missing_plan.pop("launch_contribution")
+    missing_plan["plan_digest"] = canonical_digest(
+        {key: value for key, value in missing_plan.items() if key != "plan_digest"}
+    )
+    missing_lock = {**active.resolved.lock, "plan_digest": missing_plan["plan_digest"]}
+    missing_lock["lock_digest"] = canonical_digest(
+        {key: value for key, value in missing_lock.items() if key != "lock_digest"}
+    )
+    missing = replace(
+        active,
+        resolved=replace(active.resolved, plan=missing_plan, lock=missing_lock),
+        activation={
+            **active.activation,
+            "plan_digest": missing_plan["plan_digest"],
+            "lock_digest": missing_lock["lock_digest"],
+        },
+    )
+    with pytest.raises(ProfileResolutionDenied, match="contribution is unavailable"):
+        project_runtime_launch_selector(missing)
 
 
 @pytest.mark.parametrize(

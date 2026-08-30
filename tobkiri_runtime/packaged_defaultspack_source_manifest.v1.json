@@ -61,15 +61,15 @@
     {
       "path": "ecosystem/defaultspack/domain/runtime_v4/__init__.py",
       "type": "regular-file",
-      "size": 720,
-      "sha256": "aef01e5ad38ab7ad39ac200466a6edd17113cca84ee2c5cae9a6ecf970a20bc8",
+      "size": 796,
+      "sha256": "86755d87f62a6b03cf1239f4436de708c86bef991a39d22cfad0045448b0b6f7",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/domain/runtime_v4/service.py",
       "type": "regular-file",
-      "size": 104079,
-      "sha256": "1d1e2cdb5c340498156dd4bf9e7f9b35ea9af6550cede905193f6771f87365d8",
+      "size": 108726,
+      "sha256": "0092b1851d7111f441b8757db94a4b4e7de490612fcf402a6e1564e7ab312c45",
       "executable": false
     },
     {
@@ -132,7 +132,7 @@
       "path": "ecosystem/defaultspack/v4/defaults.release.provenance.json",
       "type": "regular-file",
       "size": 34305,
-      "sha256": "4ea5483663c3e0f491545ab14ccb88e2041b5d0bc533fdf99f69518284d6d3d9",
+      "sha256": "9763845f5d74d4a88cc953bcd2cfcf0073617cd8c922443a95213b5b42bf5eae",
       "executable": false
     },
     {
@@ -1692,8 +1692,8 @@
     {
       "path": "tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
       "type": "regular-file",
-      "size": 5743,
-      "sha256": "6bff1651f3902503ee755539189aa36ce5b2458026a0ea47c153f60a0fec1acf",
+      "size": 6555,
+      "sha256": "3a0c4e7736ee2cdd5b4a38e9b4abcb433519b8c33283a56e1922bee522c0d7c2",
       "executable": false
     },
     {

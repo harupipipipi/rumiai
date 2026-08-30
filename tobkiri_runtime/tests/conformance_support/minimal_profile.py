@@ -383,6 +383,7 @@ def minimal_profile() -> MinimalProfile:
             "definition_digest": MINIMAL_SHELL_DEFINITION_DIGEST,
         },
         "application": None,
+        "launch_contribution": None,
         "effective_set": effective_set,
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": MINIMAL_CONSTRAINTS_DIGEST,

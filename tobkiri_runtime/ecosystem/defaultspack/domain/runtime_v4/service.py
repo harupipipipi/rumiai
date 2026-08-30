@@ -302,6 +302,105 @@ class ActiveDefaultProfile:
     activation: Mapping[str, Any]
 
 
+def _application_launch_identity(
+    manifest: Mapping[str, Any],
+) -> tuple[str, str, str]:
+    """Return the one neutral Application contribution or fail closed."""
+
+    pack_id = str(manifest["pack"]["id"])
+    operations = [
+        item
+        for item in manifest["operation_catalog"]
+        if item["owner"] == pack_id and item["operation_id"] == "launch"
+    ]
+    if len(operations) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is ambiguous")
+    operation = operations[0]
+    providers = [
+        item
+        for item in manifest["provider_catalog"]
+        if item["owner"] == pack_id
+        and item["provider_id"] == operation["provider_id"]
+        and item["contract_reference"] == operation["contract_reference"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    functions = [
+        item
+        for item in manifest["functions"]
+        if item["id"] == operation["provider_id"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    if len(providers) != 1 or len(functions) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is ambiguous")
+    provider = providers[0]
+    function = functions[0]
+    contracts = [
+        item
+        for item in manifest["contracts"]
+        if item["contract_id"] == operation["contract_reference"]
+        and item["revision_digest"] == function["contract_revision_digest"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    if len(contracts) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is stale")
+    return (
+        str(provider["provider_id"]),
+        str(operation["contract_reference"]),
+        str(operation["operation_id"]),
+    )
+
+
+def project_runtime_launch_selector(active: ActiveDefaultProfile) -> dict[str, Any]:
+    """Project the exact active launch contribution without catalog fallback.
+
+    The contribution is already part of the canonical ResolvedPlan. This
+    projection adds only the Activation identity that selects that immutable
+    plan; it deliberately creates no second digest or authority record.
+    """
+
+    lock = active.resolved.lock
+    plan = active.resolved.plan
+    activation = active.activation
+    plan_digest = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    if (plan["profile_id"], plan["profile_revision"], plan_digest) != (
+        lock["profile_id"],
+        lock["profile_revision"],
+        lock["plan_digest"],
+    ) or plan_digest != plan["plan_digest"]:
+        raise ProfileResolutionDenied("runtime launch selector plan is stale")
+    if (
+        activation.get("state") != "active"
+        or activation.get("profile_id") != plan["profile_id"]
+        or activation.get("profile_revision") != plan["profile_revision"]
+        or activation.get("plan_digest") != plan["plan_digest"]
+        or activation.get("lock_digest") != lock["lock_digest"]
+    ):
+        raise ProfileResolutionDenied("runtime launch selector activation is stale")
+    contribution = plan.get("launch_contribution")
+    application = plan.get("application")
+    shell = lock.get("shell")
+    if (
+        not isinstance(contribution, Mapping)
+        or not isinstance(application, Mapping)
+        or not isinstance(shell, Mapping)
+        or application.get("executable_artifact_digest")
+        != plan["shell"].get("executable_artifact_digest")
+        or contribution.get("platform") != shell.get("platform")
+        or contribution.get("architecture") != shell.get("architecture")
+    ):
+        raise ProfileResolutionDenied("runtime launch contribution is unavailable")
+    return {
+        "selector_api_version": "io.tobkiri.runtime-launch-selector.v1",
+        "profile_id": plan["profile_id"],
+        "profile_revision": plan["profile_revision"],
+        "activation_id": activation["activation_id"],
+        "plan_digest": plan["plan_digest"],
+        "launch_contribution": dict(contribution),
+    }
+
+
 def _edge_key(edge: Mapping[str, Any]) -> str:
     return "|".join(
         str(edge.get(field) or "")
@@ -1045,6 +1144,19 @@ def resolve_default_profile(
         "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_digest": canonical_digest(application_manifest),
     }
+    launch_provider_id, launch_contract_id, launch_operation_id = (
+        _application_launch_identity(application_manifest)
+    )
+    launch_contribution = {
+        "provider_id": launch_provider_id,
+        "contract_id": launch_contract_id,
+        "operation_id": launch_operation_id,
+        "platform": selected_variant["platform"],
+        "architecture": selected_variant["architecture"],
+        "artifact_digest": selected_variant["artifact_digest"],
+        "relative_path": selected_variant["relative_path"],
+        "entrypoint": selected_variant["entrypoint"],
+    }
 
     plan: dict[str, Any] = {
         "plan_api_version": "io.tobkiri.resolved-plan.v2",
@@ -1069,6 +1181,7 @@ def resolve_default_profile(
             "definition_digest": canonical_digest(shell_definition),
         },
         "application": application,
+        "launch_contribution": launch_contribution,
         "effective_set": effective_set,
         "content_projections": profile["content_projections"],
         "requested_edges_digest": requested_edges_digest,

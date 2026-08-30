@@ -686,7 +686,7 @@
     },
     {
       "path": "tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
-      "digest": "sha256:6bff1651f3902503ee755539189aa36ce5b2458026a0ea47c153f60a0fec1acf"
+      "digest": "sha256:3a0c4e7736ee2cdd5b4a38e9b4abcb433519b8c33283a56e1922bee522c0d7c2"
     },
     {
       "path": "tobkiri_protocol/schemas/shell_definition_v4.schema.json",
@@ -723,5 +723,5 @@
       "digest": "sha256:e21dbfd76b1ce6d27ede3be61f592536cac1babd37fcd211b706fc4c36a18fa3"
     }
   ],
-  "release_digest": "sha256:46de4668194d69bcd267fbbafeafc9da23816dede1a13d3b1f27bab2d878f4dd"
+  "release_digest": "sha256:4893e31faf83857a094bbd7d009a9d6a913a7488ae2d51e374dbe9025823fae9"
 }
