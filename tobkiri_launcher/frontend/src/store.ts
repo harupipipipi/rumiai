@@ -179,6 +179,7 @@ interface AppState {
   runtimeDisconnected: boolean;
   hostCatalogVerified: boolean;
   profileCeremonyAvailable: boolean;
+  defaultsBootstrapRequired: boolean;
   activeProfileReady: boolean;
   launchReady: boolean;
   lastRuntimeHealthyAt: number | null;
@@ -641,6 +642,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeDisconnected: false,
   hostCatalogVerified: false,
   profileCeremonyAvailable: false,
+  defaultsBootstrapRequired: false,
   activeProfileReady: false,
   launchReady: false,
   lastRuntimeHealthyAt: null,
@@ -671,6 +673,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       runtimeDisconnected: false,
       hostCatalogVerified: parsedHealth.host_catalog_verified,
       profileCeremonyAvailable: parsedHealth.profile_ceremony_available,
+      defaultsBootstrapRequired: parsedHealth.defaults_bootstrap_required,
       activeProfileReady: parsedHealth.active_profile_ready,
       launchReady: parsedHealth.launch_ready,
       lastRuntimeHealthyAt: parsedHealth.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,

@@ -45,7 +45,8 @@ class TestCheckSetupStatus:
         assert result["needs_setup"] is True
         assert result["reason"] == "explicit_bootstrap_confirmation_required"
         assert result["host_catalog_verified"] is True
-        assert result["profile_ceremony_available"] is True
+        assert result["profile_ceremony_available"] is False
+        assert result["defaults_bootstrap_required"] is True
         assert result["launch_ready"] is False
 
     def test_setup_status_includes_runtime_readiness(self, tmp_path):

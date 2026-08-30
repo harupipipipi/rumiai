@@ -43,6 +43,9 @@ def test_legacy_profile_json_is_not_setup_authority(
 
     assert status["needs_setup"] is True
     assert status["reason"] == "explicit_bootstrap_confirmation_required"
+    assert status["defaults_bootstrap_required"] is True
+    assert status["host_catalog_verified"] is True
+    assert status["profile_ceremony_available"] is False
 
 
 def test_existing_named_catalog_needs_activation_not_defaults_setup(
@@ -62,6 +65,7 @@ def test_existing_named_catalog_needs_activation_not_defaults_setup(
     assert status["reason"] == "profile_activation_required"
     assert status["host_catalog_verified"] is True
     assert status["profile_ceremony_available"] is True
+    assert status["defaults_bootstrap_required"] is False
     assert status["active_profile_ready"] is False
     assert status["launch_ready"] is False
 

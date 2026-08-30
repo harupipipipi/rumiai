@@ -32,6 +32,7 @@ export function Profile() {
   const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
   const hostCatalogVerified = useAppStore((state) => state.hostCatalogVerified);
   const profileCeremonyAvailable = useAppStore((state) => state.profileCeremonyAvailable);
+  const defaultsBootstrapRequired = useAppStore((state) => state.defaultsBootstrapRequired);
   const verificationState = resolveSetupVerificationState({
     isSetupDone,
     runtimeReady,
@@ -39,6 +40,7 @@ export function Profile() {
     runtimeDisconnected,
     hostCatalogVerified,
     profileCeremonyAvailable,
+    defaultsBootstrapRequired,
   });
   const profileCeremonyVerified = verificationState === 'verified';
   const surface = useRuntimeSurface<unknown>('profile');

@@ -42,6 +42,7 @@ test('Host catalog verification opens Profile ceremony without launch readiness'
     runtimeStatus: 'panel_ready',
     hostCatalogVerified: true,
     profileCeremonyAvailable: true,
+    defaultsBootstrapRequired: false,
   }), 'verified');
   assert.equal(resolveSetupVerificationState({
     ...healthy,
@@ -50,6 +51,26 @@ test('Host catalog verification opens Profile ceremony without launch readiness'
     hostCatalogVerified: true,
     profileCeremonyAvailable: false,
   }), 'needs_setup');
+});
+
+test('Defaults bootstrap blocks the generic ceremony before existing-profile activation', () => {
+  assert.equal(resolveSetupVerificationState({
+    ...healthy,
+    isSetupDone: false,
+    runtimeStatus: 'panel_ready',
+    hostCatalogVerified: true,
+    profileCeremonyAvailable: true,
+    defaultsBootstrapRequired: true,
+  }), 'needs_setup');
+
+  assert.equal(resolveSetupVerificationState({
+    ...healthy,
+    isSetupDone: false,
+    runtimeStatus: 'panel_ready',
+    hostCatalogVerified: true,
+    profileCeremonyAvailable: true,
+    defaultsBootstrapRequired: false,
+  }), 'verified');
 });
 
 test('reconfirmation, errors, disconnects, and incomplete setup fail closed', () => {

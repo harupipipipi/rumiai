@@ -14,6 +14,7 @@ export interface SetupVerificationInput {
   runtimeDisconnected: boolean;
   hostCatalogVerified?: boolean;
   profileCeremonyAvailable?: boolean;
+  defaultsBootstrapRequired?: boolean;
 }
 
 /**
@@ -27,6 +28,7 @@ export function resolveSetupVerificationState(
   input: SetupVerificationInput,
 ): SetupVerificationState {
   if (input.runtimeDisconnected) return 'denied';
+  if (input.defaultsBootstrapRequired) return 'needs_setup';
   if (input.hostCatalogVerified && input.profileCeremonyAvailable) {
     return 'verified';
   }

@@ -108,3 +108,27 @@ test("the store cannot publish a contradictory health state to the dispatch gate
   useAppStore.setState(previousState, true);
   setRuntimeDispatchStatus(previousDispatchStatus);
 });
+
+test("the store retains the Host-owned Defaults bootstrap requirement", () => {
+  const previousState = useAppStore.getState();
+  const previousDispatchStatus = getRuntimeDispatchStatus();
+
+  useAppStore.getState().setRuntimeHealth({
+    status: "ok",
+    needs_setup: true,
+    panel_ready: true,
+    runtime_ready: false,
+    runtime_status: "panel_ready",
+    runtime_error: null,
+    host_catalog_verified: true,
+    profile_ceremony_available: false,
+    active_profile_ready: false,
+    launch_ready: false,
+    defaults_bootstrap_required: true,
+  });
+
+  assert.equal(useAppStore.getState().defaultsBootstrapRequired, true);
+
+  useAppStore.setState(previousState, true);
+  setRuntimeDispatchStatus(previousDispatchStatus);
+});

@@ -160,7 +160,7 @@ class AppLifecycleManager:
                     else "profile_activation_required"
                 ),
                 "host_catalog_verified": True,
-                "profile_ceremony_available": True,
+                "profile_ceremony_available": not defaults_bootstrap_required,
                 "active_profile_ready": False,
                 "launch_ready": False,
                 "defaults_bootstrap_required": defaults_bootstrap_required,
