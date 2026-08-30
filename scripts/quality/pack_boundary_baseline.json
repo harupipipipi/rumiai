@@ -1,0 +1,1747 @@
+{
+  "baseline_api_version": "io.tobkiri.pack-boundary-baseline.v1",
+  "policy": "exact-current-shrink-only-from-reference",
+  "summary": {
+    "by_rule": {
+      "pack-boundary.empty-pack-boundary": 45,
+      "pack-boundary.identical-projection-mirror": 64,
+      "pack-boundary.indefinite-sunset": 44,
+      "pack-boundary.normative-working-tree": 9,
+      "pack-boundary.v4-file-uses-v5-api": 1
+    },
+    "total": 163
+  },
+  "violations": [
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:b32fd5a1c057aa255c81443c3347eb0ac08f53f1bcba57169d32bcdc57dbbdd7",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/defaults/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:d4ca507312f1b9e506a9f225008c5c6c0e8cb1f062b2d027a0cb56a7ad4cd467",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:39f82e9fc928f06c22a10428c8713e1985f9ac8eceee8fe34554b9bce71997ff",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_services_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:3a17682f15cc821b25e67bf125571774aac6932b7c164fc595e187f6b3fcf46b",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_workroom_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:8d061afb6566e656709749aa81757a48030edb8f0ba5399e908d532a2ba518cd",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_agentic_qa_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:b0319d5b8d547c8b6fe4ba045e7df8c9bca33cf6b393f9fee529ab3183af1356",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_ambient_trigger_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:5c999a02965f64e243a02cf7b3733db6a614d6b3897669787d1111621fbd83da",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_api_toolsmith_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:1f5b28a8aee0867dfaa815206ed48cf9d7bb8fe56b108189c4059789a8411caa",
+      "line": 15,
+      "path": "tobkiri_runtime/ecosystem/rumi_artifact_app_runtime_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:06e5a44a9c08e85acf22ffcc3a92635290d39b370af719c52535568b9ca70f5a",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_element_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:feacea2484c59b885742faaa48cef629642b931c8c8ddbfe2b7a940c3a9b6660",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_form_operator_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:cd698710e49e3065e553d3a0a03bff1305ed316907bd7c2c20a1a852203b2a46",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_session_replay_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:1f47562b38239e8e64a3ca7b1e03f0210f0664e1272b9c6a6182a6979de35a35",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_business_ops_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:cf049e81b5a19c4424c193c624e8171a7b0302032e08279967900d63eb96af52",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:ccb08576cd362f271b236de53a6ddd60260acebed2b1267f8501403dd0238d3f",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:6e1610eb735701c692c808abfe51825b5e64f03ee060491c154f4e943730fa2a",
+      "line": 15,
+      "path": "tobkiri_runtime/ecosystem/rumi_customer_research_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:bab82a067c26bc8a334447e66bddabdbee9a37387751453f19803a42ee94d870",
+      "line": 15,
+      "path": "tobkiri_runtime/ecosystem/rumi_data_analysis_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:16a095340f5751e0341a25ae53bdf24f174e33e221ae69cd196fc0e4339ca608",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_document_intelligence_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:0cd90cc307aa49af896e29404cc0ba0ed8335e42ac300e45bcfd3409dca398e0",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_evidence_dossier_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:eb8abc20c665ad93b7569590e3c32ef3f2e37ad9bd4f6f5f41f4cfabc29dd312",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_experiment_design_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:9fd0830b0a05ef2d0dd8445cc423ee6c9374a9596f6b0a12d735e2c46130113a",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_frontend_design_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:0732142c45608e2da1e08d0affb9568567bde4614cff1f1c68c587145eb40ff9",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_host_capabilities_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:225dd2fdbe6ba6243d479c001060ed5afc7c040a7d7b6be26b32147c35082070",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_knowledge_marketplace_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:28ca91c37c65714570ccf34a4d045a404e68fdde15a64f1b48bff978f5997d1b",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_local_agent_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:ce5fe45e74f2e85126dd7bb30b92bffc1fa8bfdf46a28f1f6a51e2f78a62126d",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_localization_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:eab8af490261b813b7db98c58a89a7d4d6c4372e1ff84ad86b6cea3815cbf470",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_meeting_intelligence_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:20fbb718ae68301d7c6d70b4d9810f71ebc68c1471add35af07ecc021d986897",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_memory_knowledge_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:c4e46a7dd72cc5b78adc87b697f8e769f437e1b8630034e8337b8935a5e4dcf7",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_multimodal_media_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:eeaf23909eaf5863262f5a06b2c373f4fb1bf8db0e674ad96f5d96ceab0151da",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_observability_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:97fe55eb4ddf92ecd18a4e465935d8dfadd95daf6303df1eff430a8ef4e8b282",
+      "line": 15,
+      "path": "tobkiri_runtime/ecosystem/rumi_office_authoring_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:907b4ab9866094ce9a3f21342651d15ac402ec5f1de0102089746ac559cda579",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_omnichannel_agent_inbox_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:f8dcc81180a48e2ab010180d0c73f4419f0cdfa16da3145faeeca98439d6f5b4",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_operations_company_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:19945f1a97b6516228ff923db55f62a4c99df5cadae1fd3ea916da7992142de7",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:b6aaffabb4ee6fe6bd71fa0f429a1e5af39d6a6e528233560561dae2fa78d58c",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:faffe97e40b8e97fe8a3b2d64edb25e251e51c21340f0bb40bf47cc86423170a",
+      "line": 15,
+      "path": "tobkiri_runtime/ecosystem/rumi_research_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:69be3669b5fb2e24fa143baf9dc410a11821548341a3a81ead19541b5f2ada8d",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_runtime_benchmark_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:3ded13e5f6600b4d72f0718e116322a4996fa95ba99874b568f6ad8811111365",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_sandbox_runtime_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:33accdd3c84b06c813d9f6329f38f9870d02c9be3e407b0ce06223770d8370dc",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_security_review_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:34e4fe7fe56fd59926d644cd6ecb7055dc9aee58f1c907da77e8daf1cbbea22f",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_sop_mining_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:ca4bbe0dd8b8d2e6efae3b822ed0530f252b1d80009b2a86b127729341de2380",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_study_coach_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:af34479245d8b644b0a6b1f42816c4d9f0cd4e05b1843be1c930d30ca3db833f",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_subagent_pr_manager_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:30a91aad42e3f3cd3bf432e78992f93cbefb05e0c7bfc38c4da9cf0d14296ec8",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:b129bced68c1947076bbbb5d2f63a3cc0ac3e561ad2ef0fdff5aa23eb109623d",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_voice_mobile_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:cadc8ad94c47e280a603a0aa560291fe0a5f0616e656d517ff9a479df87b6324",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_workflow_scheduler_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:ba185d10c3993c653fa675d1fbeff9b6859e5e97121a4caf56c07cfd585e1d29",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/rumi_workspace_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "contract_dependencies": 0,
+        "contracts": 0,
+        "functions": 0,
+        "pack_dependencies": 0
+      },
+      "fingerprint": "sha256:aac5c3ceefb295b5864db3ed80a42a73f9c506e914a03363762e4704302bf097",
+      "line": 10,
+      "path": "tobkiri_runtime/ecosystem/search_home_pack/pack.v4.json",
+      "rule_id": "pack-boundary.empty-pack-boundary"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/defaultspack/pack.v4.json",
+        "content_digest": "sha256:98ad910d3bd789eb68b2a934ad009413f67e6477677a9e68093f0511b76c3c63",
+        "pack_id": "defaultspack"
+      },
+      "fingerprint": "sha256:2c16ccca579d607ee72d4439f41d3773f8f876585c3912e611eb194fd5ee583f",
+      "line": 59,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/defaultspack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/pack.v4.json",
+        "content_digest": "sha256:407b9de5c0b9dac734b5ea55ab5e6a09f27544121eb6c9be1a83c6851be0ffcb",
+        "pack_id": "rumi_file_inspect_pack"
+      },
+      "fingerprint": "sha256:d9b0b932ec05ca2bb1f4a5df530bb637d916d4d2fbecaac89aecdf38ace8ca6b",
+      "line": 79,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-file-inspect.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
+        "content_digest": "sha256:4907f0a27f58cb0e44bb11283020ff1149ce46709940affdad915c333259086e",
+        "pack_id": "rumi_host_authority_bridge_pack"
+      },
+      "fingerprint": "sha256:830085481a1f21e587c92ae1e44327addf12fe511ab5da5d4701e60d664fff37",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/pack.v4.json",
+        "content_digest": "sha256:85801e263d007163ca0871519d93a47e088319f240a316629b5faf6c93994ce8",
+        "pack_id": "rumi_workspace_mount_pack"
+      },
+      "fingerprint": "sha256:01323b2b1738e4d837d19af1ed5828c3e674baaa3af20d137e2bee649176bd27",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi-workspace-mount.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/pack.v4.json",
+        "content_digest": "sha256:541abf5c2f76b9b47efceedd74a57d6a6dd479fab9cf88d69f25c20d36b77e3b",
+        "pack_id": "rumi_ai_gateway_pack"
+      },
+      "fingerprint": "sha256:6d1291a9ab7a8ec798b5098003e49e59bd91debb11e3017c7f6782c08c9f6b3e",
+      "line": 129,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_gateway_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_modality_pack/pack.v4.json",
+        "content_digest": "sha256:3e577133e3e57c0890483c7efa675bde42410a91118a537d5154775c59794f0b",
+        "pack_id": "rumi_ai_modality_pack"
+      },
+      "fingerprint": "sha256:0275f3e20496f52fd0bd0dac57d3af143c8d00bb64ea165fcbfc9318ca2b73de",
+      "line": 158,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_modality_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/pack.v4.json",
+        "content_digest": "sha256:263b8b4044cc393a78a96d7c4d8f6db4f4f3c92472570f191290a0ce9223c17c",
+        "pack_id": "rumi_ai_pipeline_pack"
+      },
+      "fingerprint": "sha256:a614f5591157c37c993221b838e89f87ae6fec3d918445efa643fc05e412706e",
+      "line": 152,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_pipeline_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/pack.v4.json",
+        "content_digest": "sha256:e8144b0a624b05f9c94bfe0ea785789042f170b4cdb97d5f8175fa08f2df8c18",
+        "pack_id": "rumi_ai_routing_pack"
+      },
+      "fingerprint": "sha256:c6bbce671016459ac3e0650427333fae57a78dd69d713782c4e0021dc479a47f",
+      "line": 97,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_routing_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/pack.v4.json",
+        "content_digest": "sha256:20b4f461de64dd888027ec8946a4ad55d310931bc124b60ee2fb071b8e7a035e",
+        "pack_id": "rumi_ai_stream_pack"
+      },
+      "fingerprint": "sha256:53ee2a4cda789073cc6496b9ee91ce6c8ba987f50d4a2ac84b41e645e02b096c",
+      "line": 71,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_stream_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/pack.v4.json",
+        "content_digest": "sha256:667d04b73c0cb7c9524b913836271c9ec5de7106103b44afe8ff7afeeb2cdae1",
+        "pack_id": "rumi_ai_tool_bridge_pack"
+      },
+      "fingerprint": "sha256:e8772aa3980e5dbd405f392eca7cc1b474246ea21274a76a518af76316b46bdf",
+      "line": 97,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_tool_bridge_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/pack.v4.json",
+        "content_digest": "sha256:bd6a0f588b04401587553a3fa222f79806b656f1a01d533b2407495a58c4f5a5",
+        "pack_id": "rumi_ai_usage_pack"
+      },
+      "fingerprint": "sha256:c45e462403f1e71f47dc25ba8ae94246d83396e4db24795d51cfd8a8f03699d2",
+      "line": 126,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_ai_usage_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_browser_host_service_pack/pack.v4.json",
+        "content_digest": "sha256:748a3d307232209ff6cab9c9114ee5f0d820534d1990aca7e7c770e989822cfb",
+        "pack_id": "rumi_browser_host_service_pack"
+      },
+      "fingerprint": "sha256:7449af2a10179b088676c317cd253a8af88004a87d6adb1f4aa1b0ee50674758",
+      "line": 100,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_browser_host_service_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/pack.v4.json",
+        "content_digest": "sha256:2069f4dfe4775a8c6f422eecca61e681513fcd474b82a1e4e87e4a27aea7eef7",
+        "pack_id": "rumi_clipboard_host_service_pack"
+      },
+      "fingerprint": "sha256:5722333a4be9c34a1c81e1aef21bad8379342b3492df0ab252d81a238afc92ec",
+      "line": 100,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_clipboard_host_service_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/pack.v4.json",
+        "content_digest": "sha256:29074c85658e6acaca0004ccfe87b7753c52fa06aa7a426ff87345dfdcb838c3",
+        "pack_id": "rumi_coding_sandbox_service_pack"
+      },
+      "fingerprint": "sha256:49f2a2ec88ac14f61407d19a8b9867f254d47768736068a6c76aba0337bdc2e8",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_coding_sandbox_service_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_context_runtime_pack/pack.v4.json",
+        "content_digest": "sha256:def80f41d3a1e33f708300f1772d8a3c11f718b4a74a464657d2ed4f4d42e104",
+        "pack_id": "rumi_context_runtime_pack"
+      },
+      "fingerprint": "sha256:2f448ac14e64797f6e28d19349f4e1a097e5c29e4cfc3436313b581449d18b82",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_context_runtime_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_conversation_store_pack/pack.v4.json",
+        "content_digest": "sha256:596ba35438534bb6d925a50ae78a50b8f7b151c6847e459dea683a0e6e1be873",
+        "pack_id": "rumi_conversation_store_pack"
+      },
+      "fingerprint": "sha256:6bfe573d6a0c99dffaa17184ea1279b7d2aba513f1a755d77069bcb78f9d68c0",
+      "line": 182,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_conversation_store_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/pack.v4.json",
+        "content_digest": "sha256:588caa4ef75ed5d3777b776a977ef9d22e920c9826abecb4e4111f94d2a935ec",
+        "pack_id": "rumi_credential_broker_pack"
+      },
+      "fingerprint": "sha256:bb9f89c93853ca934bb0b796f1c3456804800fe074d56d56516511477f2ce4cd",
+      "line": 168,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_credential_broker_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_default_tool_projection_pack/pack.v4.json",
+        "content_digest": "sha256:3b5b3f379f1e90e331b4e2814e71526f74cc8f2acad1b1e0414f9739c4ae935f",
+        "pack_id": "rumi_default_tool_projection_pack"
+      },
+      "fingerprint": "sha256:29bc31feda2541d8845f7645416054a8ae844fd3c1a3506c29e9b511f1fb1e05",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_default_tool_projection_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_discord_connector_pack/pack.v4.json",
+        "content_digest": "sha256:2fe088d50629124a39b25c0afae66a58e1f7d5bbb295009ceb72572193aa1699",
+        "pack_id": "rumi_discord_connector_pack"
+      },
+      "fingerprint": "sha256:6ca6c982bbc6d57d5fd2d743fd222733bdfa5d13fa8d5c1c54a550087da9f438",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_discord_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_email_connector_pack/pack.v4.json",
+        "content_digest": "sha256:619ecdc3ef777c9d19fe2514d71f52f9fed9351d14b44c2de15703bf51e2ca22",
+        "pack_id": "rumi_email_connector_pack"
+      },
+      "fingerprint": "sha256:7e1fc2fceb3221686ea8b567428d302b4fc7ec927bc0f9808f6c3bc117d2e8f0",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_email_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_file_mutation_pack/pack.v4.json",
+        "content_digest": "sha256:b2d2f2c4b36cea56d87837f777a2ad1812b279d2892e7b6d0de43942465f31c2",
+        "pack_id": "rumi_file_mutation_pack"
+      },
+      "fingerprint": "sha256:12cd5e1f2c5e6239bb94b16cfedeae85404ac8407ef90c76713e64d7ee006330",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_file_mutation_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_file_patch_pack/pack.v4.json",
+        "content_digest": "sha256:b8418e8c88459e50fadfb3cb08346fb9c62636a2e91d43e3f354bfb4ccbefff8",
+        "pack_id": "rumi_file_patch_pack"
+      },
+      "fingerprint": "sha256:e837c0b0ab0daf43c756f845087c0bc705c83698e6523d1f262b608e0f769512",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_file_patch_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_generic_webhook_connector_pack/pack.v4.json",
+        "content_digest": "sha256:f25b966bc43edd7f9504b09947a6157164714f7581b49f6885d233740ea855eb",
+        "pack_id": "rumi_generic_webhook_connector_pack"
+      },
+      "fingerprint": "sha256:6ab7e8fc0d8fc9f03764e064bf80fc413c5ffbf5da0b84ad517b3ea7637d7117",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_generic_webhook_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_git_publish_pack/pack.v4.json",
+        "content_digest": "sha256:f07ae8fd184a446e2b7392be098806691e2eab220535ff637ac90822df1efbd7",
+        "pack_id": "rumi_git_publish_pack"
+      },
+      "fingerprint": "sha256:4a84df3bbad05d55bb013b81893d080147ec89b987384e9f82cb093ab9cd0d7b",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_git_publish_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/pack.v4.json",
+        "content_digest": "sha256:02a6610d105df9dd965c07c9ab69e6cae76ef2cf2f7821944cf8a950abf93b35",
+        "pack_id": "rumi_git_read_pack"
+      },
+      "fingerprint": "sha256:d0f027410582d31390d3a4be9b44f9d7e329bd25592e07b4b62589d13babbab2",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_git_read_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/pack.v4.json",
+        "content_digest": "sha256:406e6486e5e150ac70e7a9ef40d4249d7dca3f3e080f214fe7161c37268e4612",
+        "pack_id": "rumi_git_write_pack"
+      },
+      "fingerprint": "sha256:590b2819586c7fe8e9aae5aa057032c37e8b7f82ff06c872d43fc53b46e32efa",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_git_write_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_http_api_connector_pack/pack.v4.json",
+        "content_digest": "sha256:f5e309e936a7b264c3a371daafc660bd0c5dd5df8745ad9dc909f94945e48d2c",
+        "pack_id": "rumi_http_api_connector_pack"
+      },
+      "fingerprint": "sha256:77d5cc7cd8d076177b5427b55462db2468559af48cb45719a7a0bd5ab826f381",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_http_api_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_human_operator_provider_pack/pack.v4.json",
+        "content_digest": "sha256:883bfe9a87683a8753debd3a1f286985d952e945ce99a51d787a6e054197e75c",
+        "pack_id": "rumi_human_operator_provider_pack"
+      },
+      "fingerprint": "sha256:9a0f6d9560a4b2cf1a38bc5a39c3a3edd5a1dfeaa1911840c2db949ea83f0bc5",
+      "line": 100,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_human_operator_provider_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_knowledge_store_pack/pack.v4.json",
+        "content_digest": "sha256:5e6dff3f96706f6319038793cf3a1ca80ef8289ca0a891a2485b5b7c4b735ab5",
+        "pack_id": "rumi_knowledge_store_pack"
+      },
+      "fingerprint": "sha256:0c9b7ca369c89e9166ccbc8d1b62a9dbb810a9efa267f2f5ef7cb3bfa4e67b48",
+      "line": 124,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_knowledge_store_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_line_connector_pack/pack.v4.json",
+        "content_digest": "sha256:ccd26d6d6f177797d864d2000f93ef1283cdbaace2d72cd5943e70f250bd8c2b",
+        "pack_id": "rumi_line_connector_pack"
+      },
+      "fingerprint": "sha256:7aa450efba344b99f76f38c9223e04692009b71cc0b3a47132806613f88ca05a",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_line_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_mcp_server_pack/pack.v4.json",
+        "content_digest": "sha256:21047320ed853f863f13e815ea321c9ffb5d8163694bcb1bfec07fdf01eb413f",
+        "pack_id": "rumi_mcp_server_pack"
+      },
+      "fingerprint": "sha256:f00f871ebec1dc9c7456189632d54b76f34ffba8bfae0a5abb37edd97b200ff9",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_mcp_server_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_media_inspect_service_pack/pack.v4.json",
+        "content_digest": "sha256:bf2cc7ffc8777fd65f882a7a90c5e51c8955c9d90be14d36b3b8416acc57ee86",
+        "pack_id": "rumi_media_inspect_service_pack"
+      },
+      "fingerprint": "sha256:41c70f29cd875d6d3fc010dd6035b535830de2a8afd90d287a99c47afd92788c",
+      "line": 65,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_media_inspect_service_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_memory_store_pack/pack.v4.json",
+        "content_digest": "sha256:7c4700a64dc1baf8004eb7100631d9aa017eb94264abf2cfd3f7d1d5980e100e",
+        "pack_id": "rumi_memory_store_pack"
+      },
+      "fingerprint": "sha256:022ddae64aeadd3dff500b26a637b41ae5e12e2e0cf9b75679935455b52d0740",
+      "line": 124,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_memory_store_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/pack.v4.json",
+        "content_digest": "sha256:61bc52c11518f92449603833b979a09029f46124c01c76d3044b342cf15609c9",
+        "pack_id": "rumi_model_catalog_pack"
+      },
+      "fingerprint": "sha256:dde7151a4cf7daf18a5d2f656d0f910150a608302f8076f361a2f244cdde7fd5",
+      "line": 97,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_model_catalog_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_model_evals_pack/pack.v4.json",
+        "content_digest": "sha256:18fb7d2837fd208033db27e35bd4fd1c89ece096f2872f98bbbb5b178e62c047",
+        "pack_id": "rumi_model_evals_pack"
+      },
+      "fingerprint": "sha256:9ca4dd052f9ee3987a5a0b817b5e7dfba003fa08598e48a435e9e5965ed113a2",
+      "line": 129,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_model_evals_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_model_registry_pack/pack.v4.json",
+        "content_digest": "sha256:16dc31088587cb661e22f3de3c81fe84ed7fa4835f8c095749159ee999548e7f",
+        "pack_id": "rumi_model_registry_pack"
+      },
+      "fingerprint": "sha256:e48120a1a964605109ed9280c4f3449a529c4ac3011e099d056c53b7cb04ebff",
+      "line": 165,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_model_registry_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_p2p_connector_pack/pack.v4.json",
+        "content_digest": "sha256:3d813c186b9df111e781f727ecbe74cd7caad8d60d53a416110b9266d3cc6a01",
+        "pack_id": "rumi_p2p_connector_pack"
+      },
+      "fingerprint": "sha256:03714c3e6d733400662ff1fda6d7d1207889ee50e2d8f931ee786ddd36bc608f",
+      "line": 67,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_p2p_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_prompt_studio_pack/pack.v4.json",
+        "content_digest": "sha256:6770b78bf184a6d77947a7a126014b65451bd542f73789994f8a05924a05edc6",
+        "pack_id": "rumi_prompt_studio_pack"
+      },
+      "fingerprint": "sha256:d13591f4524912ae929a1d01d166fc318e24b52080aa33bb771bb9473afb6495",
+      "line": 222,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_prompt_studio_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/pack.v4.json",
+        "content_digest": "sha256:875c1a784b5252b635cdb3dc94a21ef899b5027a7cedc1a3ab06a75e3ab0189d",
+        "pack_id": "rumi_provider_adapters_pack"
+      },
+      "fingerprint": "sha256:e6a7eaa25a9227929b2a06a8a938c9a9cd5cd6e24bf468ce1107aeb3a7803139",
+      "line": 158,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_provider_adapters_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/pack.v4.json",
+        "content_digest": "sha256:b6c0443cfbcf8c9a3ac12c5cd7a8588317d00ea82ed529834576bdfd19ae2f04",
+        "pack_id": "rumi_provider_registry_pack"
+      },
+      "fingerprint": "sha256:de77a488e666935fe5f21ba5b41ce4a3219c208db96f1deb48facbd71779c169",
+      "line": 196,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_provider_registry_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_repository_context_pack/pack.v4.json",
+        "content_digest": "sha256:c578481b4ee610bcf714b1c739ab000379cafc0e6fac09d4a48a62d9998ebfc3",
+        "pack_id": "rumi_repository_context_pack"
+      },
+      "fingerprint": "sha256:cbba06c723bdaf06d199a5640ea3f011be4abc562b748ab6a4c53b5f4bfa74b4",
+      "line": 188,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_repository_context_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_shell_execute_pack/pack.v4.json",
+        "content_digest": "sha256:ffe0a34433dfb712b09aab4c239646b511b27df0d137c4d0b56db540cb7b1525",
+        "pack_id": "rumi_shell_execute_pack"
+      },
+      "fingerprint": "sha256:f80ad5d9c1be8e3ca5f013b303a0863b4759e5f5a259fd8689bf0b66c788a4e6",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_shell_execute_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_shell_policy_pack/pack.v4.json",
+        "content_digest": "sha256:826a511c7c42a2ecfd91e3514847fc83b17b2793e5876adf61ef5e6edd9f9447",
+        "pack_id": "rumi_shell_policy_pack"
+      },
+      "fingerprint": "sha256:71bf060e4566d6090225e5284d01b9dc9bbdb8a494631c624c88cb21cf357e44",
+      "line": 65,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_shell_policy_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_slack_connector_pack/pack.v4.json",
+        "content_digest": "sha256:9d8ecda119ac4019fe420fdfdc7248f6a549ad37fbb26184e5b53044bba1d9ac",
+        "pack_id": "rumi_slack_connector_pack"
+      },
+      "fingerprint": "sha256:2ac0c670533b0de36c11e552c838196c20e49f74478fbd66d921a3046aedee53",
+      "line": 96,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_slack_connector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_subagent_placement_pack/pack.v4.json",
+        "content_digest": "sha256:1fbec23f39f40bf812980523000ab507c39be6e10318a058889877b3f95a916f",
+        "pack_id": "rumi_subagent_placement_pack"
+      },
+      "fingerprint": "sha256:6bd2b4e4657a933e3e88d7f5f46994d045c1d327135018c347e59fafb0ee7c42",
+      "line": 216,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_subagent_placement_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_terminal_session_pack/pack.v4.json",
+        "content_digest": "sha256:6170dddfbf642d1ff0872f4663daba48a5acca3b0c0cf4e918c295195f53eb05",
+        "pack_id": "rumi_terminal_session_pack"
+      },
+      "fingerprint": "sha256:55664b0e3f9aa678c2211b6c1976772173db543bfdef607ebfb884a168f6bac7",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_terminal_session_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_approval_bridge_pack/pack.v4.json",
+        "content_digest": "sha256:f548be71e44f14167a0e23fd080058b750939a34c4d4fcb05aefb2ab4f626172",
+        "pack_id": "rumi_tool_approval_bridge_pack"
+      },
+      "fingerprint": "sha256:90fe8223e635f19e01e6da051756809e41352e5058c17da50f5e50617c869dda",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_approval_bridge_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_audit_pack/pack.v4.json",
+        "content_digest": "sha256:f51e67b340a2d4cb25801a3bdf0ede503eda74ffcd454af61959ab2f43341daa",
+        "pack_id": "rumi_tool_audit_pack"
+      },
+      "fingerprint": "sha256:bd6bf7e0adef66ba7d570c9f2f01a1ab51625f0f44dad3cfd5acf907ad8d33f4",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_audit_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_authoring_pack/pack.v4.json",
+        "content_digest": "sha256:94596ad961f143868bc56bac4b34570f4769379ab042eddd6493518596d642ff",
+        "pack_id": "rumi_tool_authoring_pack"
+      },
+      "fingerprint": "sha256:ec2661acfcd881d418be28219ee5be115ee33e040621ccecbec61e3dc62f0841",
+      "line": 95,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_authoring_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_broker_pack/pack.v4.json",
+        "content_digest": "sha256:bb92282f400075387760917425f0aafbe11f41f6fd4444c6a17a42c00531cdd9",
+        "pack_id": "rumi_tool_broker_pack"
+      },
+      "fingerprint": "sha256:e7b8497790486694ce80cc331ad8ab36b18af6d0802baaa47efa6811cb87f3c2",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_broker_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_capability_executor_pack/pack.v4.json",
+        "content_digest": "sha256:983a585939d9bee7c3d89d3ac14a5cb42760dd3037b1b0556cab087d130a51cb",
+        "pack_id": "rumi_tool_capability_executor_pack"
+      },
+      "fingerprint": "sha256:c94eb071f73e4efc00d75a1f4a32b8d92855680379d5bbca3008500c912958e4",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_capability_executor_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_executor_selector_pack/pack.v4.json",
+        "content_digest": "sha256:0d172e2c55d6954ae75d550b5041b1bdca7ed6983c17d225590e86155bb46d9b",
+        "pack_id": "rumi_tool_executor_selector_pack"
+      },
+      "fingerprint": "sha256:42331dff97c98393f7848969e3bb05ce620ead5dcc5bfb68330cb12a39d4d22c",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_executor_selector_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_guard_pack/pack.v4.json",
+        "content_digest": "sha256:606bcff37f0444914cbd48d10e2a116927ac99732193ffe46ecc23c269739c15",
+        "pack_id": "rumi_tool_guard_pack"
+      },
+      "fingerprint": "sha256:8db614cb4a3f2459103812f2b6d98893d88801f4183e4c4ecbd7193c63777afc",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_guard_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_local_executor_pack/pack.v4.json",
+        "content_digest": "sha256:4cbedd8dabd25aaf374f614dd57ec62b395295262e55d55f7b483542163a6d13",
+        "pack_id": "rumi_tool_local_executor_pack"
+      },
+      "fingerprint": "sha256:a4dda45b5f0b3fd5dcae7ef18555c8eb9901859690b9b4dd1bdf0aace6ee0f92",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_local_executor_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_mcp_executor_pack/pack.v4.json",
+        "content_digest": "sha256:9fcb67344d4e1f79a82fbaf1c21d688a49edf258845a697b92876a8cf9b86057",
+        "pack_id": "rumi_tool_mcp_executor_pack"
+      },
+      "fingerprint": "sha256:fa9181815dc8fa701ab5cd83915c51a391f3b1a4d0bdaef0fd8aeedcaf39925e",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_mcp_executor_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_policy_pack/pack.v4.json",
+        "content_digest": "sha256:62cae739c6c01a7b219957643db365f2aee8c4afdb25c365cf93b030ea67701f",
+        "pack_id": "rumi_tool_policy_pack"
+      },
+      "fingerprint": "sha256:8a33bf268bc6f099a6d799fee546af60512733b9f890c512f7ef1fcb24183790",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_policy_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_registry_pack/pack.v4.json",
+        "content_digest": "sha256:622fedf6350be58295a09eb3758ad5dbc065339acc9216c90e458365348c68f5",
+        "pack_id": "rumi_tool_registry_pack"
+      },
+      "fingerprint": "sha256:07a310d35ebf1f9c9350a51a24eaa5509057994815a3a9d1c197135244dfe82e",
+      "line": 129,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_registry_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_remote_executor_pack/pack.v4.json",
+        "content_digest": "sha256:c389b4acc604076a6264e0b3a79b82123560732e54bc966b175cb89feb0afb7a",
+        "pack_id": "rumi_tool_remote_executor_pack"
+      },
+      "fingerprint": "sha256:819ab14c05bb776b81224e7e5b935b761c9dd30e52a38324634e781cc70e474c",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_remote_executor_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_result_pack/pack.v4.json",
+        "content_digest": "sha256:72f21fd1e87696a7b5383a5a3d00dce7b3a858edcf3a41ba8e6d6bf4affdde68",
+        "pack_id": "rumi_tool_result_pack"
+      },
+      "fingerprint": "sha256:adac793c77b8ee93b84e00fd6d175700c5aa7ad31e11dd77b8d684cffad1e66a",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_result_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_sandbox_executor_pack/pack.v4.json",
+        "content_digest": "sha256:5716fc05c25b42f95e61cd0f690c88e83de5fa5d44886864d61481a73d6ded8a",
+        "pack_id": "rumi_tool_sandbox_executor_pack"
+      },
+      "fingerprint": "sha256:946b98276f49fc21cc54179d42b7dc68f695e3a389052d52c7c4ee3075a3b417",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_sandbox_executor_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_tool_validation_pack/pack.v4.json",
+        "content_digest": "sha256:230ce9b4241042062d2d4a604215f7f96afe1330a7dd64ea05701d1f6a3aac84",
+        "pack_id": "rumi_tool_validation_pack"
+      },
+      "fingerprint": "sha256:78a2707fe3aa25d70dfea5611f1da2d77951d80a57d0a06c8ba65bdf907563d6",
+      "line": 66,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_tool_validation_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/rumi_turn_runtime_pack/pack.v4.json",
+        "content_digest": "sha256:9da7bad74fd5a3bc94412dda8b5cae9406d51b03bc3c8473ccbaaa3d052cc1a6",
+        "pack_id": "rumi_turn_runtime_pack"
+      },
+      "fingerprint": "sha256:07f3427345ad937bc06b9b1ae497fc25d2682626dfb922d2c2ce5701898717b2",
+      "line": 124,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_turn_runtime_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/pack.v4.json",
+        "content_digest": "sha256:cab1c17bf4795558cb1af9f91b08e038999b9bbc7d6a2ebf4ed2565047e24731",
+        "pack_id": "tobkiri_host_pack_control"
+      },
+      "fingerprint": "sha256:8f1563a05bcfc303eac38d0129c85ef34e24cb51089f9bbd7853950abb63d712",
+      "line": 473,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/tobkiri-host-pack-control.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "canonical_path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/pack.v4.json",
+        "content_digest": "sha256:3ca14c1f6363d88c1e47622d4241f2ef34ce65b8d1c9b2f833106a8bb7f5425e",
+        "pack_id": "tobkiri_workflow_pack"
+      },
+      "fingerprint": "sha256:ea4a5dbe6003a1a90c434c7c252c4141ca13718f583a3cc3bd2962c5ea5a3e19",
+      "line": 384,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/tobkiri_workflow_pack.pack.v4.json",
+      "rule_id": "pack-boundary.identical-projection-mirror"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:95c9cee77b0c73e4d49859f948805617ddb5eaea87f01b4afc1a276dda7880d2",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:ced2ceb10edb5ee66c0fef1294aca743b5f1e527766a8223d3df938d10a9c37c",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_services_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:61ed1f9704cac10aeb6401aa5488748558e1d578a08fe3c306d829c28649b426",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_agent_workroom_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:dbef7e2dbfc6254e9bc2056b7583649120b151a1cdfcdc6e484048c871ce1b35",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_agentic_qa_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:31636d24b19ba0ea4fb36ff5a37a71310864aafa2e896ba620daa6aed434bac5",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_ambient_trigger_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:cef9f0f405c6dbc07b0f7037dad4c3b2488cc5b4ef58fe0fc4bd7e9399b13fd1",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_api_toolsmith_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:aad57b90d2c531c4dbd507dbae70084fcb0246a866249652bc876f4d0236c985",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_automation_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:99e5d9d3251f1d47c210003161df8f74fd09083cb8c026274049d08ef0d40aff",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_element_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:555f3ac8caea691a8e9ebc7879ec461db3896e20472aa4578009ff8751be9450",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_form_operator_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:507719f084bc738ea29159ac5de67d6f9727055540aaf95396f0814c6be842aa",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_browser_session_replay_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:4168bff8d0c5c71f342751e0e396e96945731769552b6cd5a7da72b4e80cb761",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_business_ops_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:a06048f72cbd3e66fbe0b6fc71c5190a4478193415582935addc84951375544e",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_code_ide_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:c6ff99cb4ee8b8db6ad8f4e6ccade226fc75f785f1117e15c58af250ef6a5aad",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:788900bd06fa0d6e22c71429a41535b2a82a231fda1ad1264ec21346a5848727",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_computer_control_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:15a6e05ce1661fa90a32e467a600d10c8bc7d86c1a337f9611bea21a0a95710a",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:065d28fdbfa29590d0ae2e21a907afb8c6047938f2918aaeb6efae4d30bbe5b6",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_default_tools_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:40f61ceba12e1e05a76d7f2a142ac78d4f0fe3e5d3ac82f8971bb685eab59aab",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_devops_release_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:cb21a5cd9633561073cd4b0a0b335f86fe2f46e4dcd365c0793bb0e12b0898c2",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_document_intelligence_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:a7c41f7b489efe03f5fea6d73c2bed27ff862df89e33810e7b749d60702dbab8",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_evidence_dossier_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:9949058a362025f14819afb776953cdd0403672c80da2c3b243931cabe6faca7",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_experiment_design_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:d7e2a64939692656d909950edda47e7044aa92c19365ebbbb5c0c1a34fdd58f6",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_frontend_design_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:8da5d2830abd040482c65eec5efcddad6717bd2f68c452d222da40b549d20a39",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_host_capabilities_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:2cb4428757530e9da18cb3fbc4ee796ca2af3f75f72e1056bafb421b3a9735d4",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_knowledge_marketplace_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:b1dca5c82658ed014af4b24f4759c7e29eea6d7aac2e0b466a40c80b77db6889",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_local_agent_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:ba50ebd1f5a01136697038157b9da81a81e9e45108b9977d423f7151b037709d",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_localization_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:87cc7bdeddabfa8829549ebdbf28f319910fe73dea397e21c836f4520194aef7",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_meeting_intelligence_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:49f6167dea6a72fabeb9502ac184afc2fc528ae89f39df68baf0e748609b21d7",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_memory_knowledge_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:294cbcc2011067058ed31d468587381ecef55994dd1f0cab78b9bbc853e1d907",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_multimodal_media_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:b86749bc6cc4225e525987095024a819daeeb46e0a517a0afc39349edfbd4e92",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_observability_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:5458576c8992f49702474477c32b9a4e2a9cb802900683e418aed4e6bdd71ac2",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_omnichannel_agent_inbox_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:a5733114f7eb2db1bc6b013ea0d6e289fb11c1add5ed2324d0d1d81586e0d6dd",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_operations_company_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:0cde1af4b61425463a0d26b8caa805228231d08afd3fefab8aedcfb176300fdf",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:1641c68dc58cdb8614e0e8a7d21e8dd6ad6f627cc93a4dea7b220c36e9e86154",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:b9732612b3a52e3739abec95cb02c6779cac5b7ff7e1ae5a2d2957d87824ed2a",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_runtime_benchmark_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:c80ea8ef6f2ce1df1024e6aa7aae809cf7a7576a562b9620b4f81747b9904298",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_sandbox_runtime_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:94c842fa05fb994ca6ec4a3fe79e2a03e1b26e7f10ffab870f39a2b852e85b54",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_security_review_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:923e1eba4112e045ca25fd77156498d1c60040dda2d73edf6fdf2bccd8170c31",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_sop_mining_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:f946b2904b47adbbeb37e48e3349aed45c594ae9dd218cd85a7f82538c755bf8",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_study_coach_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:b88480f56913d6d076e5a698f07f91436b771c3c7b0b6b06de88cfa3fcc84588",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_subagent_pr_manager_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:31e97d9188bf0cea7ce0c687d9da8687a5986b29cea32187489e46fb83e78c5f",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:4de890ab2a7643b64a48e993fb01ba3a9314703f4d59c922dd2c320019b68406",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_voice_mobile_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:97cbe810e3fff060467da4d3418a65e4204202feba516562931b862deae209ad",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_workflow_scheduler_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:b87bcccea928772fc9ffc4068066e61bad74494cfe199069bf9c89d4dfc07e6f",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/rumi_workspace_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "sunset_at": "2099-01-01"
+      },
+      "fingerprint": "sha256:306d41afbac68b8de4a7452fc475c1f8816dd136eef089fbf8c277904f39edfb",
+      "line": 23,
+      "path": "tobkiri_runtime/ecosystem/search_home_pack/pack.v4.json",
+      "rule_id": "pack-boundary.indefinite-sunset"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:2e05a6a18c1e8da1d84e4b7861b1d6d3b522784c5a4b9069092dcb3297946c09",
+      "line": 24,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults-basepack.base.v1.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:fe66122af18fccc272a64b6cf04d5b47b2ee69b2155d6388c5d90dd8ad98c773",
+      "line": 92,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:af0ce94e83869318f8e708d6f778dfb79e3779426feae2ab93db9c10aa5a1897",
+      "line": 30,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/defaults-basepack.pack.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:7e4f0aad9acc897c0a1688ce76d60216caf444b3691c894612552ecb6129c39b",
+      "line": 44,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/dev.tauri.toolchain.default.pack.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:901c0fee9f6fc7a08816f4e61c76493f0b7e9ec9fc51d3006fe58fa9e80ba54a",
+      "line": 44,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/runtime.tauri.application.default.pack.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:6d961ad26d08f95bb366fcbf618bf0ba136f4f4a62e13ab1af0f5493be775a79",
+      "line": 58,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/shell.cli.default.pack.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:d2b37b77d95e1f98efcbe808d92ef30ee37e7a4905953329fa57e1e7e5554818",
+      "line": 60,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/shell.tauri.default.pack.v4.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:e8b59d4e2232ac2a25463046d2bc61907411010a0dbb8e6facb350adfd138464",
+      "line": 48,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/shell.cli.default.shell.v1.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "json_path": "$.provenance"
+      },
+      "fingerprint": "sha256:98ead9313ca7504eb10cbc2deeaff1c6b176142e4a8e0e046891fba209748cf3",
+      "line": 72,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/shell.tauri.default.shell.v1.json",
+      "rule_id": "pack-boundary.normative-working-tree"
+    },
+    {
+      "evidence": {
+        "declaration": "profile_api_version",
+        "value": "io.tobkiri.profile.v5"
+      },
+      "fingerprint": "sha256:b359002488024336dc49fef5e0ac7a0f5fa4ef7f29252a132c15f18f00029a68",
+      "line": 84,
+      "path": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
+      "rule_id": "pack-boundary.v4-file-uses-v5-api"
+    }
+  ]
+}

@@ -337,6 +337,30 @@ jobs:
             python scripts/quality/scan_pack_architecture.py
           fi
 
+      - name: Enforce shrink-only Pack boundary lint baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python -m pytest scripts/quality/test_scan_pack_boundaries.py -q
+          reference="${RUNNER_TEMP}/pack-boundary-reference.json"
+          baseline="scripts/quality/pack_boundary_baseline.json"
+          if [ -z "${BASE_SHA}" ]; then
+            echo "BASE_SHA is required for Pack boundary baseline validation" >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Base commit is unavailable: ${BASE_SHA}" >&2
+            exit 1
+          fi
+          if git cat-file -e "${BASE_SHA}:${baseline}" 2>/dev/null; then
+            git show "${BASE_SHA}:${baseline}" > "${reference}"
+            python scripts/quality/scan_pack_boundaries.py \
+              --reference-baseline "${reference}"
+          else
+            echo "::warning::Bootstrapping reviewed Pack boundary baseline"
+            python scripts/quality/scan_pack_boundaries.py
+          fi
+
       - name: Validate v4 schemas, provenance, and generated inventory
         run: python scripts/quality/validate_pack_architecture.py
 
