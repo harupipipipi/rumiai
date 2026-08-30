@@ -6,7 +6,9 @@ import {
   DynamicFrontendHost,
   ISOLATED_FRONTEND_SANDBOX,
   ISOLATED_FRAME_RESPONSE_TARGET_ORIGIN,
+  bindFrontendCapabilityClient,
   contributionsForRoute,
+  frontendContributionRevisionKey,
   frontendActionErrorMessage,
   isolatedFrontendFrameUrl,
   parseIsolatedCapabilityRequest,
@@ -15,7 +17,8 @@ import {
   synchronizeFrontendHostQuarantine,
 } from "./DynamicFrontendHost";
 import type {
-  FrontendCapabilityClient,
+  CapturedCapabilityInvocation,
+  FrontendCapabilityInvoker,
   FrontendCatalog,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
@@ -31,7 +34,9 @@ const contribution = (
   owner_pack_id: "feature-pack",
   owner_pack_hash: `sha256:${"1".repeat(64)}`,
   build_identity: "fixture",
+  resolved_profile_id: "fixture",
   resolved_profile_revision: "r1",
+  resolved_activation_id: "activation:fixture-1",
   resolved_plan_hash: "plan-1",
   descriptor_hash: `sha256:${"2".repeat(64)}`,
   route: "/feature",
@@ -41,18 +46,23 @@ const contribution = (
   ...overrides,
 });
 
-const catalog = (items: VerifiedFrontendContribution[]): FrontendCatalog => ({
+const catalog = (
+  items: VerifiedFrontendContribution[],
+  overrides: Partial<FrontendCatalog> = {},
+): FrontendCatalog => ({
   version: "rumi.ui.contribution.v1",
   profile_id: "fixture",
   profile_revision: "r1",
+  activation_id: "activation:fixture-1",
   plan_hash: "plan-1",
   contributions: items,
   diagnostics: [],
   quarantined_pack_ids: [],
   catalog_hash: `sha256:${"3".repeat(64)}`,
+  ...overrides,
 });
 
-const capabilities: FrontendCapabilityClient = {
+const capabilities: FrontendCapabilityInvoker = {
   invokeAction: async () => ({ ok: true }),
   readDataSource: async () => ({ ok: true }),
 };
@@ -63,6 +73,116 @@ test("route visibility follows the active resolved plan", () => {
 
   assert.equal(contributionsForRoute(current, "/feature", "plan-1").length, 1);
   assert.deepEqual(contributionsForRoute(current, "/feature", "plan-2"), []);
+  assert.deepEqual(
+    contributionsForRoute(
+      catalog([contribution({ resolved_activation_id: "activation:stale" })]),
+      "/feature",
+      "plan-1",
+    ),
+    [],
+  );
+});
+
+test("dynamic action and isolated data requests use Host-captured identity", async () => {
+  const captured: CapturedCapabilityInvocation[] = [];
+  const invoker: FrontendCapabilityInvoker = {
+    invokeAction: async (request) => {
+      captured.push(request);
+      return { ok: true };
+    },
+    readDataSource: async (request) => {
+      captured.push(request);
+      return { ok: true };
+    },
+  };
+  const item = contribution();
+  const capturedCatalog = catalog([item]);
+  const bound = bindFrontendCapabilityClient(capturedCatalog, item, invoker);
+  const clientIdentityHints = {
+    contributionId: "attacker.contribution",
+    ownerPackId: "attacker-pack",
+    planHash: "plan-attacker",
+    catalogHash: "catalog-attacker",
+  };
+
+  await bound.invokeAction({
+    contractId: "rumi.action.feature.run.v1",
+    payload: { operation: "run", input: {} },
+    ...clientIdentityHints,
+  });
+  await bound.readDataSource({
+    contractId: "rumi.resource.feature.read.v1",
+    payload: { operation: "read", input: { id: "feature" } },
+    ...clientIdentityHints,
+  });
+
+  assert.deepEqual(captured, [
+    {
+      contractId: "rumi.action.feature.run.v1",
+      payload: { operation: "run", input: {} },
+      profileId: "fixture",
+      profileRevision: "r1",
+      activationId: "activation:fixture-1",
+      planHash: "plan-1",
+      catalogHash: capturedCatalog.catalog_hash,
+      contributionId: "feature.route",
+      ownerPackId: "feature-pack",
+    },
+    {
+      contractId: "rumi.resource.feature.read.v1",
+      payload: { operation: "read", input: { id: "feature" } },
+      profileId: "fixture",
+      profileRevision: "r1",
+      activationId: "activation:fixture-1",
+      planHash: "plan-1",
+      catalogHash: capturedCatalog.catalog_hash,
+      contributionId: "feature.route",
+      ownerPackId: "feature-pack",
+    },
+  ]);
+});
+
+test("an activation A request is not rebound to activation B", async () => {
+  const captured: CapturedCapabilityInvocation[] = [];
+  const invoker: FrontendCapabilityInvoker = {
+    invokeAction: async (request) => {
+      captured.push(request);
+      return { ok: true };
+    },
+    readDataSource: async () => ({ ok: true }),
+  };
+  const itemA = contribution();
+  const catalogA = catalog([itemA]);
+  const catalogB = catalog(
+    [contribution({
+      resolved_profile_revision: "r2",
+      resolved_activation_id: "activation:fixture-2",
+      resolved_plan_hash: "plan-2",
+    })],
+    {
+      profile_revision: "r2",
+      activation_id: "activation:fixture-2",
+      plan_hash: "plan-2",
+      catalog_hash: `sha256:${"4".repeat(64)}`,
+    },
+  );
+  const boundA = bindFrontendCapabilityClient(catalogA, itemA, invoker);
+
+  assert.notEqual(
+    frontendContributionRevisionKey(itemA),
+    frontendContributionRevisionKey(catalogB.contributions[0]),
+  );
+
+  await boundA.invokeAction({
+    contractId: "rumi.action.feature.run.v1",
+    payload: { operation: "run", input: {} },
+    planHash: catalogB.plan_hash,
+    catalogHash: catalogB.catalog_hash,
+  });
+
+  assert.equal(captured[0]?.activationId, "activation:fixture-1");
+  assert.equal(captured[0]?.planHash, "plan-1");
+  assert.equal(captured[0]?.catalogHash, catalogA.catalog_hash);
 });
 
 test("renders a declarative route without importing a product screen", () => {
