@@ -1077,7 +1077,10 @@ def resolve_default_profile(
             "artifact_digest": base_manifest["pack"]["artifact_digest"],
             "definition_revision": base_definition["definition_revision"],
         },
-        "shell": dict(profile["shell"]),
+        "shell": {
+            **dict(profile["shell"]),
+            "executable_artifact_digest": selected_variant["entrypoint_digest"],
+        },
         "application": application,
         "effective_set": effective_set,
         "variant_pins": sorted(
