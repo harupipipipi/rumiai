@@ -3,10 +3,10 @@ import {act, type ComponentProps} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import test from 'node:test';
-import {MemoryRouter} from 'react-router';
+import {MemoryRouter, Route, Routes} from 'react-router';
 import {renderToStaticMarkup} from 'react-dom/server';
 
-import {SetupVerificationBanner, SetupVerificationGate} from './App';
+import {HomeRoute, SetupVerificationBanner, SetupVerificationGate} from './App';
 
 function gateProps(overrides: Partial<ComponentProps<typeof SetupVerificationGate>> = {}) {
   return {
@@ -76,6 +76,32 @@ test('verification banner keeps the recovery link visible without exposing runti
   assert.match(html, /Complete setup to continue/);
   assert.match(html, /Open Setup/);
   assert.match(html, /href="\/setup"/);
+});
+
+test('Home route keeps its child catalog mounted behind an inline verification banner', () => {
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/']}>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <HomeRoute
+              verificationBanner={
+                <SetupVerificationBanner {...gateProps({isSetupDone: false, runtimeStatus: 'starting'})} />
+              }
+            />
+          }
+        >
+          <Route index element={<div data-testid="home-profile-catalog">Profile catalog and CRUD</div>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>
+  );
+
+  assert.match(html, /data-testid="setup-verification-banner"/);
+  assert.match(html, /data-testid="home-profile-catalog"/);
+  assert.doesNotMatch(html, /data-testid="setup-verification-gate"/);
+  assert.doesNotMatch(html, /min-h-screen items-center/);
 });
 
 test('embedded verification gate blocks runtime route content inside the Home layout', () => {

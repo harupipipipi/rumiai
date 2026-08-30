@@ -141,6 +141,10 @@ export interface SetupVerificationBannerProps {
   onRetry?: () => void | Promise<void>;
 }
 
+export interface HomeRouteProps {
+  verificationBanner: ReactNode;
+}
+
 type SetupVerificationCopy = {
   role: 'status' | 'alert';
   title: string;
@@ -305,6 +309,15 @@ export function SetupVerificationBanner({
 }
 
 /**
+ * Home is the Profile catalog and recovery surface. Keep its content mounted
+ * while runtime verification is unresolved; runtime-only child routes use the
+ * gate below instead.
+ */
+export function HomeRoute({verificationBanner}: HomeRouteProps) {
+  return <Layout verificationBanner={verificationBanner} />;
+}
+
+/**
  * Keep every runtime route behind the same health and authority decision.
  * Setup remains reachable because it is the recovery surface for unresolved
  * or stale runtime state.
@@ -411,7 +424,7 @@ function DeferredRouteTree({
 
         <Route
           path={panelRoutes.home}
-          element={<Layout verificationBanner={verificationBanner} />}
+          element={<HomeRoute verificationBanner={verificationBanner} />}
         >
           <Route index element={<Dashboard />} />
           <Route path={panelRoutes.packs.slice(1)} element={gateRuntimeRoute(<LazyPacks />)} />

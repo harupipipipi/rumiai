@@ -63,6 +63,68 @@ function profileRegistry(): NamedProfileRegistry {
   };
 }
 
+function legacyFixtureProfileRecord(
+  profileId: string,
+  displayName: string,
+  order: number,
+): ReturnType<typeof profileRecord> {
+  return {
+    profile_id: profileId,
+    profile_revision: digest(String(order)),
+    profile: {
+      profile_id: profileId,
+      display_name: displayName,
+      profile_api_version: 'io.tobkiri.profile.v4',
+      state: 'needs_resolution',
+      mode: 'interactive',
+      catalog_revision: null,
+      base: {pack_id: 'defaultspack', artifact_digest: null, definition_revision: null},
+      shell: null,
+      packs: [{pack_id: 'defaultspack', artifact_digest: null}],
+    },
+    order,
+    parent_revision: null,
+    tombstone: false,
+    created_at: order,
+    updated_at: order,
+    legacy_ids: [profileId],
+  };
+}
+
+function legacyFixtureRegistry(): NamedProfileRegistry {
+  return {
+    profile_registry_api_version: 'io.tobkiri.profile-registry.v4',
+    generation: 7,
+    active_profile_id: null,
+    active_profile_revision: null,
+    profiles: [
+      {
+        ...profileRecord('defaults', 'Tobkiri Defaults', digest('a')),
+        profile: {
+          ...profileRecord('defaults', 'Tobkiri Defaults', digest('a')).profile,
+          base: {
+            pack_id: 'defaultspack',
+            artifact_digest: digest('b'),
+            definition_revision: digest('c'),
+          },
+          catalog_revision: digest('d'),
+          shell: {
+            provider_id: 'shell.tauri.default',
+            pack_id: 'defaultspack',
+            artifact_digest: digest('e'),
+            definition_revision: digest('f'),
+          },
+          packs: [{pack_id: 'defaultspack', artifact_digest: digest('1')}],
+        },
+        order: 0,
+      },
+      legacyFixtureProfileRecord('default-profile', 'Default Profile', 1),
+      legacyFixtureProfileRecord('new-custom-profile', 'New custom profile', 2),
+      legacyFixtureProfileRecord('new-custom-profile-2', 'New custom profile 2', 3),
+    ],
+  };
+}
+
 function createDashboardDom(): {dom: JSDOM; container: HTMLElement; root: Root} {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'http://localhost/panel/',
@@ -90,6 +152,12 @@ function buttonByLabel(container: HTMLElement, label: string): HTMLButtonElement
   const button = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   assert.ok(button, `missing button ${label}`);
   return button;
+}
+
+function linkByLabel(container: HTMLElement, label: string): HTMLAnchorElement {
+  const link = container.querySelector<HTMLAnchorElement>(`a[aria-label="${label}"]`);
+  assert.ok(link, `missing link ${label}`);
+  return link;
 }
 
 function menuItemByText(text: string): HTMLElement {
@@ -216,6 +284,90 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         await act(async () => root.unmount());
         dom.window.close();
       }
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.defineProperties(globalThis, {
+      window: {value: previousWindow, configurable: true},
+      document: {value: previousDocument, configurable: true},
+      navigator: {value: previousNavigator, configurable: true},
+      localStorage: {value: previousLocalStorage, configurable: true},
+      sessionStorage: {value: previousSessionStorage, configurable: true},
+    });
+    useAppStore.setState(previousState, true);
+  }
+});
+
+test('Home exposes the fresh legacy catalog with no active execution during setup verification', async () => {
+  const previousState = useAppStore.getState();
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousLocalStorage = (globalThis as typeof globalThis & {localStorage?: unknown}).localStorage;
+  const previousSessionStorage = (globalThis as typeof globalThis & {sessionStorage?: unknown}).sessionStorage;
+
+  try {
+    globalThis.fetch = (async (input) => {
+      const path = new URL(String(input), 'http://localhost').pathname;
+      assert.equal(path, '/api/v4/profiles');
+      return jsonResponse(legacyFixtureRegistry());
+    }) as typeof fetch;
+    useAppStore.setState({
+      isSetupDone: false,
+      runtimeReady: false,
+      runtimeStatus: 'starting',
+      runtimeError: null,
+      runtimeDisconnected: false,
+      lastRuntimeHealthyAt: null,
+    });
+    const {dom, container, root} = createDashboardDom();
+    try {
+      await act(async () => {
+        root.render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      });
+      await settle();
+
+      assert.ok(container.querySelector('[data-testid="profile-grid"]'));
+      assert.equal(container.querySelectorAll('[data-profile-card]').length, 4);
+      for (const profileId of [
+        'default-profile',
+        'new-custom-profile',
+        'new-custom-profile-2',
+        'defaults',
+      ]) {
+        assert.ok(container.querySelector(`[data-profile-card="${profileId}"]`), profileId);
+      }
+      assert.match(container.textContent ?? '', /Tobkiri Defaults/);
+      assert.match(container.textContent ?? '', /No active execution Profile/);
+      assert.doesNotMatch(container.textContent ?? '', /unsupported v4 definition/i);
+      assert.ok(container.querySelector('input[aria-label="Search Profiles"]'));
+      assert.ok([...container.querySelectorAll('button')].some(
+        (button) => button.textContent?.includes('Add Profile'),
+      ));
+
+      for (const displayName of [
+        'Tobkiri Defaults',
+        'Default Profile',
+        'New custom profile',
+        'New custom profile 2',
+      ]) {
+        assert.ok(buttonByLabel(container, `Launch ${displayName}`).disabled, displayName);
+        assert.ok(linkByLabel(container, `Browse and review ${displayName}`));
+        assert.ok(linkByLabel(container, `View Pack closure for ${displayName}`));
+      }
+
+      await act(async () => {
+        buttonByLabel(container, 'Open actions for New custom profile').click();
+      });
+      const activate = menuItemByText('Set Active') as HTMLAnchorElement;
+      assert.equal(activate.getAttribute('href'), '/profile?profile_id=new-custom-profile#profile-ceremony');
+      assert.equal(activate.getAttribute('aria-disabled'), 'true');
+      assert.equal(activate.getAttribute('tabindex'), '-1');
+      assert.match(activate.getAttribute('title') ?? '', /Setup verification/);
+    } finally {
+      await act(async () => root.unmount());
+      dom.window.close();
     }
   } finally {
     globalThis.fetch = previousFetch;
