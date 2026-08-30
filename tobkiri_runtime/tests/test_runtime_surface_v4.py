@@ -128,13 +128,19 @@ def _capability_snapshot(active_runtime, operations) -> dict[str, object]:
         {key: target[key] for key in target if key != "owner_pack_id"} for target in targets
     ]
     profile_id = str(active_runtime.resolved.profile["profile_id"])
+    profile_revision = str(active_runtime.resolved.plan["profile_revision"])
+    activation_id = str(active_runtime.activation["activation_id"])
     plan_digest = str(active_runtime.resolved.plan["plan_digest"])
     return {
         "profile_id": profile_id,
+        "profile_revision": profile_revision,
+        "activation_id": activation_id,
         "plan_digest": plan_digest,
         "catalog_hash": canonical_digest(
             {
                 "profile_id": profile_id,
+                "profile_revision": profile_revision,
+                "activation_id": activation_id,
                 "plan_digest": plan_digest,
                 "contributions": digest_targets,
             }

@@ -822,6 +822,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (
           !catalog.profile_id
+          || !catalog.profile_revision
+          || !catalog.activation_id
           || !catalog.plan_hash
           || !catalog.catalog_hash
           || !Array.isArray(catalog.contributions)
@@ -957,6 +959,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (
       !operation.invokable
       || contribution.action_contract !== operation.contractId
+      || contribution.resolved_profile_id !== catalog.profile_id
+      || contribution.resolved_profile_revision !== catalog.profile_revision
+      || contribution.resolved_activation_id !== catalog.activation_id
+      || contribution.resolved_plan_hash !== catalog.plan_hash
     ) {
       throw new Error('Tobkiri has not verified this Pack operation for invocation.');
     }
@@ -976,6 +982,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const result = await invokeFrontendCapability({
         profileId: catalog.profile_id,
+        profileRevision: catalog.profile_revision,
+        activationId: catalog.activation_id,
         planHash: catalog.plan_hash,
         catalogHash: catalog.catalog_hash,
         contributionId: contribution.contribution_id,

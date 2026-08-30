@@ -934,6 +934,8 @@ export function invokeFrontendCapability(
       request_id: requestId,
       expires_at: Date.now() / 1000 + 30,
       profile_id: request.profileId,
+      profile_revision: request.profileRevision,
+      activation_id: request.activationId,
       plan_hash: request.planHash,
       catalog_hash: request.catalogHash,
       contribution_id: request.contributionId,

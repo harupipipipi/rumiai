@@ -403,6 +403,7 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
           version: 'rumi.ui.contribution.v1',
           profile_id: 'profile-a',
           profile_revision: 'sha256:profile-a',
+          activation_id: 'activation:profile-a',
           plan_hash: 'sha256:plan-a',
           contributions: [{
             contribution_id: 'file-inspect',
@@ -423,6 +424,8 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
   assert.equal(lastFetchInit?.cache, 'no-store');
   const result = await invokeFrontendCapability({
     profileId: catalog.profile_id,
+    profileRevision: catalog.profile_revision,
+    activationId: catalog.activation_id,
     planHash: catalog.plan_hash,
     catalogHash: catalog.catalog_hash,
     contributionId: 'file-inspect',
@@ -441,6 +444,8 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
     request_id: invocationBody?.request_id,
     expires_at: invocationBody?.expires_at,
     profile_id: 'profile-a',
+    profile_revision: 'sha256:profile-a',
+    activation_id: 'activation:profile-a',
     plan_hash: 'sha256:plan-a',
     catalog_hash: 'sha256:catalog-a',
     contribution_id: 'file-inspect',
@@ -464,6 +469,8 @@ test('capability invocation keeps the supplied request identity in both body and
 
   await invokeFrontendCapability({
     profileId: 'profile-a',
+    profileRevision: 'sha256:profile-a',
+    activationId: 'activation:profile-a',
     planHash: 'sha256:plan-a',
     catalogHash: 'sha256:catalog-a',
     contributionId: 'contribution-a',
@@ -540,6 +547,7 @@ test('runtime operation invocation uses only its exact invocation contribution a
     invocation_reason: null,
     invokable: true,
     catalog_digest: digest('c'),
+    activation_id: 'activation:defaults-one',
     function_id: 'function.one',
     function_principal_id: 'principal.function.one',
     caller_function_id: 'caller.function.one',
@@ -603,6 +611,9 @@ test('runtime operation invocation uses only its exact invocation contribution a
   assert.equal(decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')), 'POST /api/ui/capability/invoke');
   assert.equal(body?.contribution_id, 'invocation-contribution');
   assert.equal(body?.catalog_hash, digest('c'));
+  assert.equal(body?.profile_id, 'defaults');
+  assert.equal(body?.profile_revision, digest('a'));
+  assert.equal(body?.activation_id, 'activation:defaults-one');
   assert.equal(body?.plan_hash, digest('b'));
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'catalog_revision'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'operation_digest'), false);

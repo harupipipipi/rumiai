@@ -20,6 +20,7 @@ const conversationCatalog = (): ApiDynamicFrontendCatalog => ({
   version: 'rumi.ui.contribution.v1',
   profile_id: 'research-a',
   profile_revision: `sha256:${'a'.repeat(64)}`,
+  activation_id: 'activation:research-a',
   plan_hash: `sha256:${'a'.repeat(64)}`,
   contributions: [{
     contribution_id: 'research.conversation.complete',
@@ -29,7 +30,9 @@ const conversationCatalog = (): ApiDynamicFrontendCatalog => ({
     owner_pack_id: 'research-ui-pack',
     owner_pack_hash: `sha256:${'b'.repeat(64)}`,
     build_identity: 'research-ui-build',
+    resolved_profile_id: 'research-a',
     resolved_profile_revision: `sha256:${'a'.repeat(64)}`,
+    resolved_activation_id: 'activation:research-a',
     resolved_plan_hash: `sha256:${'a'.repeat(64)}`,
     descriptor_hash: `sha256:${'c'.repeat(64)}`,
     route: '/research/conversation',
@@ -221,6 +224,7 @@ test('Conversation readiness requires one exact live capability binding', () => 
     ['version', (candidate) => { candidate.version = 'other'; }],
     ['profile id', (candidate) => { candidate.profile_id = ''; }],
     ['profile revision', (candidate) => { candidate.profile_revision = 'sha256:short'; }],
+    ['activation id', (candidate) => { candidate.activation_id = ''; }],
     ['plan hash', (candidate) => { candidate.plan_hash = 'sha256:short'; }],
     ['catalog hash', (candidate) => { candidate.catalog_hash = 'sha256:short'; }],
     ['quarantine', (candidate) => { candidate.quarantined_pack_ids = ['research-ui-pack']; }],
@@ -236,7 +240,13 @@ test('Conversation readiness requires one exact live capability binding', () => 
     ['owner hash', (candidate) => { candidate.contributions[0].owner_pack_hash = ''; }],
     ['descriptor hash', (candidate) => { candidate.contributions[0].descriptor_hash = ''; }],
     ['profile binding', (candidate) => {
+      candidate.contributions[0].resolved_profile_id = 'other-profile';
+    }],
+    ['profile revision binding', (candidate) => {
       candidate.contributions[0].resolved_profile_revision = 'sha256:stale';
+    }],
+    ['activation binding', (candidate) => {
+      candidate.contributions[0].resolved_activation_id = 'activation:stale';
     }],
     ['plan binding', (candidate) => {
       candidate.contributions[0].resolved_plan_hash = 'sha256:stale';

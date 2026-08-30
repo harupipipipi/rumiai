@@ -20,6 +20,7 @@ function operation(id: string, invokable = true): RuntimeOperationDescriptor {
     invocation_reason: null,
     invokable,
     catalog_digest: `sha256:${'b'.repeat(64)}`,
+    activation_id: 'activation:flow-one',
     function_id: `${id}.function`,
     function_principal_id: `${id}.principal`,
     caller_function_id: `${id}.caller`,

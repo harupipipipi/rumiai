@@ -233,6 +233,7 @@ export interface RuntimeOperationDescriptor {
   invocation_reason: string | null;
   invokable: boolean;
   catalog_digest: string;
+  activation_id: string;
   function_id: string;
   function_principal_id: string;
   caller_function_id: string;
@@ -1481,6 +1482,7 @@ export function extractExactOperationDescriptors(
     ) {
       return [];
     }
+    if (!validString(candidate.activation_id)) return [];
     const operationIdentity: Pick<
       RuntimeOperationDescriptor,
       'contract_id' | 'operation_id' | 'function_id' | 'owner_pack_id'
@@ -1510,6 +1512,7 @@ export function extractExactOperationDescriptors(
       invocation_reason: invocationReason,
       invokable: candidate.invokable,
       catalog_digest: candidate.catalog_digest,
+      activation_id: candidate.activation_id,
       function_id: candidate.function_id,
       function_principal_id: candidate.function_principal_id,
       caller_function_id: candidate.caller_function_id,
@@ -1730,6 +1733,7 @@ function runtimeOperationMatchesSnapshot(
     && candidate.invocation_reason === operation.invocation_reason
     && candidate.invokable === operation.invokable
     && candidate.catalog_digest === operation.catalog_digest
+    && candidate.activation_id === operation.activation_id
     && candidate.function_id === operation.function_id
     && candidate.function_principal_id === operation.function_principal_id
     && candidate.caller_function_id === operation.caller_function_id
@@ -1788,6 +1792,7 @@ export function invokeRuntimeOperation({
     || !validString(operation.function_principal_id)
     || !validString(operation.caller_function_id)
     || !validString(operation.authority_reference)
+    || !validString(operation.activation_id)
     || !isRecord(operation.schema)
     || !isSha256Digest(operation.catalog_digest)
     || (operation.invocation_contribution_id !== null
@@ -1819,6 +1824,9 @@ export function invokeRuntimeOperation({
     'authority',
     'authority_reference',
     'profile_id',
+    'profile_revision',
+    'activation_id',
+    'plan_digest',
     'plan_hash',
     'catalog_hash',
   ]);
@@ -1885,6 +1893,8 @@ export function invokeRuntimeOperation({
   }
   return invokeFrontendCapability({
     profileId: envelope.profile_id,
+    profileRevision: envelope.profile_revision,
+    activationId: operation.activation_id,
     planHash: envelope.plan_digest,
     catalogHash: operation.invocation_catalog_hash,
     contributionId: operation.invocation_contribution_id,

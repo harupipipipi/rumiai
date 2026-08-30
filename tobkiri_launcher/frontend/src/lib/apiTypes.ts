@@ -74,7 +74,9 @@ export interface ApiFrontendContribution {
   route?: string;
   owner_pack_hash?: string;
   build_identity?: string;
+  resolved_profile_id?: string;
   resolved_profile_revision?: string;
+  resolved_activation_id?: string;
   resolved_plan_hash?: string;
   descriptor_hash?: string;
   view?: {type?: string} | null;
@@ -94,6 +96,7 @@ export interface ApiDynamicFrontendCatalog {
   version: string;
   profile_id: string;
   profile_revision: string;
+  activation_id: string;
   plan_hash: string;
   contributions: ApiFrontendContribution[];
   diagnostics: ApiFrontendDiagnostic[];
@@ -109,6 +112,8 @@ export interface ApiUiCatalogData {
 
 export interface FrontendCapabilityInvocation {
   profileId: string;
+  profileRevision: string;
+  activationId: string;
   planHash: string;
   catalogHash: string;
   contributionId: string;

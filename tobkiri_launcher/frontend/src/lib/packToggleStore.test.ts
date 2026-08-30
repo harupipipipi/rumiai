@@ -138,6 +138,7 @@ function dynamicCatalog() {
     version: 'rumi.ui.contribution.v1',
     profile_id: samplePack.profileId,
     profile_revision: samplePack.profileRevision,
+    activation_id: 'activation:profile-a',
     plan_hash: samplePack.planDigest,
     contributions: [],
     diagnostics: [],

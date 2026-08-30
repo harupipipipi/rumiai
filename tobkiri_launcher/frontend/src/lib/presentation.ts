@@ -46,6 +46,7 @@ export function isVerifiedDynamicFrontendCatalog(
     && catalog.version === DYNAMIC_FRONTEND_CATALOG_VERSION
     && nonEmpty(catalog.profile_id)
     && SHA256_DIGEST.test(catalog.profile_revision)
+    && nonEmpty(catalog.activation_id)
     && SHA256_DIGEST.test(catalog.plan_hash)
     && SHA256_DIGEST.test(catalog.catalog_hash)
     && Array.isArray(catalog.contributions)
@@ -72,7 +73,9 @@ function isVerifiedContributionBinding(
     && nonEmpty(contribution.build_identity)
     && SHA256_DIGEST.test(contribution.owner_pack_hash ?? '')
     && SHA256_DIGEST.test(contribution.descriptor_hash ?? '')
+    && contribution.resolved_profile_id === catalog.profile_id
     && contribution.resolved_profile_revision === catalog.profile_revision
+    && contribution.resolved_activation_id === catalog.activation_id
     && contribution.resolved_plan_hash === catalog.plan_hash
     && contribution.view?.type === query.viewType
     && (!query.actionContract || contribution.action_contract === query.actionContract)

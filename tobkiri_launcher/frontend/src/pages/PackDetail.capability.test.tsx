@@ -48,6 +48,7 @@ const catalog: ApiDynamicFrontendCatalog = {
   version: 'rumi.ui.contribution.v1',
   profile_id: 'profile-a',
   profile_revision: 'sha256:profile',
+  activation_id: 'activation:profile-a',
   plan_hash: 'sha256:plan',
   contributions: [{
     contribution_id: 'file-inspect',

@@ -31,6 +31,7 @@ function optionalConversationCatalog(profileId = 'defaults', include = true): Ap
     version: 'rumi.ui.contribution.v1',
     profile_id: profileId,
     profile_revision: digest('a'),
+    activation_id: `activation:${profileId}`,
     plan_hash: digest('b'),
     contributions: include ? [{
       contribution_id: `${profileId}.conversation.complete`,
@@ -45,7 +46,9 @@ function optionalConversationCatalog(profileId = 'defaults', include = true): Ap
       route: `/${profileId}/conversation`,
       owner_pack_hash: digest('c'),
       build_identity: `${profileId}-conversation-build`,
+      resolved_profile_id: profileId,
       resolved_profile_revision: digest('a'),
+      resolved_activation_id: `activation:${profileId}`,
       resolved_plan_hash: digest('b'),
       descriptor_hash: digest('d'),
       view: {type: 'conversation_v4'},

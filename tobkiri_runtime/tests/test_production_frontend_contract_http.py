@@ -274,7 +274,7 @@ def test_named_profile_registry_crud_http_preserves_active_pointer_and_history(
 def test_home_and_pack_workflow_use_only_real_broker_contracts(
     production_server,
 ) -> None:
-    server, _session, authority = production_server
+    server, session, authority = production_server
     authority_path = authority.path
     cookie, csrf, origin = _authenticate(server)
     read_headers = {
@@ -926,7 +926,7 @@ def test_runtime_surface_operation_identity_invokes_exact_capability_binding(
         "expires_at": time.time() + 30,
         "profile_id": envelope["profile_id"],
         "profile_revision": envelope["profile_revision"],
-        "activation_id": envelope["records"]["activation_record"]["activation_id"],
+        "activation_id": operation["activation_id"],
         "plan_hash": envelope["plan_digest"],
         "catalog_hash": operation["invocation_catalog_hash"],
         "contribution_id": operation["invocation_contribution_id"],

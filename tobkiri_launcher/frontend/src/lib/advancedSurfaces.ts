@@ -164,7 +164,9 @@ function operationHasExactInvocationBinding(
     && operation.invocation_contribution_id !== null
     && operation.invocation_owner_pack_id === operation.owner_pack_id
     && operation.invocation_catalog_hash === envelope.catalog_revision
-    && operation.catalog_digest === envelope.catalog_revision;
+    && operation.catalog_digest === envelope.catalog_revision
+    && typeof operation.activation_id === 'string'
+    && operation.activation_id.length > 0;
 }
 
 /**

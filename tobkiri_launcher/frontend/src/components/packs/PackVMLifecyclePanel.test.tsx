@@ -491,6 +491,7 @@ test('PackVM GUI presents diagnostic severity, owner, and contribution evidence'
       version: 'rumi.ui.contribution.v1',
       profile_id: 'profile-a',
       profile_revision: digest('1'),
+      activation_id: 'activation:profile-a',
       plan_hash: digest('2'),
       contributions: [],
       diagnostics: [{

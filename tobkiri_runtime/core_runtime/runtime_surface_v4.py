@@ -1677,6 +1677,7 @@ class RuntimeSurfaceService:
                             f"browsing::{selected_profile_id}::{pack_id}::"
                             f"{contract_id}::{operation_name}"
                         ),
+                        "activation_id": str(snapshot.active.activation["activation_id"]),
                         "catalog_digest": str(entry["definition"]["digest"]),
                         "domain_kind": "browsing",
                         "artifact_digest": str(pack["artifact_digest"]),
@@ -1900,6 +1901,7 @@ class RuntimeSurfaceService:
                 "contract_id": str(binding["contract_id"]),
                 "operation_id": str(binding["operation_id"]),
                 "contribution_id": _operation_contribution_id(binding),
+                "activation_id": str(active.activation["activation_id"]),
                 "catalog_digest": str(active.resolved.lock["catalog_revision"]),
                 "domain_kind": str(binding["domain_kind"]),
                 "artifact_digest": str(binding["artifact_digest"]),
@@ -2447,8 +2449,15 @@ def _capability_invocation_target(
     if value is None:
         return None
     profile_id = str(active.resolved.profile["profile_id"])
+    profile_revision = str(active.resolved.plan["profile_revision"])
+    activation_id = str(active.activation["activation_id"])
     plan_digest = str(active.resolved.plan["plan_digest"])
-    if value.get("profile_id") != profile_id or value.get("plan_digest") != plan_digest:
+    if (
+        value.get("profile_id") != profile_id
+        or value.get("profile_revision") != profile_revision
+        or value.get("activation_id") != activation_id
+        or value.get("plan_digest") != plan_digest
+    ):
         return None
     targets = value.get("targets")
     if not isinstance(targets, list) or any(
@@ -2473,6 +2482,8 @@ def _capability_invocation_target(
     expected_hash = canonical_digest(
         {
             "profile_id": profile_id,
+            "profile_revision": profile_revision,
+            "activation_id": activation_id,
             "plan_digest": plan_digest,
             "contributions": digest_targets,
         }
