@@ -45,6 +45,7 @@ from ecosystem.rumi_workspace_mount_pack.runtime.mounts import (
 )
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
+    BackendRegistry,
     BackendStatus,
 )
 from tobkiri_host.effects import ProviderOutcome
@@ -273,6 +274,33 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     active = capture_default_profile()
 
     authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+    binding = _workspace_binding(store)
+    backend = _MediaBackend(store, binding)
+    authority_session = capture_production_dispatch(
+        active,
+        bundle_root=_bundle_root(),
+        ecosystem_root=RUNTIME_ROOT / "ecosystem",
+        authority_store=authority,
+        backends=BackendRegistry((backend,)),
+    )
+    for contract_id, operation_id in (
+        (MEDIA_CONTRACT, MEDIA_OPERATION),
+        (FILE_CONTRACT, FILE_OPERATION),
+    ):
+        context = authority_session.context_for(
+            contract_id,
+            operation_id,
+            "preflight",
+        )
+        resolved = authority_session.broker._catalog.resolve(
+            contract_id,
+            operation_id,
+            ">=1,<2",
+        )
+        backend.target_domains[resolved.principal_ref.value] = context.target_domain_id
+    backend.session = authority_session
+    authority_session.close()
+
     session = capture_production_dispatch(
         active,
         bundle_root=_bundle_root(),

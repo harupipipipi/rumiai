@@ -1471,6 +1471,21 @@ def capture_production_dispatch(
         )
         target_backend_digests[target.principal_id] = backend.status.backend_digest
 
+    # An optional Pack approval is part of the captured runtime boundary even
+    # when its selected PackVM backend is unavailable.  The absence of a
+    # backend must suppress grants and providers, but it must not turn a
+    # mutable approval into an uncaptured dependency of this session.
+    for pack_id in sorted(optional_pack_ids):
+        if pack_id in captured_dynamic_approvals:
+            continue
+        try:
+            pack_approval = capture_valid_pack_approval(pack_id)
+        except Exception:
+            continue
+        captured_dynamic_approvals[pack_id] = str(
+            pack_approval["approval_revision"]
+        )
+
     def authority_target_domain(binding: ResolvedOperationBinding) -> str:
         target_suffix = binding.principal_ref.value.removeprefix("sha256:")[:24]
         domain_id = f"domain.provider.{target_suffix}.{activation_suffix}"
