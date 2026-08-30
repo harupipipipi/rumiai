@@ -23,11 +23,24 @@ if str(ROOT) not in sys.path:
 
 from tobkiri_protocol.canonical import canonical_json  # noqa: E402
 from tobkiri_protocol.validation import validate_document  # noqa: E402
+from core_runtime.profile_projection_migration import (  # noqa: E402
+    COMPATIBILITY_RELEASE,
+    REMOVE_NO_EARLIER_THAN_RELEASE,
+    RETIREMENTS,
+    SUNSET_AT,
+)
 
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 EXECUTABLE_SOURCES = ROOT / "schemas" / "executable_sources.v1.json"
-EXCLUDED_PACKS: frozenset[str] = frozenset()
+EXCLUDED_PACKS: frozenset[str] = frozenset(
+    {
+        "rumi_agent_services_pack",
+        "rumi_local_agent_pack",
+        "rumi_pack_suite_pack",
+        "rumi_reference_ui_pack",
+    }
+)
 GENERATOR = "tobkiri.scripts.migrate_pack_artifacts_v4"
 GENERATOR_VERSION = "1.0.0"
 START_COMMIT = "1329f300cd2a8e15170edb1accce8d7c3167882b"
@@ -1207,6 +1220,45 @@ def generate(*, check: bool) -> dict[str, int]:
                     raise PackV4MigrationError(f"generated Pack v4 artifact drift: {path}")
             else:
                 path.write_text(text, encoding="utf-8")
+    forbidden_alias_artifacts = {
+        "artifact-index.v4.json",
+        "contracts.v4.json",
+        "ecosystem.json",
+        "executables.v4.json",
+        "pack.v4.json",
+    }
+    for retirement in RETIREMENTS:
+        pack_root = ECOSYSTEM / retirement.legacy_pack_id
+        descriptor = retirement.resolved()
+        alias_text = _json_text(
+            {
+                "schema": "io.tobkiri.profile-projection-compatibility-alias.v1",
+                "legacy_pack_id": retirement.legacy_pack_id,
+                "projection_id": retirement.projection_id,
+                "artifact_root": retirement.artifact_root,
+                "content_digest": descriptor["content_digest"],
+                "read_only": True,
+                "runtime_authority": False,
+                "compatibility_release": COMPATIBILITY_RELEASE,
+                "remove_no_earlier_than_release": REMOVE_NO_EARLIER_THAN_RELEASE,
+                "sunset_at": SUNSET_AT,
+            }
+        )
+        alias_path = pack_root / "compatibility-alias.v1.json"
+        if check:
+            if any((pack_root / name).exists() for name in forbidden_alias_artifacts):
+                raise PackV4MigrationError(
+                    f"retired Pack alias still contains authority artifacts: {pack_root}"
+                )
+            if not alias_path.is_file() or alias_path.read_text(
+                encoding="utf-8"
+            ) != alias_text:
+                raise PackV4MigrationError(
+                    f"retired Pack alias metadata drift: {alias_path}"
+                )
+        else:
+            pack_root.mkdir(parents=True, exist_ok=True)
+            alias_path.write_text(alias_text, encoding="utf-8")
     return {
         "packs": len(rendered),
         "valid": len(rendered),

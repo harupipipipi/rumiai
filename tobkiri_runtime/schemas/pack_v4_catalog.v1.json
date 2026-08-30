@@ -1,13 +1,17 @@
 {
   "catalog_api_version": "io.tobkiri.pack-source-catalog.v1",
-  "excluded_packs": [],
+  "excluded_packs": [
+    "rumi_agent_services_pack",
+    "rumi_local_agent_pack",
+    "rumi_pack_suite_pack",
+    "rumi_reference_ui_pack"
+  ],
   "migration_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
   "pack_ids": [
     "defaults",
     "defaultspack",
     "rumi_agent_continuity_pack",
     "rumi_agent_runtime_service_pack",
-    "rumi_agent_services_pack",
     "rumi_agent_state_store_pack",
     "rumi_agent_workroom_pack",
     "rumi_agentic_qa_pack",
@@ -79,7 +83,6 @@
     "rumi_knowledge_marketplace_pack",
     "rumi_knowledge_store_pack",
     "rumi_line_connector_pack",
-    "rumi_local_agent_pack",
     "rumi_localization_pack",
     "rumi_mcp_gateway_pack",
     "rumi_mcp_server_pack",
@@ -99,12 +102,10 @@
     "rumi_omnichannel_agent_inbox_pack",
     "rumi_operations_company_pack",
     "rumi_p2p_connector_pack",
-    "rumi_pack_suite_pack",
     "rumi_prompt_studio_pack",
     "rumi_provider_adapters_pack",
     "rumi_provider_registry_pack",
     "rumi_qr_pairing_connector_pack",
-    "rumi_reference_ui_pack",
     "rumi_repository_context_pack",
     "rumi_research_pack",
     "rumi_runtime_benchmark_pack",
@@ -616,90 +617,6 @@
         "mode": "offline-one-way-import",
         "owner": "rumi_agent_runtime_service_pack",
         "source_format": "rumi.pack.v3.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "rumi_agent_services_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_agent_services_pack",
-        "rumi_agent_services_pack"
-      ],
-      "legacy_operations": [
-        {
-          "component_id": "agent_services_capabilities",
-          "id": "rumi.agent_services.capability_catalog",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.routing",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.handoffs",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.workflow_templates",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_examples",
-          "id": "rumi.agent_services.examples",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_presets",
-          "id": "rumi.agent_services.presets",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_profiles",
-          "id": "rumi.agent_services.profiles",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_prompts",
-          "id": "rumi.agent_services.prompts",
-          "source": "legacy_component"
-        }
-      ],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_agent_services_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:3fe30493af829e0891d2f0891476c7a002473c152290e6819b7680d4e001c581",
-          "path": "ecosystem/rumi_agent_services_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_agent_services_pack",
-        "source_format": "ecosystem.json"
       },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
@@ -8248,49 +8165,6 @@
       "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
-      "description": "",
-      "display_name": "rumi_local_agent_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_local_agent_pack",
-        "rumi_local_agent_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_local_agent_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:d3874489fb11b5bac98d90b0332890d6c45bb884260d0808a49345902b75bb74",
-          "path": "ecosystem/rumi_local_agent_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_local_agent_pack",
-        "source_format": "ecosystem.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
       "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
       "display_name": "Rumi Localization Pack",
       "execution_boundary": "declarative_only",
@@ -10180,49 +10054,6 @@
       "workspace_boundary": "host_brokered"
     },
     {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "Rumi Pack Suite Pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_pack_suite_pack",
-        "rumi_pack_suite_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_pack_suite_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:7ede30e875c651e5ce8874526f1f74654a489fc0fcfccb28f51f37995c0e449e",
-          "path": "ecosystem/rumi_pack_suite_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_pack_suite_pack",
-        "source_format": "ecosystem.json"
-      },
-      "version": "0.1.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
       "approval_policy": "capability_gated",
       "authority": "v4-authoritative",
       "capabilities": [
@@ -11051,49 +10882,6 @@
         "mode": "offline-one-way-import",
         "owner": "rumi_qr_pairing_connector_pack",
         "source_format": "rumi.pack.v3.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "rumi_reference_ui_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_reference_ui_pack",
-        "rumi_reference_ui_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_reference_ui_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:cc1aeebfe588488e066150fc8a976372780ab986b8073f253137362cba8a3c02",
-          "path": "ecosystem/rumi_reference_ui_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_reference_ui_pack",
-        "source_format": "ecosystem.json"
       },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"

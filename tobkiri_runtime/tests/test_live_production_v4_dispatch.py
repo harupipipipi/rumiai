@@ -611,7 +611,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
         "catalog.read",
         {"_session_id": "session.panel.first-start"},
     )
-    assert result["count"] == 143
+    assert result["count"] == 139
     assert result["profile_id"] == "defaults"
     assert result["plan_digest"] == active.resolved.plan["plan_digest"]
     assert [event["event_state"] for event in store.audit_events()][-3:] == [
@@ -676,7 +676,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
             "catalog.read",
             {"_session_id": "session.panel.restart"},
         )["count"]
-        == 143
+        == 139
     )
 
     catalog_grant = next(

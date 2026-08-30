@@ -68,8 +68,8 @@
     {
       "path": "ecosystem/defaultspack/domain/runtime_v4/service.py",
       "type": "regular-file",
-      "size": 102850,
-      "sha256": "a9fb53b65289de2dc5241aed9a08db2f1dd5508d25647413908a437f5ac8cba1",
+      "size": 104079,
+      "sha256": "1d1e2cdb5c340498156dd4bf9e7f9b35ea9af6550cede905193f6771f87365d8",
       "executable": false
     },
     {
@@ -97,7 +97,7 @@
       "path": "ecosystem/defaultspack/v4/bundle.lock.json",
       "type": "regular-file",
       "size": 26933,
-      "sha256": "06b94a7a65947a261d814c9974d3d86182d73de631530814bbe15d559ff0e3fe",
+      "sha256": "094b9f887a7a4ca8a8f310f7a5a90a3f8a147c49f9f6d651fb173d5f1857b5b1",
       "executable": false
     },
     {
@@ -117,22 +117,22 @@
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
       "type": "regular-file",
-      "size": 15459,
-      "sha256": "42a21fdd88955ebad921ceda5727ddffe0134f8bbe8a93d9829ae29dc476e99b",
+      "size": 15594,
+      "sha256": "e21dbfd76b1ce6d27ede3be61f592536cac1babd37fcd211b706fc4c36a18fa3",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
       "type": "regular-file",
-      "size": 42539,
-      "sha256": "112669f09cbe1387394f26a70fe41efa73bd07adbc236d0dc17fc7023a3ee23b",
+      "size": 42568,
+      "sha256": "d671e12ac9cd50a90e7dae1f7d4d3a5dd2f9195e08a72bca21ec9c7e507868af",
       "executable": false
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.release.provenance.json",
       "type": "regular-file",
-      "size": 34118,
-      "sha256": "608fde791fd4d8c4f6fc4327a53a3892026ab56545317135e828fd2c37b44a37",
+      "size": 34305,
+      "sha256": "4ea5483663c3e0f491545ab14ccb88e2041b5d0bc533fdf99f69518284d6d3d9",
       "executable": false
     },
     {
@@ -1132,8 +1132,8 @@
     {
       "path": "scripts/generate_profile_artifacts.py",
       "type": "regular-file",
-      "size": 32516,
-      "sha256": "63affd61e0967dacb319cda66bbc4c86258b68ffbdfefe97221cbf17f77f050a",
+      "size": 33829,
+      "sha256": "bfabfcb027892fd7aa5df771d8043e766a447b057727a7e6820ea7361d1c1b40",
       "executable": false
     },
     {
@@ -1146,15 +1146,15 @@
     {
       "path": "scripts/migrate_manifest_authority.py",
       "type": "regular-file",
-      "size": 19780,
-      "sha256": "855a358696ff075be42c369d417666176542884f7b82a84ffeac36bb32c5f2fb",
+      "size": 20150,
+      "sha256": "108c3d2aaac6048b9281bde78d33644698c1e2672b59f3a5270c4baeafef0dd9",
       "executable": false
     },
     {
       "path": "scripts/migrate_pack_artifacts_v4.py",
       "type": "regular-file",
-      "size": 50933,
-      "sha256": "a519f7045fa012eafa2b73b7c85c6d19508f2c3f5a387280422353e74465bdf2",
+      "size": 52944,
+      "sha256": "55605649552c337ed502d4a7fe80b706ee41ecda12936332a74c41b43483863f",
       "executable": false
     },
     {
@@ -1601,15 +1601,22 @@
     {
       "path": "tobkiri_protocol/schemas/profile_artifact_lock_v1.schema.json",
       "type": "regular-file",
-      "size": 2791,
-      "sha256": "f8035fb3cbc6d10edd66a63935b1f6f1faa1c8d301464ebb57c16d1869647f00",
+      "size": 3164,
+      "sha256": "b9ffec2d23ac0490466754a2c4b9978e82fc598818c90a7f84a9f084094711bc",
+      "executable": false
+    },
+    {
+      "path": "tobkiri_protocol/schemas/profile_content_projection_v1.schema.json",
+      "type": "regular-file",
+      "size": 1667,
+      "sha256": "420709af812c136ce5dff37d6449a3271c2a8f3d503fa979d33860e181027ca6",
       "executable": false
     },
     {
       "path": "tobkiri_protocol/schemas/profile_intent_v1.schema.json",
       "type": "regular-file",
-      "size": 4795,
-      "sha256": "0d59900c2bc755fa004887d0a42e5440be66c0367b346ed9f95b7ce1ee17e646",
+      "size": 5015,
+      "sha256": "a4358c1845050ac8c8fc215c2d28f83645dada8a788192b10b78932813f9e5c4",
       "executable": false
     },
     {
@@ -1622,8 +1629,8 @@
     {
       "path": "tobkiri_protocol/schemas/profile_lock_v5.schema.json",
       "type": "regular-file",
-      "size": 6450,
-      "sha256": "571fe5f18b269159c3336b0b8eb5daa9e16d8b2440bbbe495551a5b9c4cc47b9",
+      "size": 6671,
+      "sha256": "0288649d4042c368f3533b9df1c75e5fbb47d7b1c34d3f07a3086ab71448e4ac",
       "executable": false
     },
     {
@@ -1636,15 +1643,15 @@
     {
       "path": "tobkiri_protocol/schemas/profile_v4.schema.json",
       "type": "regular-file",
-      "size": 5920,
-      "sha256": "b8e026f38d7477903f6ccbd04a0e855123491652c86c5bed6ae62c54cf146e85",
+      "size": 6142,
+      "sha256": "c98f0422edc4571c6ff306c851acc3052d37f9d016facae5346afbcf29da7888",
       "executable": false
     },
     {
       "path": "tobkiri_protocol/schemas/profile_v5.schema.json",
       "type": "regular-file",
-      "size": 7412,
-      "sha256": "8b31667b1e6e5ba80a62b625ad560a1423b8fa31712791cfbed2520deb4299e8",
+      "size": 7634,
+      "sha256": "55bfb92bfef12d88683bd75eeb942fcd4af8652555414bb2dcd83e7b868a8ddb",
       "executable": false
     },
     {
@@ -1685,8 +1692,8 @@
     {
       "path": "tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
       "type": "regular-file",
-      "size": 5522,
-      "sha256": "335d22467c2a13de341eb65f6fc47fc487d4f655cc064f0873989d3eef73c8b5",
+      "size": 5743,
+      "sha256": "6bff1651f3902503ee755539189aa36ce5b2458026a0ea47c153f60a0fec1acf",
       "executable": false
     },
     {

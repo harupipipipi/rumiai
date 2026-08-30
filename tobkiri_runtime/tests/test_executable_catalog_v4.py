@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_all_canonical_executable_catalogs_compile_without_exclusion() -> None:
     pack_roots = sorted(path.parent for path in (ROOT / "ecosystem").glob("*/pack.v4.json"))
     compiled = [compile_pack_root(path) for path in pack_roots]
-    assert len(compiled) == 143
+    assert len(compiled) == 139
     assert {item.artifact.pack_id for item in compiled} == {path.name for path in pack_roots}
 
     conversation = next(item for item in compiled if item.artifact.pack_id == "defaultspack")

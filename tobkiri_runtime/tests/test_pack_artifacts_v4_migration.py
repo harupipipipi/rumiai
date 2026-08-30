@@ -281,7 +281,7 @@ def test_legacy_operation_source_cannot_enter_v4_authority_catalog() -> None:
     record = next(
         item
         for item in _catalog()["packs"]
-        if item["pack_id"] == "rumi_agent_services_pack"
+        if item["pack_id"] == "rumi_agent_continuity_pack"
     )
     files = _render_record(record)
     manifest = json.loads(files["pack.v4.json"])
@@ -291,7 +291,7 @@ def test_legacy_operation_source_cannot_enter_v4_authority_catalog() -> None:
 
     manifest["operation_catalog"] = [
         {
-            "operation_id": "rumi_agent_services_pack.legacy.operation",
+            "operation_id": "rumi_agent_continuity_pack.legacy.operation",
             "owner": record["pack_id"],
             "source_kind": "legacy_component",
             "effect_ceiling": [],
