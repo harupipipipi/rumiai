@@ -279,14 +279,15 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     active = capture_default_profile()
 
-    authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
+    authority_path = user_data / "authority" / "v4.sqlite3"
+    authority_setup = AuthorityStore(authority_path)
     binding = _workspace_binding(store)
     backend = _MediaBackend(store, binding)
     authority_session = capture_production_dispatch(
         active,
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
-        authority_store=authority,
+        authority_store=authority_setup,
         backends=BackendRegistry((backend,)),
     )
     for contract_id, operation_id in (
@@ -307,6 +308,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     backend.session = authority_session
     authority_session.close()
 
+    authority = AuthorityStore(authority_path)
     session = capture_production_dispatch(
         active,
         bundle_root=_bundle_root(),
