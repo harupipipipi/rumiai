@@ -14,7 +14,10 @@ Profile source and release artifacts have separate roles:
   source-release lock.
 - `ecosystem/defaultspack/v4/defaults.profile.v4.json` remains a generated
   compatibility projection for consumers that still load the historical
-  filename. Despite the filename, its document API is Profile v5.
+  filename. Despite the filename, its document API is Profile v5. Its embedded
+  legacy provenance remains byte-compatible with the old core bundle check;
+  it is not release authority. Only `defaults.release.provenance.json` binds
+  the intent and generated outputs.
 
 Run the compiler from `tobkiri_runtime/`:
 
@@ -28,6 +31,13 @@ its `bundle.lock.json` entry, the source-release lock, or release provenance
 differs from a fresh render. It also fails before rendering if any non-Profile
 bundle input differs from its locked digest. Generated artifacts must never be
 edited by hand.
+
+Intent, bundle inputs, and release outputs reject symlink components, and all
+outputs must remain inside the selected bundle root. Publication copies links
+without following them, revalidates the staged catalog and every bound digest,
+then atomically exchanges the complete bundle directory. If the host lacks an
+atomic directory-exchange primitive, publication fails before changing the
+authoritative bundle.
 
 The compiler is not Defaults-specific. Use `--intent`,
 `--compatibility-profile`, `--lock`, and `--provenance` for another Named

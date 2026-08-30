@@ -15,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 GENERATOR = ROOT / "scripts" / "generate_defaultspack_v4_bundle.py"
 SOURCE_COMMIT = "f297890d29194ed5fb256a2d8351f00472c3d46d"
+PROFILE_RELEASE_ARTIFACTS = {
+    "defaults.profile.intent.v1.json",
+    "defaults.profile.lock.v5.json",
+    "defaults.release.provenance.json",
+}
 
 
 def _load_generator() -> ModuleType:
@@ -29,7 +34,7 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.relative_to(root).as_posix() not in PROFILE_RELEASE_ARTIFACTS
     }
 
 
@@ -58,8 +63,7 @@ def test_checked_in_bundle_matches_canonical_render() -> None:
     generator = _load_generator()
     rendered = generator._render()
     expected = {
-        path.relative_to(generator.BUNDLE).as_posix(): raw
-        for path, raw in rendered.items()
+        path.relative_to(generator.BUNDLE).as_posix(): raw for path, raw in rendered.items()
     }
 
     assert _snapshot(generator.BUNDLE) == expected

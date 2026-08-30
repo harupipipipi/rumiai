@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from typing import Any, Mapping
@@ -23,12 +25,22 @@ from tobkiri_protocol.canonical import canonical_digest, strict_loads  # noqa: E
 from tobkiri_protocol.profile_scope import (  # noqa: E402
     normalize_requested_scope_template,
 )
+from tobkiri_protocol.provenance import normative_generated_provenance  # noqa: E402
 from tobkiri_protocol.validation import SCHEMA_DIR, validate_document  # noqa: E402
 
 
 GENERATOR_NAME = "tobkiri-profile-artifacts"
 GENERATOR_VERSION = "1.0.0"
 GENERATOR_PATH = Path(__file__).relative_to(ROOT.parent).as_posix()
+LEGACY_GENERATOR = ROOT / "scripts" / "generate_defaultspack_v4_bundle.py"
+LEGACY_GENERATOR_PATH = LEGACY_GENERATOR.relative_to(ROOT.parent).as_posix()
+LOCAL_INPUTS = (
+    ROOT / "tobkiri_protocol" / "canonical.py",
+    ROOT / "tobkiri_protocol" / "profile_scope.py",
+    ROOT / "tobkiri_protocol" / "provenance.py",
+    ROOT / "tobkiri_protocol" / "validation.py",
+    LEGACY_GENERATOR,
+)
 DEFAULT_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 DEFAULT_INTENT = DEFAULT_BUNDLE / "defaults.profile.intent.v1.json"
 DEFAULT_COMPATIBILITY = DEFAULT_BUNDLE / "defaults.profile.v4.json"
@@ -62,12 +74,45 @@ def _read_object(path: Path, label: str) -> dict[str, Any]:
     return value
 
 
+def _absolute(path: Path) -> Path:
+    return Path(os.path.abspath(path.expanduser()))
+
+
+def _reject_symlink_components(path: Path, label: str) -> None:
+    candidate = _absolute(path)
+    current = Path(candidate.anchor)
+    for part in candidate.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            raise ValueError(f"{label} contains a symlink component: {current}")
+        if not current.exists():
+            break
+
+
+def _require_output_layout(bundle_root: Path, outputs: tuple[Path, ...]) -> None:
+    root = _absolute(bundle_root)
+    _reject_symlink_components(root, "bundle root")
+    if not root.is_dir():
+        raise ValueError("bundle root must be a real directory")
+    for output in outputs:
+        candidate = _absolute(output)
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"Profile artifact output escapes bundle root: {output}") from exc
+        _reject_symlink_components(candidate, "Profile artifact output")
+        if candidate.exists() and not candidate.is_file():
+            raise ValueError(f"Profile artifact output is not a regular file: {output}")
+
+
 class ProfileCatalog:
     """Digest-verified bundle inputs used by the generic Profile compiler."""
 
     def __init__(self, bundle_root: Path, compatibility_path: Path) -> None:
+        _reject_symlink_components(bundle_root, "bundle root")
         self.root = bundle_root.resolve(strict=True)
-        self.compatibility_path = compatibility_path.resolve(strict=False)
+        _reject_symlink_components(compatibility_path, "compatibility Profile")
+        self.compatibility_path = _absolute(compatibility_path)
         self.lock_path = self.root / "bundle.lock.json"
         self.lock = _read_object(self.lock_path, "bundle lock")
         if set(self.lock) != {"schema", "entries"}:
@@ -90,6 +135,8 @@ class ProfileCatalog:
             raise ValueError("bundle lock does not name the compatibility Profile")
         for schema_path in sorted(SCHEMA_DIR.glob("*.schema.json")):
             self.input_digests[_relative(schema_path)] = _sha256(schema_path.read_bytes())
+        for local_input in LOCAL_INPUTS:
+            self.input_digests[_relative(local_input)] = _sha256(local_input.read_bytes())
 
     def _load_entry(self, entry: object, seen: set[str]) -> None:
         if not isinstance(entry, dict) or set(entry) != {"path", "kind", "digest"}:
@@ -98,7 +145,9 @@ class ProfileCatalog:
         kind = entry["kind"]
         if not isinstance(relative, str) or not relative or relative in seen:
             raise ValueError("bundle lock entry has an invalid or duplicate path")
-        path = (self.root / relative).resolve(strict=False)
+        candidate = self.root / relative
+        _reject_symlink_components(candidate, "bundle input")
+        path = candidate.resolve(strict=False)
         if path == self.root or self.root not in path.parents:
             raise ValueError(f"bundle lock entry escapes bundle root: {relative}")
         if path == self.compatibility_path:
@@ -255,71 +304,33 @@ def _edge_variant(
     return candidates[0]
 
 
-def _profile_provenance(
-    intent_path: Path,
-    intent_raw: bytes,
-    input_digests: Mapping[str, str],
+def _compatibility_provenance(
+    profile: Mapping[str, Any], compatibility_path: Path
 ) -> dict[str, Any]:
-    generator_digest = _sha256(Path(__file__).read_bytes())
-    source_path = _relative(intent_path)
-    source_digest = _sha256(intent_raw)
-    inputs = dict(input_digests)
-    inputs[source_path] = source_digest
-    inventory = [{"path": path, "digest": inputs[path]} for path in sorted(inputs)]
-    inventory_digest = canonical_digest(inventory)
-    content_root_digest = canonical_digest(
-        {
-            "source_path": source_path,
-            "source_digest": source_digest,
-            "generator_path": GENERATOR_PATH,
-            "generator_digest": generator_digest,
-            "input_inventory_digest": inventory_digest,
-        }
+    """Reproduce legacy provenance while the old projection is supported."""
+
+    return normative_generated_provenance(
+        source_path=_relative(compatibility_path),
+        payload=profile,
+        repository_commit_value="working-tree",
+        generator="defaultspack-v4-core",
+        generator_version="2.0.0",
+        generator_path=LEGACY_GENERATOR_PATH,
+        generator_payload=LEGACY_GENERATOR.read_bytes(),
     )
-    return {
-        "schema": "io.tobkiri.provenance.v2",
-        "source_kind": "generated",
-        "source_path": source_path,
-        "source_digest": source_digest,
-        "repository_commit": "working-tree",
-        "repository_commit_trusted": False,
-        "content_root_digest": content_root_digest,
-        "generator": GENERATOR_NAME,
-        "generator_version": GENERATOR_VERSION,
-        "generator_path": GENERATOR_PATH,
-        "generator_digest": generator_digest,
-        "input_inventory_digest": inventory_digest,
-        "normative": True,
-        "evidence": [
-            {
-                "path": GENERATOR_PATH,
-                "rule_id": "normative-generator-bytes",
-                "digest": generator_digest,
-            },
-            {
-                "path": source_path,
-                "rule_id": "normative-input-bytes",
-                "digest": source_digest,
-            },
-        ],
-    }
 
 
 def _compile_profile(
     catalog: ProfileCatalog,
     intent: Mapping[str, Any],
-    intent_path: Path,
-    intent_raw: bytes,
+    compatibility_path: Path,
 ) -> tuple[dict[str, Any], list[str], dict[str, str], list[dict[str, Any]]]:
     selected, requested_roles = _resolve_closure(catalog, intent)
-    provenance = _profile_provenance(intent_path, intent_raw, catalog.input_digests)
     profile: dict[str, Any] = {}
     for key, value in intent.items():
         if key == "intent_api_version":
             profile["profile_api_version"] = "io.tobkiri.profile.v5"
         else:
-            if key == "requested_edges":
-                profile["provenance"] = provenance
             profile[key] = value
     pins: dict[tuple[str, str], dict[str, Any]] = {}
     resolved_edges = []
@@ -354,6 +365,13 @@ def _compile_profile(
         }
         pins[(pin["pack_id"], pin["variant_id"])] = pin
     profile["requested_edges"] = resolved_edges
+    provenance = _compatibility_provenance(profile, compatibility_path)
+    with_provenance: dict[str, Any] = {}
+    for key, value in profile.items():
+        if key == "requested_edges":
+            with_provenance["provenance"] = provenance
+        with_provenance[key] = value
+    profile = with_provenance
     profile = validate_document(profile, "profile")
     return (
         profile,
@@ -522,10 +540,15 @@ def render(
 ) -> dict[Path, bytes]:
     """Render one Named Profile release without reading generated Profile bytes."""
 
+    outputs = (compatibility_path, lock_path, provenance_path, bundle_root / "bundle.lock.json")
+    _require_output_layout(bundle_root, outputs)
+    _reject_symlink_components(intent_path, "Profile intent")
+    if not _absolute(intent_path).is_file():
+        raise ValueError("Profile intent must be a regular file")
     catalog = ProfileCatalog(bundle_root, compatibility_path)
     intent_raw = intent_path.read_bytes()
     intent = validate_document(intent_raw, "profile_intent")
-    profile, selected, _, pins = _compile_profile(catalog, intent, intent_path, intent_raw)
+    profile, selected, _, pins = _compile_profile(catalog, intent, compatibility_path)
     compatibility_raw = _pretty(profile)
     bundle_lock = catalog.bundle_lock_with(compatibility_raw)
     bundle_lock_raw = _pretty(bundle_lock)
@@ -550,25 +573,197 @@ def render(
     }
 
 
-def _publish(rendered: Mapping[Path, bytes]) -> None:
-    """Replace each generated file atomically after every render succeeds."""
-
-    staged: list[tuple[Path, Path]] = []
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
     try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _exchange_directories(left: Path, right: Path) -> None:
+    """Atomically exchange two directories or fail before changing either."""
+
+    library = ctypes.CDLL(None, use_errno=True)
+    left_raw = os.fsencode(left)
+    right_raw = os.fsencode(right)
+    if sys.platform == "darwin" and hasattr(library, "renameatx_np"):
+        exchange = library.renameatx_np
+        exchange.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        exchange.restype = ctypes.c_int
+        result = exchange(-2, left_raw, -2, right_raw, 0x00000002)
+    elif sys.platform.startswith("linux") and hasattr(library, "renameat2"):
+        exchange = library.renameat2
+        exchange.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        exchange.restype = ctypes.c_int
+        result = exchange(-100, left_raw, -100, right_raw, 0x00000002)
+    else:
+        raise RuntimeError("atomic directory exchange is unavailable on this platform")
+    if result != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), f"{left} <-> {right}")
+
+
+def _stage_path(source: Path, source_root: Path, stage: Path) -> Path:
+    return stage / _absolute(source).relative_to(source_root)
+
+
+def _bound_input_path(value: str, source_root: Path, stage: Path) -> Path:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    candidate = _absolute(candidate)
+    try:
+        return stage / candidate.relative_to(source_root)
+    except ValueError:
+        return candidate
+
+
+def _validate_staged_release(
+    stage: Path,
+    source_root: Path,
+    rendered: Mapping[Path, bytes],
+) -> None:
+    """Revalidate a complete immutable generation immediately before exchange."""
+
+    for candidate in stage.rglob("*"):
+        if candidate.is_symlink():
+            raise ValueError(f"staged bundle contains a symlink: {candidate}")
+    documents: dict[str, tuple[Path, Path, bytes, dict[str, Any]]] = {}
+    for source, expected in rendered.items():
+        target = _stage_path(source, source_root, stage)
+        if not target.is_file() or target.read_bytes() != expected:
+            raise ValueError(f"staged Profile artifact changed: {source.name}")
+        if source.name == "bundle.lock.json":
+            continue
+        value = _read_object(target, "staged Profile artifact")
+        if "lock_api_version" in value:
+            documents["lock"] = (
+                source,
+                target,
+                expected,
+                validate_document(value, "profile_artifact_lock"),
+            )
+        elif "profile_api_version" in value:
+            documents["profile"] = (
+                source,
+                target,
+                expected,
+                validate_document(value, "profile"),
+            )
+        elif value.get("schema") == "io.tobkiri.profile-release-provenance.v1":
+            documents["provenance"] = (
+                source,
+                target,
+                expected,
+                validate_document(value, "profile_release_provenance"),
+            )
+    if set(documents) != {"profile", "lock", "provenance"}:
+        raise ValueError("staged Profile release set is incomplete")
+    profile_source, profile_path, profile_raw, profile = documents["profile"]
+    lock_source, _, lock_raw, lock = documents["lock"]
+    _, _, _, provenance = documents["provenance"]
+    catalog = ProfileCatalog(stage, profile_path)
+    if catalog.bundle_lock_with(profile_raw) != catalog.lock:
+        raise ValueError("staged compatibility Profile bundle digest is stale")
+    if lock["profile_revision"] != canonical_digest(profile):
+        raise ValueError("staged Profile revision is stale")
+    if lock["closure_digest"] != canonical_digest(lock["effective_set"]):
+        raise ValueError("staged Profile closure digest is stale")
+    if lock["lock_digest"] != canonical_digest(
+        {key: value for key, value in lock.items() if key != "lock_digest"}
+    ):
+        raise ValueError("staged Profile lock digest is stale")
+    bundle_raw = (stage / "bundle.lock.json").read_bytes()
+    if lock["bundle_digest"] != _sha256(bundle_raw):
+        raise ValueError("staged Profile bundle digest is stale")
+    if provenance["release_digest"] != canonical_digest(
+        {key: value for key, value in provenance.items() if key != "release_digest"}
+    ):
+        raise ValueError("staged Profile release digest is stale")
+    for item in provenance["source_inputs"]:
+        path = _bound_input_path(item["path"], source_root, stage)
+        _reject_symlink_components(path, "staged release input")
+        if not path.is_file() or _sha256(path.read_bytes()) != item["digest"]:
+            raise ValueError(f"staged release input changed: {item['path']}")
+    expected_outputs = {
+        _relative(profile_source): _sha256(profile_raw),
+        _relative(lock_source): _sha256(lock_raw),
+    }
+    actual_outputs = {item["path"]: item["digest"] for item in provenance["outputs"]}
+    if actual_outputs != expected_outputs:
+        raise ValueError("staged Profile release output digests are stale")
+    if provenance["profile_revision"] != lock["profile_revision"]:
+        raise ValueError("staged release provenance Profile revision is stale")
+    if provenance["catalog"]["bundle_digest"] != lock["bundle_digest"]:
+        raise ValueError("staged release provenance bundle digest is stale")
+
+
+def _publish(
+    rendered: Mapping[Path, bytes],
+    bundle_root: Path,
+    *,
+    fault: Any | None = None,
+) -> None:
+    """Publish the complete release set with one atomic directory exchange."""
+
+    outputs = tuple(rendered)
+    _require_output_layout(bundle_root, outputs)
+    root = _absolute(bundle_root)
+    stage = Path(tempfile.mkdtemp(prefix=f".{root.name}.profile-stage-", dir=root.parent))
+    stage.rmdir()
+    exchanged = False
+    try:
+        shutil.copytree(root, stage, copy_function=shutil.copy2, symlinks=True)
         for path, raw in rendered.items():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-            stage = Path(name)
-            with os.fdopen(descriptor, "wb") as handle:
+            target = _stage_path(path, root, stage)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as handle:
                 handle.write(raw)
                 handle.flush()
                 os.fsync(handle.fileno())
-            staged.append((stage, path))
-        for stage, path in staged:
-            os.replace(stage, path)
+        if fault is not None:
+            fault("before_validation", stage)
+            fault("before_exchange", stage)
+        _validate_staged_release(stage, root, rendered)
+        for directory in sorted(
+            (item for item in stage.rglob("*") if item.is_dir()),
+            key=lambda item: len(item.parts),
+            reverse=True,
+        ):
+            _fsync_directory(directory)
+        _fsync_directory(stage)
+        _exchange_directories(root, stage)
+        exchanged = True
+        _fsync_directory(root.parent)
+        if fault is not None:
+            fault("after_exchange", stage)
+    except BaseException:
+        if exchanged:
+            try:
+                _exchange_directories(root, stage)
+                _fsync_directory(root.parent)
+                exchanged = False
+            except BaseException as rollback_error:
+                raise RuntimeError("Profile release rollback failed") from rollback_error
+        raise
     finally:
-        for stage, _ in staged:
-            stage.unlink(missing_ok=True)
+        if stage.exists() and not exchanged:
+            shutil.rmtree(stage)
+    if stage.exists():
+        shutil.rmtree(stage)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -594,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in stale:
             print(_relative(path))
         return int(bool(stale))
-    _publish(rendered)
+    _publish(rendered, args.bundle_root)
     return 0
 
 
