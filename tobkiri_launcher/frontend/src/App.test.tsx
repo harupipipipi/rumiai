@@ -14,6 +14,7 @@ function gateProps(overrides: Partial<ComponentProps<typeof SetupVerificationGat
     runtimeReady: false,
     runtimeStatus: 'panel_ready' as const,
     runtimeDisconnected: false,
+    defaultsBootstrapRequired: false,
     ...overrides,
   };
 }
@@ -76,6 +77,38 @@ test('verification banner keeps the recovery link visible without exposing runti
   assert.match(html, /Complete setup to continue/);
   assert.match(html, /Open Setup/);
   assert.match(html, /href="\/setup"/);
+});
+
+test('empty bootstrap keeps Home recovery-gated even when generic runtime health is ready', () => {
+  const banner = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationBanner
+        {...gateProps({
+          defaultsBootstrapRequired: true,
+          runtimeReady: true,
+          runtimeStatus: 'runtime_ready',
+        })}
+      />
+    </MemoryRouter>,
+  );
+  const gate = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationGate
+        {...gateProps({
+          defaultsBootstrapRequired: true,
+          runtimeReady: true,
+          runtimeStatus: 'runtime_ready',
+        })}
+      >
+        <p>unsafe runtime page</p>
+      </SetupVerificationGate>
+    </MemoryRouter>,
+  );
+
+  assert.match(banner, /Complete setup to continue/);
+  assert.match(banner, /Open Setup/);
+  assert.match(gate, /Complete setup to continue/);
+  assert.doesNotMatch(gate, /unsafe runtime page/);
 });
 
 test('Home route keeps its child catalog mounted behind an inline verification banner', () => {

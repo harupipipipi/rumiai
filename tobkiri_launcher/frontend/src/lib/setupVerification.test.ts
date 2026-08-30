@@ -8,6 +8,7 @@ const healthy = {
   runtimeReady: false,
   runtimeStatus: 'starting' as const,
   runtimeDisconnected: false,
+  defaultsBootstrapRequired: false,
 };
 
 test('setup verification stays closed during cold start and panel-only readiness', () => {

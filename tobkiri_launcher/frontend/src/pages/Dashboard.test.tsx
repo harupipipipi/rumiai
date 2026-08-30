@@ -208,7 +208,7 @@ test('duplicate Profile IDs are deterministic and never privilege Defaults', () 
   );
 });
 
-test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnected states', async () => {
+test('Home keeps the Profile catalog visible while gating ceremony in unresolved states', async () => {
   const previousState = useAppStore.getState();
   const previousFetch = globalThis.fetch;
   const previousWindow = globalThis.window;
@@ -225,8 +225,24 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
     }) as typeof fetch;
 
     const scenarios = [
-      {name: 'needs_setup', isSetupDone: false, runtimeDisconnected: false},
-      {name: 'disconnected', isSetupDone: true, runtimeDisconnected: true},
+      {
+        name: 'needs_setup',
+        isSetupDone: false,
+        runtimeDisconnected: false,
+        defaultsBootstrapRequired: false,
+      },
+      {
+        name: 'disconnected',
+        isSetupDone: true,
+        runtimeDisconnected: true,
+        defaultsBootstrapRequired: false,
+      },
+      {
+        name: 'empty_bootstrap',
+        isSetupDone: false,
+        runtimeDisconnected: false,
+        defaultsBootstrapRequired: true,
+      },
     ] as const;
 
     for (const scenario of scenarios) {
@@ -239,6 +255,7 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         lastRuntimeHealthyAt: null,
         hostCatalogVerified: true,
         profileCeremonyAvailable: scenario.name !== 'disconnected',
+        defaultsBootstrapRequired: scenario.defaultsBootstrapRequired,
         activeProfileReady: false,
         launchReady: false,
       });
@@ -286,7 +303,7 @@ test('Home keeps Profile catalog and CRUD visible in needs_setup and disconnecte
         await act(async () => { buttonByLabel(container, 'Open actions for Research Profile').click(); });
         const activate = menuItemByText('Set Active') as HTMLAnchorElement;
         assert.equal(activate.getAttribute('aria-label'), 'Activate Research Profile');
-        if (scenario.name === 'disconnected') {
+        if (scenario.name !== 'needs_setup') {
           assert.equal(activate.getAttribute('aria-disabled'), 'true', scenario.name);
           assert.equal(activate.getAttribute('tabindex'), '-1', scenario.name);
         } else {

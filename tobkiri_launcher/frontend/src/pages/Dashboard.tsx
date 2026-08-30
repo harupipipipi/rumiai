@@ -106,6 +106,7 @@ export function Dashboard() {
   const runtimeError = useAppStore((state) => state.runtimeError);
   const hostCatalogVerified = useAppStore((state) => state.hostCatalogVerified);
   const profileCeremonyAvailable = useAppStore((state) => state.profileCeremonyAvailable);
+  const defaultsBootstrapRequired = useAppStore((state) => state.defaultsBootstrapRequired);
   const activeProfileReady = useAppStore((state) => state.activeProfileReady);
   const launchReady = useAppStore((state) => state.launchReady);
   const desktopShellAvailable = isDesktopShellAvailable();
@@ -192,6 +193,7 @@ export function Dashboard() {
   const profileCatalogVerified = hostCatalogVerified
     && registry !== null
     && profileLoadError === null;
+  const profileActivationAvailable = profileCeremonyAvailable && !defaultsBootstrapRequired;
   const sourceProfileOptions = useMemo(() => (
     [...(registry?.profiles ?? [])].sort((left, right) => {
       const displayNameOrder = namedProfileDisplayName(left).localeCompare(
@@ -647,7 +649,7 @@ export function Dashboard() {
                       onSubmitEdit={(event, profile) => void submitProfileName(event, profile)}
                       profile={entry}
                       profileView={profileView}
-                      profileCeremonyAvailable={profileCeremonyAvailable}
+                      profileCeremonyAvailable={profileActivationAvailable}
                       activeProfileReady={activeProfileReady}
                       launchReady={launchReady}
                     />

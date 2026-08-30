@@ -12,9 +12,9 @@ export interface SetupVerificationInput {
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeDisconnected: boolean;
+  defaultsBootstrapRequired: boolean;
   hostCatalogVerified?: boolean;
   profileCeremonyAvailable?: boolean;
-  defaultsBootstrapRequired?: boolean;
 }
 
 /**

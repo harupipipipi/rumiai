@@ -40,6 +40,7 @@ export default function App() {
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const runtimeDisconnected = useAppStore(state => state.runtimeDisconnected);
+  const defaultsBootstrapRequired = useAppStore(state => state.defaultsBootstrapRequired);
   const addToast = useAppStore(state => state.addToast);
   const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
 
@@ -114,6 +115,7 @@ export default function App() {
         runtimeReady={runtimeReady}
         runtimeStatus={runtimeStatus}
         runtimeDisconnected={runtimeDisconnected}
+        defaultsBootstrapRequired={defaultsBootstrapRequired}
         onRetryRuntimeHealth={refreshRuntimeHealth}
       />
       <ToastContainer />
@@ -128,6 +130,7 @@ export interface SetupVerificationGateProps {
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeDisconnected: boolean;
+  defaultsBootstrapRequired: boolean;
   onRetry?: () => void | Promise<void>;
   /** Render a compact blocker inside the already-mounted panel layout. */
   embedded?: boolean;
@@ -138,6 +141,7 @@ export interface SetupVerificationBannerProps {
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeDisconnected: boolean;
+  defaultsBootstrapRequired: boolean;
   onRetry?: () => void | Promise<void>;
 }
 
@@ -274,6 +278,7 @@ export function SetupVerificationBanner({
   runtimeReady,
   runtimeStatus,
   runtimeDisconnected,
+  defaultsBootstrapRequired,
   onRetry,
 }: SetupVerificationBannerProps) {
   const state = resolveSetupVerificationState({
@@ -281,6 +286,7 @@ export function SetupVerificationBanner({
     runtimeReady,
     runtimeStatus,
     runtimeDisconnected,
+    defaultsBootstrapRequired,
   });
   const [retrying, setRetrying] = useState(false);
 
@@ -328,6 +334,7 @@ export function SetupVerificationGate({
   runtimeReady,
   runtimeStatus,
   runtimeDisconnected,
+  defaultsBootstrapRequired,
   onRetry,
   embedded = false,
 }: SetupVerificationGateProps) {
@@ -336,6 +343,7 @@ export function SetupVerificationGate({
     runtimeReady,
     runtimeStatus,
     runtimeDisconnected,
+    defaultsBootstrapRequired,
   });
   const [retrying, setRetrying] = useState(false);
 
@@ -379,12 +387,14 @@ function DeferredRouteTree({
   runtimeReady,
   runtimeStatus,
   runtimeDisconnected,
+  defaultsBootstrapRequired,
   onRetryRuntimeHealth,
 }: {
   isSetupDone: boolean;
   runtimeReady: boolean;
   runtimeStatus: RuntimeStatus;
   runtimeDisconnected: boolean;
+  defaultsBootstrapRequired: boolean;
   onRetryRuntimeHealth: () => Promise<void>;
 }) {
   const location = useLocation();
@@ -400,6 +410,7 @@ function DeferredRouteTree({
       runtimeReady={runtimeReady}
       runtimeStatus={runtimeStatus}
       runtimeDisconnected={runtimeDisconnected}
+      defaultsBootstrapRequired={defaultsBootstrapRequired}
       onRetry={onRetryRuntimeHealth}
     />
   );
@@ -409,6 +420,7 @@ function DeferredRouteTree({
       runtimeReady={runtimeReady}
       runtimeStatus={runtimeStatus}
       runtimeDisconnected={runtimeDisconnected}
+      defaultsBootstrapRequired={defaultsBootstrapRequired}
       onRetry={onRetryRuntimeHealth}
       embedded
     >
