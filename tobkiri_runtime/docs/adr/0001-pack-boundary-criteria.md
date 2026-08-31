@@ -48,8 +48,10 @@ include exactly one such manifest evidence item, whose digest is independently
 compared with the current manifest, plus at least one canonically distinct,
 non-ADR supporting item. Canonically different spelling is not enough: evidence
 items that resolve to the same filesystem identity, including case aliases or
-hard links, are treated as the same file. A changed manifest or evidence file
-resets a reviewed row to `unreviewed` when the inventory is regenerated.
+hard links, are treated as the same file. The non-ADR classification also uses
+the filesystem identities of all readable ADR files, so an ADR case alias or
+hard link cannot be relabeled as external support. A changed manifest or evidence
+file resets a reviewed row to `unreviewed` when the inventory is regenerated.
 
 ## Inventory contract
 
@@ -66,9 +68,12 @@ making the assessment an executable catalog.
 The non-consumption guard is deliberately static and bounded: it excludes
 documentation, tests, vendor directories, and the exact generated-output prefix
 `tobkiri_launcher/src-tauri/gen/`; it does not broadly exclude every directory
-named `gen`. It cannot prove the absence of dynamic loading or external-process
-consumption. It is a regression signal, not a runtime security control or a claim
-that all possible consumers are enumerated.
+named `gen`. Exclusion uses the production file's lexical repository path before
+any symlink target is resolved, so a production path cannot evade scanning by
+linking into an excluded directory; a target outside the repository fails closed.
+It cannot prove the absence of dynamic loading or external-process consumption.
+It is a regression signal, not a runtime security control or a claim that all
+possible consumers are enumerated.
 
 ## Consequences
 
