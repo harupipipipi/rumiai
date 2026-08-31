@@ -475,6 +475,34 @@ def test_static_guard_scans_production_symlink_to_lexically_excluded_target(
     ]
 
 
+@pytest.mark.parametrize(
+    "target_path",
+    [
+        "tobkiri_runtime/docs/hidden-package",
+        "tobkiri_launcher/src-tauri/gen/hidden-package",
+    ],
+)
+def test_static_guard_fails_closed_for_production_directory_symlink(
+    tmp_path: Path,
+    target_path: str,
+) -> None:
+    target = tmp_path / target_path
+    source = tmp_path / "tobkiri_runtime/core_runtime/linked_package"
+    _write_manifest(target / "consumer.py", SCHEMA_VERSION)
+    source.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        source.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks in the test directory")
+
+    references = find_runtime_references(tmp_path)
+
+    assert references == [
+        "tobkiri_runtime/core_runtime/linked_package "
+        "(symlinked production directory)"
+    ]
+
+
 def test_static_guard_keeps_lexically_excluded_tauri_prefix_out_of_scope(
     tmp_path: Path,
 ) -> None:
