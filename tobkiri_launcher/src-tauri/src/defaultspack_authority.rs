@@ -274,9 +274,9 @@ impl SignedApplicationResolver {
         let app_root = canonical_directory(&config.app_dir, "packaged application root")?;
         let (_, bootstrap_profile_source, _) = catalog.bootstrap_profile_identity()?;
         let bundle_root = packaged_bundle_root(&app_root, bootstrap_profile_source)?;
-        verify_symlink_free_tree(&bundle_root, &bundle_root)?;
-        let bundle_lock = verify_bundle_lock(&bundle_root)?;
         let pack_root = canonical_pack_root(&bundle_root)?;
+        verify_symlink_free_tree(&pack_root, &pack_root)?;
+        let bundle_lock = verify_bundle_lock(&bundle_root)?;
         #[cfg(test)]
         let catalog = fixture_catalog_with_shell_variant(catalog, &app_root)?;
         let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
