@@ -623,17 +623,65 @@ fn reset_tauri_resource_copy_at(out_dir: &Path, profile_root: &Path) -> io::Resu
 }
 
 #[cfg(target_os = "macos")]
+fn tauri_resource_profile_root(
+    out_dir: &Path,
+    target_root: &Path,
+    target: &str,
+    profile: &str,
+) -> io::Result<PathBuf> {
+    validate_path_component(target, "Rust target")?;
+    validate_path_component(profile, "Cargo profile")?;
+    reject_staged_path_components(out_dir)?;
+    reject_staged_path_components(target_root)?;
+
+    let profile_roots = [
+        target_root.join(profile),
+        target_root.join(target).join(profile),
+    ];
+    for profile_root in profile_roots {
+        let build_root = profile_root.join("build");
+        let Ok(relative) = out_dir.strip_prefix(&build_root) else {
+            continue;
+        };
+        let components = relative.components().collect::<Vec<_>>();
+        if components.len() != 2
+            || !matches!(components[0], Component::Normal(_))
+            || components[1].as_os_str() != "out"
+        {
+            return Err(invalid_release(
+                "Cargo OUT_DIR has an unexpected target profile shape",
+            ));
+        }
+        return Ok(profile_root);
+    }
+
+    Err(invalid_release(
+        "Cargo OUT_DIR escaped the expected target profile build roots",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_resource_copy_for_cargo_at(
+    out_dir: &Path,
+    target_root: &Path,
+    target: &str,
+    profile: &str,
+) -> io::Result<PathBuf> {
+    let profile_root = tauri_resource_profile_root(out_dir, target_root, target, profile)?;
+    reset_tauri_resource_copy_at(out_dir, &profile_root)
+}
+
+#[cfg(target_os = "macos")]
 fn reset_tauri_macos_resource_copy() -> io::Result<()> {
     let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let target_root = resolve_tauri_shell_target_dir(&project_dir)?;
     let target = required_cargo_target()?;
     let profile = std::env::var("PROFILE")
         .map_err(|_| invalid_release("Cargo PROFILE is missing for resource reset"))?;
-    let profile_root = target_root.join(target).join(profile);
     let out_dir = std::env::var_os("OUT_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| invalid_release("Cargo OUT_DIR is missing for resource reset"))?;
-    reset_tauri_resource_copy_at(&out_dir, &profile_root)?;
+    reset_tauri_resource_copy_for_cargo_at(&out_dir, &target_root, &target, &profile)?;
     Ok(())
 }
 
@@ -7528,24 +7576,115 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn tauri_resource_copy_reset_reaps_only_the_bound_profile_cache() {
-        let tree = TestTree::new("tauri-resource-copy-reset");
-        let profile = tree.path().join("target/aarch64-apple-darwin/release");
-        let out = profile.join("build/tobkiri-launcher-fixture/out");
+    fn tauri_resource_copy_reset_accepts_target_qualified_profile() {
+        let tree = TestTree::new("tauri-resource-copy-target-qualified");
+        let target_root = tree.path().join("target");
+        let profile_root = target_root.join("aarch64-apple-darwin/release");
+        let out = profile_root.join("build/tobkiri-launcher-fixture/out");
         fs::create_dir_all(&out).expect("Cargo OUT_DIR fixture should be creatable");
-        let resource = profile.join("app");
+        let resource = profile_root.join("app");
         let nested = write_read_only_staged_runtime_fixture(&resource);
+        let host_sentinel = target_root.join("release/app/untouched");
+        fs::create_dir_all(host_sentinel.parent().unwrap()).unwrap();
+        fs::write(&host_sentinel, b"host profile").unwrap();
 
-        let reset = reset_tauri_resource_copy_at(&out, &profile)
-            .expect("manifest-bound Tauri resource cache should reset");
+        let reset = reset_tauri_resource_copy_for_cargo_at(
+            &out,
+            &target_root,
+            "aarch64-apple-darwin",
+            "release",
+        )
+        .expect("target-qualified Tauri resource cache should reset");
 
         assert_eq!(reset, resource);
         assert!(resource.is_dir());
         assert!(!nested.exists());
         assert!(fs::read_dir(&resource).unwrap().next().is_none());
-        let outside = tree.path().join("outside");
-        fs::create_dir_all(&outside).unwrap();
-        assert!(reset_tauri_resource_copy_at(&outside, &profile).is_err());
+        assert_eq!(fs::read(&host_sentinel).unwrap(), b"host profile");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_accepts_implicit_host_profile() {
+        let tree = TestTree::new("tauri-resource-copy-implicit-host");
+        let target_root = tree.path().join("target");
+        let profile_root = target_root.join("debug");
+        let out = profile_root.join("build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&out).expect("Cargo OUT_DIR fixture should be creatable");
+        let resource = profile_root.join("app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+        let target_sentinel = target_root.join("aarch64-apple-darwin/debug/app/untouched");
+        fs::create_dir_all(target_sentinel.parent().unwrap()).unwrap();
+        fs::write(&target_sentinel, b"target profile").unwrap();
+
+        let reset = reset_tauri_resource_copy_for_cargo_at(
+            &out,
+            &target_root,
+            "aarch64-apple-darwin",
+            "debug",
+        )
+        .expect("implicit-host Tauri resource cache should reset");
+
+        assert_eq!(reset, resource);
+        assert!(resource.is_dir());
+        assert!(!nested.exists());
+        assert!(fs::read_dir(&resource).unwrap().next().is_none());
+        assert_eq!(fs::read(&target_sentinel).unwrap(), b"target profile");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_rejects_unbound_or_malformed_out_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("tauri-resource-copy-rejected-layouts");
+        let target_root = tree.path().join("target");
+        let resource = target_root.join("debug/app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+        let rejected = [
+            tree.path()
+                .join("outside/debug/build/tobkiri-launcher-fixture/out"),
+            target_root.join("x86_64-apple-darwin/debug/build/tobkiri-launcher-fixture/out"),
+            target_root.join("debug/build/out"),
+            target_root.join("debug/build/tobkiri-launcher-fixture/not-out"),
+            target_root.join("debug/build/tobkiri-launcher-fixture/extra/out"),
+        ];
+
+        for out in rejected {
+            fs::create_dir_all(&out).expect("rejected OUT_DIR fixture should be creatable");
+            reset_tauri_resource_copy_for_cargo_at(
+                &out,
+                &target_root,
+                "aarch64-apple-darwin",
+                "debug",
+            )
+            .expect_err("unbound or malformed Cargo OUT_DIR must be rejected");
+            assert!(
+                nested.exists(),
+                "rejected OUT_DIR mutated the resource cache"
+            );
+        }
+
+        let valid_out = target_root.join("debug/build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&valid_out).expect("valid OUT_DIR fixture should be creatable");
+        for invalid_profile in ["", ".", "..", "debug/escape", r"debug\escape"] {
+            reset_tauri_resource_copy_for_cargo_at(
+                &valid_out,
+                &target_root,
+                "aarch64-apple-darwin",
+                invalid_profile,
+            )
+            .expect_err("invalid Cargo PROFILE must be rejected");
+            assert!(
+                nested.exists(),
+                "invalid PROFILE mutated the resource cache"
+            );
+        }
+
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o755))
+            .expect("nested fixture should be restored for cleanup");
+        fs::set_permissions(&resource, fs::Permissions::from_mode(0o755))
+            .expect("resource fixture should be restored for cleanup");
     }
 
     #[cfg(target_os = "macos")]
