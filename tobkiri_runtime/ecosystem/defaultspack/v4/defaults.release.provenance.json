@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.profile-release-provenance.v1",
   "profile_id": "defaults",
-  "profile_revision": "sha256:dca8a590c874154720a45d3f23a457c31b11eee257a2c4b5f2dfd876638a903c",
+  "profile_revision": "sha256:0389c546141ba421c0de65c0bb93fcee5513b6744bdcee93b96875e88ae10e3d",
   "profile_definition_digest": "sha256:4c9de762ae200b302f663f0ab4658b8e843be308466a5823852fb2e2c98f5632",
   "source_inputs": [
     {
@@ -705,23 +705,23 @@
     "name": "tobkiri-profile-artifacts",
     "version": "1.0.0",
     "path": "tobkiri_runtime/scripts/generate_profile_artifacts.py",
-    "digest": "sha256:bfabfcb027892fd7aa5df771d8043e766a447b057727a7e6820ea7361d1c1b40"
+    "digest": "sha256:e27f80114244a3278d888aad044189f9f9703c76afd491e084b8fd18984966a6"
   },
   "catalog": {
     "bundle_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
-    "bundle_digest": "sha256:094b9f887a7a4ca8a8f310f7a5a90a3f8a147c49f9f6d651fb173d5f1857b5b1",
+    "bundle_digest": "sha256:3804d2034382611a966d886a2ce9b480503c771648af7430327b77e43c3367b1",
     "catalog_revision": "sha256:58f74e544acf4f125ee19a820d6df8f4364e4d33eb48d51ca01e1b0179b794ff",
     "closure_digest": "sha256:ea2e473604123939d4ff2d1ed0dbcea0f82f59eb9a32dee3f43fa25e52d59528"
   },
   "outputs": [
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
-      "digest": "sha256:d671e12ac9cd50a90e7dae1f7d4d3a5dd2f9195e08a72bca21ec9c7e507868af"
+      "digest": "sha256:fdf505c64b9cf5a2761b15b2d2d7f4b8484e38ac923d2718554a82c74e827fb0"
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
-      "digest": "sha256:e21dbfd76b1ce6d27ede3be61f592536cac1babd37fcd211b706fc4c36a18fa3"
+      "digest": "sha256:0d9b95643a36ed7c2b5e5540db9cd33b0800a921c43da23b133c694ef368cd5c"
     }
   ],
-  "release_digest": "sha256:4893e31faf83857a094bbd7d009a9d6a913a7488ae2d51e374dbe9025823fae9"
+  "release_digest": "sha256:ca1e10b926bca4039e5972f6a4a2baac7045b4ebe04100d663d990ed0fafa1a2"
 }

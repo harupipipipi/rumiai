@@ -175,6 +175,30 @@ def test_detects_requested_pack_boundary_violations(
     } <= rules
 
 
+def test_committed_baseline_does_not_excuse_the_non_authoritative_profile(
+    scanner: ModuleType,
+) -> None:
+    repo_root = SCRIPT.parents[2]
+    profile_path = "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json"
+    baseline_path = SCRIPT.with_name("pack_boundary_baseline.json")
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    profile_exceptions = [
+        item
+        for item in baseline["violations"]
+        if item["rule_id"] == "pack-boundary.normative-working-tree"
+        and item["path"] == profile_path
+    ]
+    assert profile_exceptions == []
+    assert baseline["summary"]["by_rule"]["pack-boundary.normative-working-tree"] == 8
+
+    violations = scanner.scan_repository(repo_root)
+    assert not any(
+        item["rule_id"] == "pack-boundary.normative-working-tree"
+        and item["path"] == profile_path
+        for item in violations
+    )
+
+
 def test_false_positive_guards(scanner: ModuleType, tmp_path: Path) -> None:
     host = _pack(
         "host",

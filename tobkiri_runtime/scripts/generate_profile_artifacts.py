@@ -25,19 +25,16 @@ from tobkiri_protocol.canonical import canonical_digest, strict_loads  # noqa: E
 from tobkiri_protocol.profile_scope import (  # noqa: E402
     normalize_requested_scope_template,
 )
-from tobkiri_protocol.provenance import normative_generated_provenance  # noqa: E402
 from tobkiri_protocol.validation import SCHEMA_DIR, validate_document  # noqa: E402
 from core_runtime.profile_content_projection import (  # noqa: E402
     resolve_intent_projection,
     selected_projection_roots,
 )
 
-
 GENERATOR_NAME = "tobkiri-profile-artifacts"
 GENERATOR_VERSION = "1.0.0"
 GENERATOR_PATH = Path(__file__).relative_to(ROOT.parent).as_posix()
 LEGACY_GENERATOR = ROOT / "scripts" / "generate_defaultspack_v4_bundle.py"
-LEGACY_GENERATOR_PATH = LEGACY_GENERATOR.relative_to(ROOT.parent).as_posix()
 LOCAL_INPUTS = (
     ROOT / "tobkiri_protocol" / "canonical.py",
     ROOT / "tobkiri_protocol" / "profile_scope.py",
@@ -311,17 +308,60 @@ def _edge_variant(
 def _compatibility_provenance(
     profile: Mapping[str, Any], compatibility_path: Path
 ) -> dict[str, Any]:
-    """Reproduce legacy provenance while the old projection is supported."""
+    """Describe the legacy projection without granting it release authority.
 
-    return normative_generated_provenance(
-        source_path=_relative(compatibility_path),
-        payload=profile,
-        repository_commit_value="working-tree",
-        generator="defaultspack-v4-core",
-        generator_version="2.0.0",
-        generator_path=LEGACY_GENERATOR_PATH,
-        generator_payload=LEGACY_GENERATOR.read_bytes(),
-    )
+    ``defaults.profile.v4.json`` remains a schema-compatible projection while
+    the v4 file name is supported.  It can be generated from an unresolved
+    intent and an ordinary working tree, so it must not claim the normative
+    provenance reserved for a resolved, release-bound artifact.
+    """
+
+    source_path = _relative(compatibility_path)
+    source_digest = canonical_digest(dict(profile))
+    generator_payload = Path(__file__).read_bytes()
+    generator_digest = _sha256(generator_payload)
+    repository_tree = canonical_digest(
+        {
+            "source_path": source_path,
+            "source_digest": source_digest,
+            "generator_path": GENERATOR_PATH,
+            "generator_digest": generator_digest,
+        }
+    ).removeprefix(_DIGEST_PREFIX)
+    return {
+        "schema": "io.tobkiri.provenance.v1",
+        "source_kind": "generated",
+        "source_path": source_path,
+        "source_digest": source_digest,
+        "repository_commit": "working-tree",
+        "repository_tree": repository_tree,
+        "generator": GENERATOR_NAME,
+        "generator_version": GENERATOR_VERSION,
+        "normative": False,
+        "evidence": [
+            {
+                "path": GENERATOR_PATH,
+                "rule_id": "compatibility-projection-generator-bytes",
+                "digest": generator_digest,
+            }
+        ],
+    }
+
+
+def _validate_compatibility_profile_provenance(profile: Mapping[str, Any]) -> None:
+    """Reject authority claims that an unresolved compatibility Profile lacks."""
+
+    provenance = profile.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("compatibility Profile provenance must be an object")
+    if provenance.get("normative") is True and (
+        profile.get("state") == "needs_resolution"
+        or provenance.get("repository_commit") == "working-tree"
+    ):
+        raise ValueError(
+            "compatibility Profile cannot claim normative provenance while "
+            "unresolved or sourced from a working tree"
+        )
 
 
 def _compile_profile(
@@ -395,6 +435,7 @@ def _compile_profile(
         with_provenance[key] = value
     profile = with_provenance
     profile = validate_document(profile, "profile")
+    _validate_compatibility_profile_provenance(profile)
     return (
         profile,
         selected,

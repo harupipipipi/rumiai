@@ -100,6 +100,9 @@ def test_checked_in_profile_artifacts_are_deterministic_and_schema_valid() -> No
     assert "provenance" not in intent
     assert intent["intent_api_version"] == "io.tobkiri.profile-intent.v1"
     assert compatibility["provenance"]["source_path"].endswith("defaults.profile.v4.json")
+    assert compatibility["provenance"]["schema"] == "io.tobkiri.provenance.v1"
+    assert compatibility["provenance"]["normative"] is False
+    assert compatibility["provenance"]["repository_commit"] == "working-tree"
     assert lock["profile_revision"] == canonical_digest(compatibility)
     assert lock["activation_authority"] == "unbound"
     assert lock["profile_definition_digest"] == canonical_digest(intent)
@@ -121,6 +124,25 @@ def test_checked_in_profile_artifacts_are_deterministic_and_schema_valid() -> No
     assert provenance["release_digest"] == canonical_digest(
         {key: value for key, value in provenance.items() if key != "release_digest"}
     )
+
+
+@pytest.mark.parametrize(
+    ("state", "repository_commit"),
+    [
+        ("needs_resolution", "a" * 40),
+        ("resolved", "working-tree"),
+    ],
+)
+def test_compatibility_profile_rejects_normative_unresolved_provenance(
+    state: str, repository_commit: str
+) -> None:
+    profile = json.loads((BUNDLE / "defaults.profile.v4.json").read_text())
+    profile["state"] = state
+    profile["provenance"]["normative"] = True
+    profile["provenance"]["repository_commit"] = repository_commit
+
+    with pytest.raises(ValueError, match="cannot claim normative provenance"):
+        generator._validate_compatibility_profile_provenance(profile)
 
 
 def test_roundtrip_preserves_bundle_compatibility_and_output_bytes(tmp_path: Path) -> None:
