@@ -111,8 +111,8 @@
         "reason": "Provide provider and tooling handoffs for dialing, ASR/TTS-adjacent runtime, transcript/media handling, and contact or calendar lookup outside this pack."
       },
       {
-        "pack_id": "rumi_local_agent_pack",
-        "reason": "Consume redacted transcript packets for recap, note-taking, and other local-first follow-up artifacts."
+        "pack_id": "rumi_meeting_intelligence_pack",
+        "reason": "Consume reviewed, redacted transcript packets for meeting recap and follow-up artifacts."
       },
       {
         "pack_id": "rumi_operations_company_pack",

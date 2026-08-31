@@ -130,6 +130,7 @@ class _CapturedConversationSession:
     profile_revision = "sha256:" + "3" * 64
     plan_digest = "sha256:" + "1" * 64
     activation_id = "activation:conversation-test"
+    security_epoch = 1
 
     def __init__(self, targets: tuple[FrontendContractTarget, ...]) -> None:
         self._providers: dict[str, tuple[Mapping[str, object], ...]] = {}

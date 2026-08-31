@@ -625,7 +625,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_artifact_app_runtime_pack/ecosystem.json",
-          "sha256": "706f45abf0c8f68c6a386aeb538d5a2bc81bdf8be34eac5f29abd9cdb87cc74b"
+          "sha256": "d6391e06330158d491e268237cb8e98add742934f9c34471beabda10af99d93b"
         }
       ]
     },
@@ -1033,7 +1033,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/ecosystem.json",
-          "sha256": "a7139c75869d8ba5e19e182719ef318b61d83250b3792f6bac7d9308c63805f2"
+          "sha256": "399befb7c7dc34a9c2d13db5e2406aa38ed9c00fceb64bb7fc5313666a5ebfea"
         }
       ]
     },
@@ -2977,7 +2977,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
-          "sha256": "99b86aff6f9e1cd575aa91937719dbdf705f42241337fc424c6a978e9f0758e0"
+          "sha256": "680d8ccc9ca9c7ca139028ab1c7a6e1b6e53ea5b51a72e373a310fb553a937ae"
         }
       ]
     },

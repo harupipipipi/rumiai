@@ -26,12 +26,7 @@
     },
     "manifest_authority": "v4-authoritative",
     "network_policy": "none_by_default",
-    "optional_integrations": [
-      {
-        "pack_id": "rumi_local_agent_pack",
-        "reason": "Route normalized connector handoffs into reusable local agent presets."
-      }
-    ],
+    "optional_integrations": [],
     "owner_surfaces": [
       "connector_namespace_policy",
       "channel_handoff_contracts",

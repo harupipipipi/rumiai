@@ -441,22 +441,15 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     first = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     restarted = capture_default_profile()
 
+    from core_runtime.host_contract import bind_host_contract
     from tests.conformance_support.host_contract import host_contract
 
-    contract_path = user_data / "host_contract.json"
-    contract_path.write_text(
-        json.dumps(
-            host_contract(
-                profile_id=str(first.resolved.profile["profile_id"]),
-                profile_revision=str(first.resolved.plan["profile_revision"]),
-                activation_id=str(first.activation["activation_id"]),
-                plan_digest=str(first.resolved.plan["plan_digest"]),
-            )
-        ),
-        encoding="utf-8",
+    contract = host_contract(
+        profile_id=str(first.resolved.profile["profile_id"]),
+        profile_revision=str(first.resolved.plan["profile_revision"]),
+        activation_id=str(first.activation["activation_id"]),
+        plan_digest=str(first.resolved.plan["plan_digest"]),
     )
-    contract_path.chmod(0o600)
-    monkeypatch.setenv("TOBKIRI_HOST_CONTRACT_PATH", str(contract_path))
 
     assert first.activation == restarted.activation
     assert first.resolved.plan == restarted.resolved.plan
@@ -473,8 +466,9 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     kernel = Kernel()
     monkeypatch.setenv("RUMI_PORT", str(_free_port()))
     try:
-        kernel.run_startup_until("api_init")
-        session = get_container().get("v4_dispatch_session")
+        with bind_host_contract(contract):
+            kernel.run_startup_until("api_init")
+            session = get_container().get("v4_dispatch_session")
         assert isinstance(session, V4DispatchSession)
         assert isinstance(session.broker, RequestBroker)
         assert session.authority_control is not None
