@@ -276,6 +276,8 @@ impl SignedApplicationResolver {
         let bundle_root = packaged_bundle_root(&app_root, bootstrap_profile_source)?;
         verify_symlink_free_tree(&bundle_root, &bundle_root)?;
         let bundle_lock = verify_bundle_lock(&bundle_root)?;
+        #[cfg(test)]
+        let catalog = fixture_catalog_with_shell_variant(catalog, &app_root)?;
         let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
 
         let selected_variant = validate_profile(&selected.profile, &catalog, &selected)?;
@@ -1039,7 +1041,10 @@ fn validate_profile_pack_closure(
             selected.application_artifact_digest.as_deref()
         } else if pack_id == selected.base_pack_id {
             value_str(&selected.profile, "/base/artifact_digest")
-        } else if pack_id == selected.shell_pack_id {
+        } else if pack_id == selected.shell_pack_id && selected.plan.is_some() {
+            // A bootstrap Profile names the selected platform artifact tree
+            // here; an active Profile names the Shell Pack aggregate. Only
+            // the latter belongs in the Pack closure comparison below.
             value_str(&selected.profile, "/shell/artifact_digest")
         } else {
             selected
@@ -1953,7 +1958,18 @@ fn validate_profile<'a>(
     if variants.len() != 1 {
         bail!("selected Profile has no unique packaged Shell variant");
     }
-    if selected.plan.is_some() {
+    if selected.plan.is_none() {
+        let artifact_digest = value_str(profile, "/shell/artifact_digest")
+            .context("bootstrap Profile Shell artifact digest is missing")?;
+        let entrypoint_digest = value_str(profile, "/shell/executable_artifact_digest")
+            .context("bootstrap Profile Shell entrypoint digest is missing")?;
+        if !valid_digest(artifact_digest)
+            || !valid_digest(entrypoint_digest)
+            || !bootstrap_shell_variant_matches(variants[0], artifact_digest, entrypoint_digest)
+        {
+            bail!("bootstrap Profile Shell differs from its signed artifact variant");
+        }
+    } else {
         let executable_digest = value_str(profile, "/shell/executable_artifact_digest")
             .context("active Profile Shell executable digest is missing")?;
         let launch = selected
@@ -1970,6 +1986,15 @@ fn validate_profile<'a>(
         }
     }
     Ok(variants[0])
+}
+
+fn bootstrap_shell_variant_matches(
+    variant: &crate::presentation::ArtifactVariant,
+    artifact_digest: &str,
+    entrypoint_digest: &str,
+) -> bool {
+    variant.sha256.as_deref() == Some(artifact_digest)
+        && variant.entrypoint_sha256.as_deref() == Some(entrypoint_digest)
 }
 
 fn validate_effective_pack_set(profile: &Value) -> Result<()> {
@@ -2061,6 +2086,57 @@ fn verify_pack_artifact_index(
         bail!("selected Pack artifact index is stale for its Pack v4 authority");
     }
     Ok(())
+}
+
+#[cfg(test)]
+fn fixture_catalog_with_shell_variant(
+    mut catalog: crate::presentation::PresentationCatalog,
+    app_root: &Path,
+) -> Result<crate::presentation::PresentationCatalog> {
+    let (_, profile_source, _) = catalog.bootstrap_profile_identity()?;
+    let bundle_root = packaged_bundle_root(app_root, profile_source)?;
+    let profile = read_json(&bundle_root.join(PROFILE_PATH), "fixture bootstrap Profile")?;
+    let platform = value_str(&profile, "/shell/platform")
+        .context("fixture bootstrap Profile Shell platform is missing")?;
+    let architecture = value_str(&profile, "/shell/architecture")
+        .context("fixture bootstrap Profile Shell architecture is missing")?;
+    let default_shell_provider_id = catalog.default_selection.shell_provider_id.clone();
+    let shell = catalog
+        .shell_providers
+        .iter_mut()
+        .find(|shell| shell.provider_id == default_shell_provider_id)
+        .context("fixture catalog default Shell is missing")?;
+    let variant = shell
+        .artifact_variants
+        .iter_mut()
+        .find(|variant| variant.platform == platform && variant.architecture == architecture)
+        .context("fixture catalog has no selected Shell variant")?;
+    let metadata_absent = variant.path.is_none()
+        && variant.sha256.is_none()
+        && variant.entrypoint_sha256.is_none()
+        && variant.size.is_none()
+        && variant.source_identity.is_none()
+        && variant.source_revision.is_none();
+    let metadata_complete = variant.path.is_some()
+        && variant.sha256.is_some()
+        && variant.entrypoint_sha256.is_some()
+        && variant.size.is_some()
+        && variant.source_identity.is_some()
+        && variant.source_revision.is_some();
+    if !metadata_absent && !metadata_complete {
+        bail!("fixture catalog Shell variant has partial installed artifact metadata");
+    }
+    if metadata_absent {
+        let artifact_base = app_root.join("ecosystem/defaultspack/platform-artifacts");
+        let artifact_root = artifact_base.join(safe_relative(&variant.artifact_ref)?);
+        let entrypoint = artifact_base.join(safe_relative(&variant.entrypoint)?);
+        variant.sha256 = Some(artifact_tree_digest(&artifact_root)?);
+        variant.entrypoint_sha256 = Some(sha256(&read_regular_file(
+            &entrypoint,
+            "fixture Shell entrypoint",
+        )?));
+    }
+    Ok(catalog)
 }
 
 #[cfg(test)]
@@ -3766,6 +3842,79 @@ mod tests {
             );
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn packaged_bootstrap_shell_tree_digest_is_not_the_shell_pack_aggregate() {
+        let (root, config) = fixture("bootstrap-shell-digest-domain");
+        let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
+        let profile: Value =
+            serde_json::from_slice(&fs::read(bundle_root.join(PROFILE_PATH)).unwrap()).unwrap();
+        let shell_pack: Value =
+            serde_json::from_slice(&fs::read(bundle_root.join(SHELL_PACK_PATH)).unwrap()).unwrap();
+
+        let shell_tree_digest = value_str(&profile, "/shell/artifact_digest").unwrap();
+        assert_eq!(value_str(&profile, "/state"), Some("needs_resolution"));
+        assert!(valid_digest(shell_tree_digest));
+        assert_ne!(
+            Some(shell_tree_digest),
+            value_str(&shell_pack, "/pack/artifact_digest"),
+            "bootstrap Profile shell tree and Shell Pack aggregate must remain distinct domains"
+        );
+
+        resolve(&config).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bootstrap_profile_shell_digests_must_match_the_signed_variant() {
+        let (root, config) = fixture("bootstrap-shell-signed-variant");
+        let bundle_root = config.app_dir.join("ecosystem/defaultspack/v4");
+        let original_profile: Value =
+            serde_json::from_slice(&fs::read(bundle_root.join(PROFILE_PATH)).unwrap()).unwrap();
+        let original_shell = original_profile["shell"].clone();
+        let original_tree_digest = value_str(&original_profile, "/shell/artifact_digest")
+            .unwrap()
+            .to_owned();
+        let original_entrypoint_digest =
+            value_str(&original_profile, "/shell/executable_artifact_digest")
+                .unwrap()
+                .to_owned();
+
+        for field in ["artifact_digest", "executable_artifact_digest"] {
+            let expected = if field == "artifact_digest" {
+                &original_tree_digest
+            } else {
+                &original_entrypoint_digest
+            };
+            let replacement = if expected.ends_with(&"0".repeat(64)) {
+                format!("sha256:{}", "f".repeat(64))
+            } else {
+                format!("sha256:{}", "0".repeat(64))
+            };
+            rewrite_locked_document(&config, PROFILE_PATH, |profile| {
+                profile["shell"] = original_shell.clone();
+                profile["shell"][field] = Value::String(replacement.clone());
+            });
+
+            let profile_raw = fs::read(bundle_root.join(PROFILE_PATH)).unwrap();
+            let catalog = crate::presentation::load_catalog(&config).unwrap();
+            assert_eq!(catalog.default_profile_digest, sha256(&profile_raw));
+            let bundle_root = bundle_root.canonicalize().unwrap();
+            let bundle_lock = verify_bundle_lock(&bundle_root).unwrap();
+            assert_eq!(
+                bundle_lock.authority_digests.get(PROFILE_PATH),
+                Some(&catalog.default_profile_digest),
+                "the test must preserve the coherent lock/catalog Profile digest"
+            );
+            let error = resolve(&config).unwrap_err().to_string();
+            assert!(
+                error.contains("bootstrap Profile Shell differs from its signed artifact variant"),
+                "{field} mismatch was accepted or rejected for the wrong reason: {error}"
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
