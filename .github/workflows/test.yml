@@ -334,6 +334,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           reference="${RUNNER_TEMP}/pack-architecture-reference.json"
+          baseline="scripts/quality/pack_architecture_baseline.json"
+          bootstrap_commit='49df7570167176fba71420b2d9131d082eb696d3'
+          bootstrap_blob='72c0b006778b24a6459115bf569890fcf3636f35'
           if [ -z "${BASE_SHA}" ]; then
             echo "BASE_SHA is required for shrink-only baseline validation" >&2
             exit 1
@@ -342,14 +345,17 @@ jobs:
             echo "Base commit is unavailable: ${BASE_SHA}" >&2
             exit 1
           fi
-          if git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
-            git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
-            python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
+          if git cat-file -e "${BASE_SHA}:${baseline}" 2>/dev/null; then
+            git show "${BASE_SHA}:${baseline}" > "${reference}"
           else
-            echo "::warning::Bootstrap baseline: this reviewed candidate must exactly match its scan. Protected-base shrink-only enforcement starts after the baseline lands on the target branch."
-            cp scripts/quality/pack_architecture_baseline.json "${reference}"
-            python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
+            echo "::warning::Using the content-addressed reviewed bootstrap baseline"
+            test "$(git rev-parse "${bootstrap_commit}:${baseline}")" = "${bootstrap_blob}"
+            git show "${bootstrap_commit}:${baseline}" > "${reference}"
+            python scripts/quality/verify_pack_architecture_bootstrap.py \
+              --candidate "${baseline}" --reference "${reference}"
           fi
+          python scripts/quality/scan_pack_architecture.py \
+            --reference-baseline "${reference}"
 
       - name: Enforce shrink-only Pack boundary lint baseline
         env:
