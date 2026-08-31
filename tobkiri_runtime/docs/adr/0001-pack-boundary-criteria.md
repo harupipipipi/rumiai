@@ -21,13 +21,18 @@ runtime, does not participate in activation or approval, and is not included in 
 Pack signature or trust decision.
 
 A Pack boundary is justified only when the review finds one or more substantive
-reasons for it:
+reasons for it. Accepted assessment rows select one or more of these exact
+criterion keys and explain, in their own words, how the selected evidence meets
+them:
 
-1. It has an independent release, upgrade, rollback, or deprecation lifecycle.
-2. It crosses a distinct trust or authority boundary.
-3. Process, VM, or fault isolation has meaningful security or reliability value.
-4. It owns independently migrated durable state.
-5. A third party can genuinely replace or distribute it independently.
+1. `independent_lifecycle`: independent release, upgrade, rollback, or
+   deprecation lifecycle.
+2. `trust_or_authority_boundary`: a distinct trust or authority boundary.
+3. `meaningful_isolation`: process, VM, or fault isolation has meaningful
+   security or reliability value.
+4. `independently_migrated_state`: independently migrated durable state.
+5. `third_party_replaceability`: a third party can genuinely replace or
+   distribute it independently.
 
 A normal internal responsibility split, an import boundary, or a UI section is
 not sufficient by itself. Such code may ultimately be a module or resource inside
@@ -35,17 +40,29 @@ a larger Pack.
 
 Unknown values remain explicit until evidence exists. An assessment row cannot be
 accepted while its lifecycle owner, state owner, trust domain, execution mode,
-canonical owner, or disposition remains unresolved.
+canonical owner, or disposition remains unresolved. It must also have a non-empty
+`boundary_criteria` selection, an `assessment_justification`, and content-bound
+supporting evidence beyond the Pack manifest itself. Each evidence item records a
+repository-relative path and a SHA-256 digest; a changed manifest or evidence file
+resets a reviewed row to `unreviewed` when the inventory is regenerated.
 
 ## Inventory contract
 
 `docs/status/pack-boundary-assessment.v1.json` records the observed manifests and
 their unresolved review state. `scripts/quality/check_pack_boundary_assessment.py`
 checks that every production Pack manifest appears exactly once and that stale rows
-are removed. It also rejects any production Python reference to the assessment.
+are removed. It also rejects the assessment filename, schema version, and document
+role in covered static source/config files under `tobkiri_runtime`,
+`tobkiri_launcher`, and `.github`.
 
 Adding, removing, or moving a Pack manifest therefore creates review drift without
 making the assessment an executable catalog.
+
+The non-consumption guard is deliberately static and bounded: it excludes
+documentation, tests, vendor, and generated directories, and cannot prove the
+absence of dynamic loading or external-process consumption. It is a regression
+signal, not a runtime security control or a claim that all possible consumers are
+enumerated.
 
 ## Consequences
 
