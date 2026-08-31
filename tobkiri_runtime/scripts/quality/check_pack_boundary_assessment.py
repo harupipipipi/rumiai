@@ -735,13 +735,18 @@ def _is_guard_candidate(path: Path, repo_root: Path) -> bool:
         return False
     if path.suffix not in PRODUCTION_GUARD_SUFFIXES:
         return False
+    return not _guard_path_is_excluded(relative)
+
+
+def _guard_path_is_excluded(relative: Path) -> bool:
+    """Return whether one lexical repository path is outside guard scope."""
     if any(part in PRODUCTION_GUARD_EXCLUDED_PARTS for part in relative.parts):
-        return False
+        return True
     if any(
         relative.is_relative_to(prefix) for prefix in PRODUCTION_GUARD_EXCLUDED_PREFIXES
     ):
-        return False
-    return relative.as_posix() != (
+        return True
+    return relative.as_posix() == (
         "tobkiri_runtime/scripts/quality/check_pack_boundary_assessment.py"
     )
 
@@ -773,10 +778,23 @@ def find_runtime_references(repo_root: Path = REPO_ROOT) -> list[str]:
         if not scan_root.exists():
             continue
         for candidate in scan_root.rglob("*"):
-            if not _is_guard_candidate(candidate, root):
-                continue
             lexical_path = _lexical_relative(candidate, root)
             if lexical_path is None:
+                continue
+            relative = Path(lexical_path)
+            if candidate.is_symlink() and not _guard_path_is_excluded(relative):
+                try:
+                    symlink_target_is_directory = candidate.resolve(
+                        strict=True
+                    ).is_dir()
+                except (OSError, RuntimeError):
+                    symlink_target_is_directory = candidate.suffix == ""
+                if symlink_target_is_directory:
+                    references.append(
+                        f"{lexical_path} (symlinked production directory)"
+                    )
+                    continue
+            if not _is_guard_candidate(candidate, root):
                 continue
             try:
                 resolved = candidate.resolve(strict=True)
