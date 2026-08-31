@@ -24,6 +24,9 @@ from core_runtime.panel_auth import PanelAuthManager
 from tests.conformance_support.host_contract import host_contract
 
 
+pytestmark = pytest.mark.contract
+
+
 PROFILE_REVISION_A = "sha256:" + "a" * 64
 PROFILE_REVISION_B = "sha256:" + "b" * 64
 PLAN_DIGEST_A = "sha256:" + "c" * 64

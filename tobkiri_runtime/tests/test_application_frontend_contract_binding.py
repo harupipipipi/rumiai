@@ -25,6 +25,10 @@ from core_runtime.frontend_contract_routes import (
 )
 from tobkiri_protocol.canonical import canonical_digest
 
+
+pytestmark = pytest.mark.contract
+
+
 RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 DEFAULTSPACK_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack"
 if str(DEFAULTSPACK_ROOT) not in sys.path:
