@@ -29,6 +29,7 @@ PROFILE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_profile_bundle.v1.json"
 PROFILE_WORKSPACE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_profile_bundle"
 EXECUTABLE_SOURCE_FIXTURE = ROOT / "tests" / "fixtures" / "legacy_executable_sources.v1.json"
 EXECUTABLE_SOURCE_REGISTRY = ROOT / "schemas" / "executable_sources.v1.json"
+PACK_CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 DEFAULT_OUTPUT = ROOT / "scripts" / "quality" / "evidence" / "pack_migration_proof.v1.json"
 PACK_ARTIFACTS = (
     "artifact-index.v4.json",
@@ -52,6 +53,26 @@ from tobkiri_protocol.canonical import canonical_digest  # noqa: E402
 
 class IndependentMigrationProofError(RuntimeError):
     """Raised when independent migration or artifact verification fails."""
+
+
+def _production_pack_roots() -> list[Path]:
+    """Return the finite Pack roots declared by the canonical v4 catalog."""
+
+    catalog = _load_json(PACK_CATALOG)
+    pack_ids = catalog.get("pack_ids")
+    if not isinstance(pack_ids, list) or not all(
+        isinstance(pack_id, str) and pack_id for pack_id in pack_ids
+    ):
+        raise IndependentMigrationProofError("canonical Pack catalog is invalid")
+    if len(pack_ids) != len(set(pack_ids)):
+        raise IndependentMigrationProofError("canonical Pack catalog has duplicate IDs")
+    roots = [ECOSYSTEM / pack_id for pack_id in pack_ids]
+    missing = [root.name for root in roots if not root.is_dir()]
+    if missing:
+        raise IndependentMigrationProofError(
+            f"canonical Pack roots are missing: {', '.join(sorted(missing))}"
+        )
+    return sorted(roots)
 
 
 def _load_json(path: Path) -> Mapping[str, Any]:
@@ -524,9 +545,7 @@ def _source_inputs() -> list[dict[str, str]]:
         artifact_manifest = v3_path.parent / "artifact-manifest.json"
         if artifact_manifest.is_file():
             paths.append(("legacy-artifact-manifest", artifact_manifest))
-    for pack_root in sorted(
-        path for path in ECOSYSTEM.iterdir() if path.is_dir() and path.name != "setup_pack"
-    ):
+    for pack_root in _production_pack_roots():
         for name in PACK_ARTIFACTS:
             paths.append(("v4-artifact", pack_root / name))
         index = _load_json(pack_root / "artifact-index.v4.json")
@@ -978,9 +997,7 @@ def build_proof(*, observed_head_sha: str | None = None) -> dict[str, Any]:
             identity,
             Path(temporary),
         )
-    pack_dirs = sorted(
-        path for path in ECOSYSTEM.iterdir() if path.is_dir() and path.name != "setup_pack"
-    )
+    pack_dirs = _production_pack_roots()
     if not pack_dirs:
         raise IndependentMigrationProofError("no production Pack directories were found")
     explicit_packs = fixture.get("packs") if isinstance(fixture.get("packs"), Mapping) else {}

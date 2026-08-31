@@ -313,13 +313,75 @@ def _sha256(path: Path) -> str:
 
 def _production_pack_dirs() -> tuple[Path, ...]:
     """Return exactly the direct Pack roots under ``ecosystem``."""
+    catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
+    excluded = (
+        frozenset(catalog.get("excluded_packs", ()))
+        if isinstance(catalog, Mapping)
+        and isinstance(catalog.get("excluded_packs"), list)
+        else frozenset()
+    )
     return tuple(
         sorted(
             path
             for path in ECOSYSTEM.iterdir()
-            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+            if path.is_dir()
+            and path.name != "setup_pack"
+            and path.name not in excluded
+            and not path.name.startswith(".")
         )
     )
+
+
+def _compatibility_alias_findings() -> list[dict[str, Any]]:
+    """Require catalog exclusions to be finite, read-only non-Pack aliases."""
+    catalog_path = RUNTIME / "schemas" / "pack_v4_catalog.v1.json"
+    catalog = _load_json(catalog_path)
+    raw_excluded = catalog.get("excluded_packs") if isinstance(catalog, Mapping) else None
+    pack_ids = catalog.get("pack_ids") if isinstance(catalog, Mapping) else None
+    if not isinstance(raw_excluded, list) or not all(
+        isinstance(pack_id, str) for pack_id in raw_excluded
+    ):
+        return [_finding(catalog_path, 1, "compatibility_alias_catalog_invalid")]
+    excluded = set(raw_excluded)
+    findings: list[dict[str, Any]] = []
+    if len(excluded) != len(raw_excluded):
+        findings.append(_finding(catalog_path, 1, "duplicate_compatibility_alias"))
+    if isinstance(pack_ids, list) and excluded & set(pack_ids):
+        findings.append(
+            _finding(
+                catalog_path,
+                1,
+                "compatibility_alias_has_pack_authority",
+                pack_ids=sorted(excluded & set(pack_ids)),
+            )
+        )
+    forbidden = set(PACK_ARTIFACTS) | {"ecosystem.json", "rumi.pack.v3.json"}
+    for pack_id in sorted(excluded):
+        pack_dir = ECOSYSTEM / pack_id
+        alias_path = pack_dir / "compatibility-alias.v1.json"
+        alias = _load_json(alias_path)
+        if not isinstance(alias, Mapping):
+            findings.append(_finding(alias_path, 1, "compatibility_alias_missing"))
+            continue
+        if (
+            alias.get("schema")
+            != "io.tobkiri.profile-projection-compatibility-alias.v1"
+            or alias.get("legacy_pack_id") != pack_id
+            or alias.get("runtime_authority") is not False
+            or alias.get("read_only") is not True
+        ):
+            findings.append(_finding(alias_path, 1, "compatibility_alias_invalid"))
+        authority_artifacts = sorted(name for name in forbidden if (pack_dir / name).exists())
+        if authority_artifacts:
+            findings.append(
+                _finding(
+                    alias_path,
+                    1,
+                    "compatibility_alias_contains_authority_artifacts",
+                    artifacts=authority_artifacts,
+                )
+            )
+    return findings
 
 
 def _v4_pack_artifacts() -> list[Path]:
@@ -1572,7 +1634,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     plan_schema = load_schema("resolved_plan")
     required_plan = frozenset(plan_schema.get("required", ()))
     properties_plan = frozenset(plan_schema.get("properties", ()))
-    expected_plan = frozenset(
+    expected_required_plan = frozenset(
         {
             "plan_api_version",
             "profile_id",
@@ -1586,6 +1648,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "shell",
             "application",
             "effective_set",
+            "content_projections",
             "requested_edges_digest",
             "constraints_digest",
             "closure_digest",
@@ -1594,10 +1657,14 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "plan_digest",
         }
     )
-    if required_plan != expected_plan or properties_plan != expected_plan:
+    expected_properties_plan = expected_required_plan | {"launch_contribution"}
+    if (
+        required_plan != expected_required_plan
+        or properties_plan != expected_properties_plan
+    ):
         findings.append(
             {
-                "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
+                "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
                 "line": 1,
                 "rule": "resolved_plan_scope_mismatch",
                 "required": sorted(required_plan),
@@ -2621,6 +2688,7 @@ def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
     """Every declared Pack has the complete direct compiler input set."""
     pack_count = len(_production_pack_dirs())
+    _assert_zero("compatibility aliases", _compatibility_alias_findings())
     assert pack_count == len(_authority_source_sets()["v4_ids"])
     assert len(_v4_pack_artifacts()) == pack_count
     assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == pack_count * len(
@@ -3363,7 +3431,7 @@ def test_migration_status_promotes_only_pack_specific_semantic_proof() -> None:
         _migration_status(path.name, path, proof)
         for path in _production_pack_dirs()
     )
-    assert statuses == {"semantically-reviewed": 45, "generated-draft": 98}
+    assert statuses == {"semantically-reviewed": 45, "generated-draft": 94}
 
 
 def test_current_sha_evidence_is_red_while_pack_semantics_are_unproved() -> None:
@@ -3382,7 +3450,7 @@ def test_current_sha_evidence_is_red_while_pack_semantics_are_unproved() -> None
         PACK_ARTIFACTS
     )
     assert report["pack_inventory"]["migration_status_counts"] == {
-        "generated-draft": 98,
+        "generated-draft": 94,
         "semantically-reviewed": 45,
     }
     assert report["gates"]["artifact_contracts"]["status"] == "GREEN"

@@ -123,8 +123,8 @@
           ],
           "optional_integrations": [
             {
-              "pack_id": "rumi_reference_ui_pack",
-              "reason": "Hosts reference UI manifests and review surfaces for artifact runtime UI contracts."
+              "pack_id": "rumi_frontend_design_pack",
+              "reason": "Owns frontend design generation and UI review workflows for artifact runtime contracts."
             },
             {
               "pack_id": "defaultspack",

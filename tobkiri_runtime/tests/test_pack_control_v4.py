@@ -614,12 +614,27 @@ def test_generic_dispatch_is_retired_without_client_selected_execution(
 ) -> None:
     """The generic endpoint never trusts client-selected Broker identities."""
     session, state_path, _user_data = captured_session
+    active = profile_capture.capture_active_profile()
+
+    class AuthenticatedDispatch:
+        """Expose the active capture fields required by panel authentication."""
+
+        profile_id = str(active.resolved.profile["profile_id"])
+        profile_revision = str(active.resolved.plan["profile_revision"])
+        activation_id = str(active.activation["activation_id"])
+        plan_digest = str(active.resolved.plan["plan_digest"])
+        security_epoch = int(active.activation["security_epoch"])
+
+        @staticmethod
+        def assert_current() -> None:
+            profile_capture.capture_active_profile()
+
     auth = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
     server = PackAPIServer(
         host="127.0.0.1",
         port=0,
         panel_auth_manager=auth,
-        dispatch_session=session,
+        dispatch_session=AuthenticatedDispatch(),
     )
     server.start()
     assert server.server is not None
@@ -661,19 +676,6 @@ def test_generic_dispatch_is_retired_without_client_selected_execution(
         }
 
     try:
-        dispatch_body = {
-            "contract_id": PACK_CONTROL_CONTRACT,
-            "operation_id": "catalog.read",
-            "payload": {},
-        }
-        before = state_path.read_bytes()
-        assert_post_denied("/api/v4/dispatch", dispatch_body, 410)
-        assert_post_denied(
-            "/api/v4/dispatch",
-            dispatch_body,
-            410,
-            {"Authorization": "Bearer formerly-valid-internal-token"},
-        )
         bootstrap = post(
             "/api/panel/auth/bootstrap",
             {},
@@ -684,6 +686,24 @@ def test_generic_dispatch_is_retired_without_client_selected_execution(
             {"code": bootstrap["data"]["code"]},
         )
         csrf = exchange["data"]["csrf_token"]
+        dispatch_body = {
+            "contract_id": PACK_CONTROL_CONTRACT,
+            "operation_id": "catalog.read",
+            "payload": {},
+        }
+        before = state_path.read_bytes()
+        assert_post_denied(
+            "/api/v4/dispatch", dispatch_body, 410, {"X-Rumi-CSRF": csrf}
+        )
+        assert_post_denied(
+            "/api/v4/dispatch",
+            dispatch_body,
+            410,
+            {
+                "Authorization": "Bearer formerly-valid-internal-token",
+                "X-Rumi-CSRF": csrf,
+            },
+        )
         assert_post_denied(
             "/api/v4/dispatch",
             {
