@@ -1193,6 +1193,13 @@
       "executable": false
     },
     {
+      "path": "scripts/quality/check_pack_boundary_assessment.py",
+      "type": "regular-file",
+      "size": 30991,
+      "sha256": "3df5c0e91d4a9cb8d88ae16b712f2aa8676df9d72c61be16098c21bf366fd2b3",
+      "executable": false
+    },
+    {
       "path": "scripts/quality/check_template_contracts.py",
       "type": "regular-file",
       "size": 8576,
@@ -1272,8 +1279,8 @@
     {
       "path": "scripts/quality/scan_defaultspack_integrity.py",
       "type": "regular-file",
-      "size": 24565,
-      "sha256": "67f91e568a626068567975de7d83768494485f4ef0b84182eef28b067eb41e87",
+      "size": 24774,
+      "sha256": "5995c7c44ddaae35ee78c7b200341aa7c23bc61113d1857fc60eccbc39d95833",
       "executable": false
     },
     {
@@ -1489,8 +1496,8 @@
     {
       "path": "tobkiri_protocol/schema_hashes.json",
       "type": "regular-file",
-      "size": 3614,
-      "sha256": "1cc0b8ee10d723e729f7781d2d79cc0b6e34e1571dc5ffef1f44ec3bd9f17c62",
+      "size": 3738,
+      "sha256": "af272c73e47edec4b5c022653e9c393023496ed1ca58c35bef29444b1c588185",
       "executable": false
     },
     {

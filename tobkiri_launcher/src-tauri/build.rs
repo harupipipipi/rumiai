@@ -262,18 +262,12 @@ fn bind_macos_artifact_policy() -> io::Result<()> {
                     "production macOS builds may not carry a CI verification key",
                 ));
             }
-            let team = std::env::var(APPLE_TEAM_ID_ENV).unwrap_or_default();
-            if profile == "release"
-                && (team.len() != 10
-                    || !team
-                        .bytes()
-                        .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()))
-            {
+            if std::env::var_os(APPLE_TEAM_ID_ENV).is_some() {
                 return Err(invalid_release(
-                    "release macOS production builds require an exact 10-character APPLE_TEAM_ID",
+                    "OSS macOS production builds may not claim an Apple Team ID",
                 ));
             }
-            team
+            String::new()
         }
         "ci-e2e-v1" => {
             if profile != "release" {
@@ -1096,7 +1090,7 @@ fn bind_sealed_python_root(root: &Path, require_formal_binding: bool) -> io::Res
         || provenance
             .get("package_id")
             .and_then(serde_json::Value::as_str)
-            != Some("dev.tobkiri.launcher")
+            != Some("dev.rumiai.app")
         || !valid_sha256(provenance.get("release_digest"))
     {
         return Err(io::Error::new(
@@ -5907,7 +5901,7 @@ mod tests {
             "python_version": "3.13.13",
             "package_provenance": {
                 "kind": "pinned-python-build-standalone-v1",
-                "package_id": "dev.tobkiri.launcher",
+                "package_id": "dev.rumiai.app",
                 "release_digest": raw_byte_digest(b"release")
             },
             "sentinels": {
@@ -6134,7 +6128,7 @@ mod tests {
             let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
             let _certificate = EnvironmentGuard::clear(MACOS_CI_CERT_SHA256_ENV);
             let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
-            let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
+            let _team = EnvironmentGuard::clear(APPLE_TEAM_ID_ENV);
             bind_macos_artifact_policy().unwrap();
         }
     }
@@ -6151,8 +6145,7 @@ mod tests {
         }
         {
             let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
-            let _certificate =
-                EnvironmentGuard::set_value(MACOS_CI_CERT_SHA256_ENV, &"b".repeat(64));
+            let _certificate = EnvironmentGuard::clear(MACOS_CI_CERT_SHA256_ENV);
             let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
             let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
             assert!(bind_macos_artifact_policy().is_err());

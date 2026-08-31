@@ -347,7 +347,8 @@ jobs:
             python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
           else
             echo "::warning::Bootstrap baseline: this reviewed candidate must exactly match its scan. Protected-base shrink-only enforcement starts after the baseline lands on the target branch."
-            python scripts/quality/scan_pack_architecture.py
+            cp scripts/quality/pack_architecture_baseline.json "${reference}"
+            python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
           fi
 
       - name: Enforce shrink-only Pack boundary lint baseline

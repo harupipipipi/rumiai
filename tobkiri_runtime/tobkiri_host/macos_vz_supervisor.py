@@ -168,6 +168,10 @@ class MacOSVZHelperIdentity:
         ):
             if not isinstance(value, str) or len(value) > 512 or "\x00" in value:
                 raise BackendUnavailableError(f"{label} is invalid")
+        if bool(self.team_id) != bool(self.signing_identity):
+            raise BackendUnavailableError(
+                "macOS VZ helper signing identity is incomplete"
+            )
 
     @property
     def expected_code_digest(self) -> str:
@@ -1380,12 +1384,13 @@ def verify_macos_vz_helper_identity(
             fields.setdefault(key.strip(), []).append(value.strip())
     if fields.get("Identifier") != [expected.bundle_id]:
         return False, "macOS VZ native helper signing identity mismatch"
-    if expected.team_id and fields.get("TeamIdentifier") != [expected.team_id]:
-        return False, "macOS VZ native helper signing identity mismatch"
-    if expected.signing_identity and expected.signing_identity not in fields.get(
-        "Authority", []
-    ):
-        return False, "macOS VZ native helper signing identity mismatch"
+    if expected.team_id:
+        if fields.get("TeamIdentifier") != [expected.team_id]:
+            return False, "macOS VZ native helper signing identity mismatch"
+        if expected.signing_identity not in fields.get("Authority", []):
+            return False, "macOS VZ native helper signing identity mismatch"
+    elif fields.get("Signature") != ["adhoc"]:
+        return False, "macOS VZ native helper is not ad-hoc signed"
     entitlement_source = described.stdout + "\n" + described.stderr
     start = entitlement_source.find("<?xml")
     if start < 0:

@@ -107,6 +107,17 @@ def test_v4_integrity_rejects_unlisted_bundle_artifact(tmp_path):
     assert any("extra artifact" in error for error in errors)
 
 
+def test_v4_integrity_source_only_companion_allowlist_is_exact(tmp_path):
+    pack_root = _copy_v4_pack(tmp_path)
+    (pack_root / "v4" / "defaults.profile.intent.v2.json").write_text(
+        "{}\n", encoding="utf-8"
+    )
+
+    errors = _v4_errors(pack_root)
+
+    assert any("defaults.profile.intent.v2.json" in error for error in errors)
+
+
 def test_v4_integrity_rejects_path_traversal(tmp_path):
     pack_root = _copy_v4_pack(tmp_path)
     index_path = pack_root / "artifact-index.v4.json"

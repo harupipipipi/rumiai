@@ -1070,7 +1070,7 @@ def test_manifest_is_strict_complete_and_reproducible(tmp_path: Path, target: st
         "package_id",
         "release_digest",
     )
-    assert first_document["package_provenance"]["package_id"] == "dev.tobkiri.launcher"
+    assert first_document["package_provenance"]["package_id"] == "dev.rumiai.app"
     assert tuple(first_document["sentinels"]) == BUILDER.SENTINEL_KEYS
     records = first_document["files"]
     assert records == sorted(records, key=lambda entry: entry["path"])

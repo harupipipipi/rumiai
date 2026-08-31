@@ -49,7 +49,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/core_runtime/core_pack/core_control_panel/ecosystem.json",
-          "sha256": "01f91fa276d8adb944090af7e5d6eeec813816e9fe7fe1aec0ada040c59b4a38"
+          "sha256": "64fa078fc6d8e7edb36916d514640fd9377b1ef2639b7d8a30f077e6d764eaaf"
         }
       ]
     },
@@ -169,7 +169,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/core_runtime/core_pack/core_setup/ecosystem.json",
-          "sha256": "44ba42cac8440710c4755701fe9d49f967e52c0940c35f5e5ebcaa4b28e3f8a6"
+          "sha256": "bccb145d58c62768745695eccd692e87f001ea68c0d51d4b67c20dd597e808c6"
         }
       ]
     },
@@ -270,54 +270,6 @@
       ]
     },
     {
-      "observed_pack_id": "defaults",
-      "manifest_path": "tobkiri_runtime/ecosystem/defaults/ecosystem.json",
-      "review_status": "unreviewed",
-      "lifecycle_owner": "unknown",
-      "state_owner": "unknown",
-      "external_effects": [
-        "unknown"
-      ],
-      "trust_domain": "unknown",
-      "execution_mode": "unknown",
-      "canonical_owner": "unresolved",
-      "disposition": "undecided",
-      "deprecated_ids": [],
-      "removal_phase": null,
-      "boundary_criteria": [],
-      "assessment_justification": "",
-      "evidence": [
-        {
-          "path": "tobkiri_runtime/ecosystem/defaults/ecosystem.json",
-          "sha256": "884a82fd7e943679dfcf6b37255f93ff529147313d88cac5f57efa27130bb804"
-        }
-      ]
-    },
-    {
-      "observed_pack_id": "defaultspack",
-      "manifest_path": "tobkiri_runtime/ecosystem/defaultspack/ecosystem.json",
-      "review_status": "unreviewed",
-      "lifecycle_owner": "unknown",
-      "state_owner": "unknown",
-      "external_effects": [
-        "unknown"
-      ],
-      "trust_domain": "unknown",
-      "execution_mode": "unknown",
-      "canonical_owner": "unresolved",
-      "disposition": "undecided",
-      "deprecated_ids": [],
-      "removal_phase": null,
-      "boundary_criteria": [],
-      "assessment_justification": "",
-      "evidence": [
-        {
-          "path": "tobkiri_runtime/ecosystem/defaultspack/ecosystem.json",
-          "sha256": "a42fcdde993f7941c18de21ef463010fd834187453fa2d29890a8bfe02cb321e"
-        }
-      ]
-    },
-    {
       "observed_pack_id": "rumi_agent_continuity_pack",
       "manifest_path": "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/ecosystem.json",
       "review_status": "unreviewed",
@@ -337,13 +289,13 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/ecosystem.json",
-          "sha256": "b4c60a71375f836aeb70aecd10e76427d79aa3965fdfcbbf0ccbf1be20584376"
+          "sha256": "f050cbe73bc18d3651bb3922583e0caec841760872682411974b6deacb13c086"
         }
       ]
     },
     {
-      "observed_pack_id": "rumi_agent_services_pack",
-      "manifest_path": "tobkiri_runtime/ecosystem/rumi_agent_services_pack/ecosystem.json",
+      "observed_pack_id": "rumi_agent_runtime_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/ecosystem.json",
       "review_status": "unreviewed",
       "lifecycle_owner": "unknown",
       "state_owner": "unknown",
@@ -360,8 +312,32 @@
       "assessment_justification": "",
       "evidence": [
         {
-          "path": "tobkiri_runtime/ecosystem/rumi_agent_services_pack/ecosystem.json",
-          "sha256": "0c50bdf5e1db0563de5fdc254598a05afe691523e0b8fab632b07c5d91d32c61"
+          "path": "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/ecosystem.json",
+          "sha256": "bd8b8fb8a40b44298dc95902cc089f353ce0a43e7f416390ec3d84b57b196561"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_agent_state_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/ecosystem.json",
+          "sha256": "13d50c2a27aa48da720cef78ec0622d3597030a860a465fca7caee17afa6f502"
         }
       ]
     },
@@ -385,7 +361,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_agent_workroom_pack/ecosystem.json",
-          "sha256": "ab959501019f79b5c4c4233215dece1efa08171503e2a39cb36735c0399379e6"
+          "sha256": "3645d225473e94e900bd4609f34c1ba7f481838c7a49fb8a5d5a7e3d5066e1f3"
         }
       ]
     },
@@ -409,7 +385,175 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_agentic_qa_pack/ecosystem.json",
-          "sha256": "0357775878f1aa05b1598e9709f68b4e7ad5f570f8cc86c6e89ecf68a427ed7f"
+          "sha256": "1b76f183aad241f7d391693517419eeed3cd8efb551474cd17ca9c568b420a65"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_gateway_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_gateway_pack/ecosystem.json",
+          "sha256": "412e8e25eaa60e98b0d1b10d9a8d7319059cd09123ad12c7767a5527cd690a5d"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_modality_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_modality_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_modality_pack/ecosystem.json",
+          "sha256": "3d6e545a785d7aa395630f1803adab9c39b0e35fd057d7bf6d0f90d70e2734a8"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_pipeline_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_pipeline_pack/ecosystem.json",
+          "sha256": "2577644824fc054dac19e45e0a529f72106a7936fd13cfcf62fd16c17ecc291d"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_routing_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_routing_pack/ecosystem.json",
+          "sha256": "a0fe19bb2a4f679e3f152d068b5aadb49f3a30c4df856bc1e893c61845e1f929"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_stream_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_stream_pack/ecosystem.json",
+          "sha256": "eaa2dd61312ae7edd774d345daa9cae1c846d3925a3f28bb4a29bf84567e3ac1"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_tool_bridge_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_tool_bridge_pack/ecosystem.json",
+          "sha256": "b0cb27913f71b9fa30cb388f3525020e5e47a8ae4cf9cd427d3bcf486f146331"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ai_usage_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ai_usage_pack/ecosystem.json",
+          "sha256": "97c435be4018be04393f91186d801c78877221b5c8aad354ebc3c2ecbd41ab9d"
         }
       ]
     },
@@ -433,7 +577,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_ambient_trigger_pack/ecosystem.json",
-          "sha256": "9a6c0daec597ba3d3a3195e8910748ac62fd200fda933bf89099e10d2c31ec81"
+          "sha256": "98b15b513536b30461db4d8e579911364e347af5fbe7fc88c3ffe44ffbd3f021"
         }
       ]
     },
@@ -457,7 +601,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_api_toolsmith_pack/ecosystem.json",
-          "sha256": "a53417c61d2d276cac0e2ffd2a7e5782b73351e99539a8a87d51523b03fd4204"
+          "sha256": "942e94f68767c46939c5327c266220f6e4eb56866189a364a5a4ca3101a1b0e3"
         }
       ]
     },
@@ -481,7 +625,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_artifact_app_runtime_pack/ecosystem.json",
-          "sha256": "150ad8dbc8916d02cb4a3e0b20839cc3774603e4fd7415b763d40ba6862d8426"
+          "sha256": "706f45abf0c8f68c6a386aeb538d5a2bc81bdf8be34eac5f29abd9cdb87cc74b"
         }
       ]
     },
@@ -505,7 +649,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_browser_automation_pack/ecosystem.json",
-          "sha256": "5abc45ac96c5c707ba36b2fc90df36fd93ab02cbd8340f81eb4d48a4430fe179"
+          "sha256": "a3dd3c822b80a8cb429d5349012c61d8bf7551972810403267ef0c63225bae22"
         }
       ]
     },
@@ -529,7 +673,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_browser_element_pack/ecosystem.json",
-          "sha256": "80afdf4545f757369caf21f48e93603a366e77059c96ff338793ce86e304c7d4"
+          "sha256": "eb3971133d253832df1927f5d408037408a3de9526dd1f319901ec91a5eceac0"
         }
       ]
     },
@@ -553,7 +697,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_browser_form_operator_pack/ecosystem.json",
-          "sha256": "0b7aed77a403e73f587adca28fc4469256fadf2c3f64c04dce1ff73caeed2285"
+          "sha256": "5b6967699ac14f8314a47ed9b6c38d0c298bd8f2cd6b0b142f290b5893d09737"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_browser_host_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_browser_host_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_browser_host_service_pack/ecosystem.json",
+          "sha256": "045bb23a9cdb7a5b6b0572ac9949546c81b863dd3192351257f9bdb224ff99c4"
         }
       ]
     },
@@ -577,7 +745,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_browser_session_replay_pack/ecosystem.json",
-          "sha256": "9d08dfaba61821b9f4e3f0a6d823f30ae233bb0827bccd36edd8c95d1bdabfa4"
+          "sha256": "de01edb4228eee84b4225097a14124baae22a5f1970f36d45cc496152c7a1014"
         }
       ]
     },
@@ -601,7 +769,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_business_ops_pack/ecosystem.json",
-          "sha256": "45d26e8f22513c59bebc76a0dfc76ac5bf0e554e56cc85bf79bf46d454babb44"
+          "sha256": "3545dc4ea0847613affabaebfc9bff19c546d1634d0b00526cea2d3ea9508ba5"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_clipboard_host_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_clipboard_host_service_pack/ecosystem.json",
+          "sha256": "e957c5ccc7a0fea5ddce5e20343d8124053f397acee8718b1c687c4f92d7246c"
         }
       ]
     },
@@ -625,7 +817,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_code_ide_pack/ecosystem.json",
-          "sha256": "c41b54786437381b99ae69c255d50ffc965e24cf6e73c91847112ac6752ff616"
+          "sha256": "962f775ab295cafab45fd2a3e45bc26c90daf323dd4bcdd8405f4a545f58bee6"
         }
       ]
     },
@@ -649,7 +841,127 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json",
-          "sha256": "5107677876657c2fb7d9f12debd1fa98006a4a0ee32beb407638279dec3efefb"
+          "sha256": "15512b7bdaabc11b8c4618ea5fedade9d6f7b27b931dc7c6e6cc60403e30a13e"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_coding_sandbox_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_coding_sandbox_service_pack/ecosystem.json",
+          "sha256": "c39cf13bd8315121670af62aeca46443e2bad7ff91751168659d5c0b3293dc2e"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_company_agent_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_company_agent_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_company_agent_adapter_pack/ecosystem.json",
+          "sha256": "6ce4cd60780888108be801d8e050b69627abf8a9ff16560b320399b184c53db2"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_company_coordinator_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_company_coordinator_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_company_coordinator_pack/ecosystem.json",
+          "sha256": "79edaf8ff0d42572169d26b332878d7391fb41ee23d512fea5bb40fd3abfd08e"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_company_state_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_company_state_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_company_state_store_pack/ecosystem.json",
+          "sha256": "0a7c8759ec6322c06553bba9cbd3f0bbc87e6d4dfb301b5e1796d775db945d57"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_company_surface_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_company_surface_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_company_surface_pack/ecosystem.json",
+          "sha256": "3ac64d25c786351d784122e15ae22be6e38fd80abf7f6962cc76f3ae850b7921"
         }
       ]
     },
@@ -673,7 +985,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_computer_control_pack/ecosystem.json",
-          "sha256": "55f2faee867a0d46364a48faf54672cc90c389c0d9aa9c8677fd028dd540f42d"
+          "sha256": "52a6c4d733a54e5d4f656e8e55419cc9e78475b4760daec71191443a3f5a0863"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_company_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_company_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_company_adapter_pack/ecosystem.json",
+          "sha256": "4f0d2db8c5ac329653d04ad632bc05c81316218fbf4b9e71a0918f065044bbce"
         }
       ]
     },
@@ -697,7 +1033,247 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/ecosystem.json",
-          "sha256": "5d9e60fc232d1ca65719893fdd0e7f4dbe5ea81478fd92ce6383e0b4b96819c3"
+          "sha256": "a7139c75869d8ba5e19e182719ef318b61d83250b3792f6bac7d9308c63805f2"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_inbound_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_inbound_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_inbound_broker_pack/ecosystem.json",
+          "sha256": "8bb25e4488b3c24e25d982dfebf9a7592c5a802c0e36a8245a4c64f1187feb99"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_oauth_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_oauth_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_oauth_broker_pack/ecosystem.json",
+          "sha256": "3289e119ff04b42fa953477e22fa13a0bf5e246558f6cc16f24e41189b159486"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_outbound_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_outbound_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_outbound_broker_pack/ecosystem.json",
+          "sha256": "5f7280a0812f9ff306dd44cec96b572450807e09afb85f0a7677849bb585ab24"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_registry_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_registry_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_registry_service_pack/ecosystem.json",
+          "sha256": "2c51c1959c70ab6921b2d3cc3e071b950d58208250cbbac13d548ad53fd40e6c"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_settings_surface_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_settings_surface_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_settings_surface_pack/ecosystem.json",
+          "sha256": "e6a86c51b18e4684d7a93868eedce8a9d992b5d173c5dcbd27ac3824fb3f9c2d"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_transport_gateway_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_transport_gateway_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_transport_gateway_pack/ecosystem.json",
+          "sha256": "df144cd6d0a9a3cc01cef5fc64774bf147e9a7651141581cfa468976be1e21c4"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_connector_turn_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_connector_turn_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_turn_adapter_pack/ecosystem.json",
+          "sha256": "b8c706ec13ed26b224df603f23c146184a6ef5d4a28584addfdbfe7a6af4e88a"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_context_runtime_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_context_runtime_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_context_runtime_pack/ecosystem.json",
+          "sha256": "aa5c38811c91f7b540d5c99aa8385dc8f027d7cd3a463bf789285c0941ac740a"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_conversation_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_conversation_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_conversation_store_pack/ecosystem.json",
+          "sha256": "127164eadd131cada8c15ff6a153561c41aade56458e3b1897fcf50979bd1caa"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_credential_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
+          "sha256": "17b5b5f6083fd6fd204fd27ee5d144d02a5e2995acae0a91042304afc71d91c9"
         }
       ]
     },
@@ -721,7 +1297,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_customer_research_pack/ecosystem.json",
-          "sha256": "d5d64b7f6789f6a792672a4b391925e7e1ca94a9b8fa0f6d0d4bffab8f4a044d"
+          "sha256": "6b69a70cf7e8a00816a67be8c0dba4b5c805f4a2b8b8c4f79e4e7d53a04b515c"
         }
       ]
     },
@@ -745,7 +1321,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_data_analysis_pack/ecosystem.json",
-          "sha256": "e57e82216000331de0d13a4e528cdded320b6cb6eb9bbe2de01b50af9199b972"
+          "sha256": "48851c186c915904a504e28dee1554107970eb3b361b5ae379ba320c40323732"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_default_tool_projection_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_default_tool_projection_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_default_tool_projection_pack/ecosystem.json",
+          "sha256": "df716a1f207ad475cd57c03a762d28a56d3e7859aa84e71d1c22077bc3575211"
         }
       ]
     },
@@ -769,7 +1369,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_default_tools_pack/ecosystem.json",
-          "sha256": "77a5d68bd579f4498aa7864392dcfca7a3c382623fec3f73cd0fb30a77bd2606"
+          "sha256": "89dcf2bb2261e07e8ab1f0e000218fe45c240fc5e424f6797ec8425791171004"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_desktop_host_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_desktop_host_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_desktop_host_service_pack/ecosystem.json",
+          "sha256": "f211d9918e8600a24da2d36e6c9cede5e5880ce1c9549f3f19896aaf628c978c"
         }
       ]
     },
@@ -793,7 +1417,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_devops_release_pack/ecosystem.json",
-          "sha256": "af958304fc33c7f7e06b35e378c0994165b18b7ed6b0bc8de20effb58da3afc0"
+          "sha256": "f4984ea7c2b59c849b42802b3c248f7081c99811f99ed3e891fa7cab672ce40c"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_discord_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_discord_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_discord_connector_pack/ecosystem.json",
+          "sha256": "26b82e247c2460dab397328b65ee29c1ca54d45601f24a6e6a480b6516a11d5e"
         }
       ]
     },
@@ -817,7 +1465,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_document_intelligence_pack/ecosystem.json",
-          "sha256": "56f9987f1bf3e5fe1b52290c5bb4956e93925d694465f35c4a97bd26a51c80d5"
+          "sha256": "a3ee7f0f8c10a3ef2e4e8db98be3e1eff417182e1ce79aa870920c1dfd3b8136"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_email_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_email_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_email_connector_pack/ecosystem.json",
+          "sha256": "9c050e32171a6c1799b0bded5b35e9573bc6abe1769b131f8b3285d2ea42c6a3"
         }
       ]
     },
@@ -841,7 +1513,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_evidence_dossier_pack/ecosystem.json",
-          "sha256": "3541b9f4275c48c5993ce3b288ef91d14a2c51929937760fc25de8929165f0ad"
+          "sha256": "f6a3a63af9ca33cae3668d7362182c9f4c8a1730079258feff073d3e0ff89806"
         }
       ]
     },
@@ -865,7 +1537,79 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_experiment_design_pack/ecosystem.json",
-          "sha256": "093fed34e236a699e893c9db11007d9c3f54157e4762c63d96a37719fb947863"
+          "sha256": "8ba074fbfa6c2a5c672959db3851a6a3f4eaccdfa50c23e62a7b1c1c0c913ba2"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_file_inspect_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_file_inspect_pack/ecosystem.json",
+          "sha256": "ab0940d5fa7d0e93013c739b75eeabcf7bc737f3a3037bfa87833a1c229940ac"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_file_mutation_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_file_mutation_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_file_mutation_pack/ecosystem.json",
+          "sha256": "4fe6be213d964f65cdefd8bda5785ba8ff240ae92e723e66391c57f5c50e677b"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_file_patch_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_file_patch_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_file_patch_pack/ecosystem.json",
+          "sha256": "fd7440f849c3a3790bbe7006c70cf845d7874f2ada91f803d77c3adf627ac806"
         }
       ]
     },
@@ -889,7 +1633,127 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_frontend_design_pack/ecosystem.json",
-          "sha256": "dc71ae8b5e5207dd8bdbc5d7acb8ef9d611a49f549d7251f3a04a2b0a04a2734"
+          "sha256": "c7112f13185ce6d6768bbe5668a559123c1cf1e94333b1bf6bdfbbe4041cdfa9"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_generic_webhook_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_generic_webhook_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_generic_webhook_connector_pack/ecosystem.json",
+          "sha256": "0160cb7f7d282ca599a1a28adc43e2b71f90d0ea46784fc32524a9fbcaaf20b8"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_git_publish_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_git_publish_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_git_publish_pack/ecosystem.json",
+          "sha256": "7bf999e0863af45e147c9281dcfb76eba9b5660800e8af9a8de786e46eac3fb4"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_git_read_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/ecosystem.json",
+          "sha256": "25910b31ad6f2d940b2fb704a94d45414ecd2996cda69552ada3fb05ecde971f"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_git_write_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/ecosystem.json",
+          "sha256": "c3c16799a2ea86614f7fbba0bbc12773b7097de267d09a5ef058264721d028d0"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_host_authority_bridge_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/ecosystem.json",
+          "sha256": "32866d079faf6f2c601450f335e44a7a75e080c0fd2182b5df5c9babdc94b546"
         }
       ]
     },
@@ -913,7 +1777,175 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_host_capabilities_pack/ecosystem.json",
-          "sha256": "dbe0368ed3b25e66614b68f31e001ff80ffdd6265f1c3f83a8e8aeb7d5f4175b"
+          "sha256": "07e4824f2dd5cd00ce110c2f398d997fa1f70f4ed2d503a98b992f3d0c30efc8"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_http_api_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_http_api_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_http_api_connector_pack/ecosystem.json",
+          "sha256": "24bd130125dc1c64e7f1210dcf3253b0fe2f4b07f07191c9d0a13ff253a93a7a"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_human_operator_provider_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_human_operator_provider_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_human_operator_provider_pack/ecosystem.json",
+          "sha256": "b4cc8368a472b6759f2415f712d8c458a9b4eff1efce5a4efafa0845a42df72e"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_ide_bridge_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_ide_bridge_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ide_bridge_service_pack/ecosystem.json",
+          "sha256": "ea87c42e89a13ef3d2198e4fb821a4e29f656b09903fdee22671cc82a905a777"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_job_action_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_job_action_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_job_action_broker_pack/ecosystem.json",
+          "sha256": "d64fafa4582c7b9dc68407f3dcd83321470d7b9a88eae59d245fc9e5498d292f"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_kanban_conversation_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_kanban_conversation_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_kanban_conversation_adapter_pack/ecosystem.json",
+          "sha256": "cd525cd7894731e0aebba77d52c2e4765387c97c6de277432157cfde1199d9af"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_kanban_state_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_kanban_state_store_pack/ecosystem.json",
+          "sha256": "125153339c60f1d0989fbc248a8e63aeb72a4728f5d1c26f6b9ceb461f0cfba6"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_kanban_surface_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_kanban_surface_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_kanban_surface_pack/ecosystem.json",
+          "sha256": "410b7f8204b5d5884abad52568b7c63d0dbeebfc72f5dcd8f46dc19e8aaab38b"
         }
       ]
     },
@@ -937,13 +1969,13 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_knowledge_marketplace_pack/ecosystem.json",
-          "sha256": "881219efe64272f608f6c59e91bd0263e5707354ff6d65d3bc17ae23bb0650f8"
+          "sha256": "bf568e7743c6ec88b072266708720fd00d074b87cda6f31532704f96e5149e2f"
         }
       ]
     },
     {
-      "observed_pack_id": "rumi_local_agent_pack",
-      "manifest_path": "tobkiri_runtime/ecosystem/rumi_local_agent_pack/ecosystem.json",
+      "observed_pack_id": "rumi_knowledge_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_knowledge_store_pack/ecosystem.json",
       "review_status": "unreviewed",
       "lifecycle_owner": "unknown",
       "state_owner": "unknown",
@@ -960,8 +1992,32 @@
       "assessment_justification": "",
       "evidence": [
         {
-          "path": "tobkiri_runtime/ecosystem/rumi_local_agent_pack/ecosystem.json",
-          "sha256": "197b7947ea61314c5b7c562419244401ba3e9abc56d0572303387ea360c8c1e7"
+          "path": "tobkiri_runtime/ecosystem/rumi_knowledge_store_pack/ecosystem.json",
+          "sha256": "ce6d104d70f3aa3c898bb6b6ef1ac8fb21df67178f9856d0d6a80e012ec1aa40"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_line_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_line_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_line_connector_pack/ecosystem.json",
+          "sha256": "1c8766d5b0c4de3b45cf04336087c0ff3540b42a4a67359246df6d3199a15510"
         }
       ]
     },
@@ -985,7 +2041,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_localization_pack/ecosystem.json",
-          "sha256": "c9da909bd5c3b2c8d4eadcdc6e410544bbe92123d5adc3fd2343c96d728e6c5b"
+          "sha256": "9651d0481ab18b2be1cf809e4e6c9e6942a078048fe89916c84acc4f3ee87d36"
         }
       ]
     },
@@ -1009,7 +2065,103 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_mcp_gateway_pack/ecosystem.json",
-          "sha256": "80c218c010e8198c4c48fdc5d039bdaf4eb95eda38040549adfba806732b5c09"
+          "sha256": "f330630a1889127402ddd7afedf0c4d36901dcbc6d71ea5e87e385b51a97d564"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_mcp_server_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_mcp_server_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_mcp_server_pack/ecosystem.json",
+          "sha256": "2a33abaf0eeb105a13b77d4994203e16cd117d9319d67f22e7abd1ea9105bbe4"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_media_analysis_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_media_analysis_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_media_analysis_adapter_pack/ecosystem.json",
+          "sha256": "42c0c1d75f18081876dd793abe8597bee8b3f4329e45ca4d1a4be29d4413bc86"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_media_capture_host_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_media_capture_host_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_media_capture_host_service_pack/ecosystem.json",
+          "sha256": "7f5374e80f3a1a610046f249f92baea0e812f8577b5cc7590fc1ee4d04516f53"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_media_inspect_service_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_media_inspect_service_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_media_inspect_service_pack/ecosystem.json",
+          "sha256": "49fce669cb05a9879a83080ed552505e90e25cdcf5c8d3affdee251276e816f6"
         }
       ]
     },
@@ -1033,7 +2185,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_meeting_intelligence_pack/ecosystem.json",
-          "sha256": "ae8f8c4e4ad8001597373ce07030d7c51fd2324a3e46fba22eca6b415a0d3902"
+          "sha256": "84b966eca330557cd33ce1b313ad944830dbf4e5346f45005f5632a2a4898e57"
         }
       ]
     },
@@ -1057,7 +2209,55 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_memory_knowledge_pack/ecosystem.json",
-          "sha256": "1fece6fccca23b7f9110a58d7cfebe6edf7c8ebf35aa7ad5ceee92f4d3d3dab6"
+          "sha256": "95d6cade79c3b727f2f0222723004cb832583a1472372f49dec31174e7665923"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_memory_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_memory_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_memory_store_pack/ecosystem.json",
+          "sha256": "fbe05c301889e92bc47e0f9cab920d1e08302cfe6cf87a3ab99d156491553aea"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_mobile_pairing_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_mobile_pairing_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_mobile_pairing_connector_pack/ecosystem.json",
+          "sha256": "112e8011f5f28e5677fa605f4ec6da1395c3fdaab9195e4847ecd28793d696f3"
         }
       ]
     },
@@ -1081,7 +2281,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/ecosystem.json",
-          "sha256": "3dff1e72cf15d17bbcfcb23b99a09d3d5d1cec67d717062e9b7cc1cb6cadc9cf"
+          "sha256": "ba6d4dcf5a3810d3375cd20c6243c90b7d3b73b0ecce033d35a24c52d3e43ed6"
         }
       ]
     },
@@ -1105,7 +2305,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_model_evals_pack/ecosystem.json",
-          "sha256": "b0a5c1b244f4c8cb797b76f7c3487d0a88f6a200de3aebe831ee7d4c1b6cd82f"
+          "sha256": "be043dd7c7558270f3d35e2144c1ee57185d54adeebe1c9f0303abf3d1969700"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_model_registry_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_model_registry_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_model_registry_pack/ecosystem.json",
+          "sha256": "33804ebe4900210098fe032f3522c02d57e5a32130a2a76a5a09c1a81193ac44"
         }
       ]
     },
@@ -1129,7 +2353,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_multimodal_media_pack/ecosystem.json",
-          "sha256": "d095538cadc7191c6b08a30311e29e9642d3249529e217f13a3ad4370dca0d0c"
+          "sha256": "3d2fa5e5bda26cbc1e647b2191ff6fd6cbced98af4f36e85a2b625ee2e420eab"
         }
       ]
     },
@@ -1153,7 +2377,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_observability_pack/ecosystem.json",
-          "sha256": "5fd55656898ab0714643392a519e2a870f64e974f0144053c240ceb6c7842945"
+          "sha256": "d6f6f63e0d4de88bb0de52a7e5d0c83ac93b095bf7e09f4d814149a712904ab8"
         }
       ]
     },
@@ -1177,7 +2401,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_office_authoring_pack/ecosystem.json",
-          "sha256": "d5b59f0dd0dbaefcbe3d1da208b34a4b664b7f9ebe0d04a7d1046bb2f933455a"
+          "sha256": "40b5780b829e652d0984a75e1c009e0f96046aacbd5fc946b320b6d804abeef9"
         }
       ]
     },
@@ -1201,7 +2425,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_omnichannel_agent_inbox_pack/ecosystem.json",
-          "sha256": "d1bb554e98c3553f3bf3a76d534dc2d81598737dd2b6c181c2b7f6df85acc182"
+          "sha256": "a0345cf5b09d01674451af73be4bad218dc46b9281e6c94b0a58612777615e27"
         }
       ]
     },
@@ -1225,13 +2449,13 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_operations_company_pack/ecosystem.json",
-          "sha256": "96c63a562dbb0932a3834709bb38fece0eca6a1da8245e505c67a73607ccfa6c"
+          "sha256": "ce30021e421491db29c8dbd5ad0280eb4aac8ff369b1b8bc1522ded5cd323026"
         }
       ]
     },
     {
-      "observed_pack_id": "rumi_pack_suite_pack",
-      "manifest_path": "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/ecosystem.json",
+      "observed_pack_id": "rumi_p2p_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_p2p_connector_pack/ecosystem.json",
       "review_status": "unreviewed",
       "lifecycle_owner": "unknown",
       "state_owner": "unknown",
@@ -1248,8 +2472,8 @@
       "assessment_justification": "",
       "evidence": [
         {
-          "path": "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/ecosystem.json",
-          "sha256": "3a3ca90c20e4779272f503463d03a51cb7e13e214d9ee27b97366045b76f7846"
+          "path": "tobkiri_runtime/ecosystem/rumi_p2p_connector_pack/ecosystem.json",
+          "sha256": "d9c27fed1b641d0958ea59ea7695e6572123e1ffc69b9f92e1a6729955128b0b"
         }
       ]
     },
@@ -1273,13 +2497,13 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_prompt_studio_pack/ecosystem.json",
-          "sha256": "0bb8fc9b962bccc8fdaae14773b75ba70c29894fbe8355561625bd28e2c1d973"
+          "sha256": "f7d81435ee05b0bfe3f6ac12d32ae0e85a6f410128b6aba8b9bc845eb17e754e"
         }
       ]
     },
     {
-      "observed_pack_id": "rumi_reference_ui_pack",
-      "manifest_path": "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/ecosystem.json",
+      "observed_pack_id": "rumi_provider_adapters_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/ecosystem.json",
       "review_status": "unreviewed",
       "lifecycle_owner": "unknown",
       "state_owner": "unknown",
@@ -1296,8 +2520,80 @@
       "assessment_justification": "",
       "evidence": [
         {
-          "path": "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/ecosystem.json",
-          "sha256": "5ca697bbbce2b1ab4a8651653172808189c55c3f0d53c796e40eb016b65f69ce"
+          "path": "tobkiri_runtime/ecosystem/rumi_provider_adapters_pack/ecosystem.json",
+          "sha256": "3fd9b2111d0b21655ba9d53de40a5a949667ae4b744028ed4b6ddabe86e3ad09"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_provider_registry_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_provider_registry_pack/ecosystem.json",
+          "sha256": "a56f0e95f12e74756513bf5d7f67b5ff6de889a958a493eeb28f6cee595574d3"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_qr_pairing_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_qr_pairing_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_qr_pairing_connector_pack/ecosystem.json",
+          "sha256": "0274b7e2984b3a41b8de5c4f292cc613b52b30cccf9e728718b93bccbfd773d8"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_repository_context_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_repository_context_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_repository_context_pack/ecosystem.json",
+          "sha256": "a6e2e68b93c49fb673d62db6c8a32d950cf4923ab89f2a898fa217f8a52e89aa"
         }
       ]
     },
@@ -1321,7 +2617,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_research_pack/ecosystem.json",
-          "sha256": "5c419409f3575c60151997673ffca155472a3dfdc8094c3128c44ecf61bb988b"
+          "sha256": "32eccffc5c4e5736463b8a3a0a7ced899b5a14453d63adea67248df25b5afbb1"
         }
       ]
     },
@@ -1345,7 +2641,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_runtime_benchmark_pack/ecosystem.json",
-          "sha256": "e01d14d8dbec4ad7b44cfb64011d50edd531484fe9e0c4f547773302f6737f95"
+          "sha256": "c44ff2c73d6fac970580d17e93b8975c66ff67945e66017fd59325c438f3262d"
         }
       ]
     },
@@ -1369,7 +2665,103 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_sandbox_runtime_pack/ecosystem.json",
-          "sha256": "d3b4f9955f95b1f54445a4ee349c809e10581ac207fae4338d116f6d9318f0e5"
+          "sha256": "835a4e05fdb18fa4a7ebfaba8437014e9d586b5dbe1c471c9bc6662a4a174cac"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_schedule_store_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_schedule_store_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_schedule_store_pack/ecosystem.json",
+          "sha256": "adadf32860dc82be7ecd4b051eb855cee785a9e98baa08b32e8f9326fc13c1ce"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_scheduler_runtime_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_scheduler_runtime_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_scheduler_runtime_pack/ecosystem.json",
+          "sha256": "df6b40a7120597526dd496907da67ba0501b103b67caae90d446c6e4657a5fb5"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_scheduler_surface_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_scheduler_surface_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_scheduler_surface_pack/ecosystem.json",
+          "sha256": "7ac1680c51e4e4091c3ba6654ae43901152426781b22e3730a48ebb358b1d9c4"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_scheduler_tool_adapter_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/ecosystem.json",
+          "sha256": "e7c1712eb10f4189283b2beed1437180fe94353d44ea291d28ce0c93fe10491c"
         }
       ]
     },
@@ -1393,7 +2785,79 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_security_review_pack/ecosystem.json",
-          "sha256": "7bce52df2a4c64848dc4f0872d8e428eea8e499ce9ba925b7dc2822f9b7c0bb8"
+          "sha256": "bca9a1a5714287004552015fc9e096aa42b927b511d8e35ecd70ebe37e04e387"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_shell_execute_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_shell_execute_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_shell_execute_pack/ecosystem.json",
+          "sha256": "0ee7e9ecb2d396d8f20baad5ce939b731ac01c3520b6e7e9ec62c7fbbc20b98d"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_shell_policy_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_shell_policy_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_shell_policy_pack/ecosystem.json",
+          "sha256": "8fd07a652fd80659e5f9533b6d4761f08c590f8d8989c996ca0a4cd6cbe3f5ba"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_slack_connector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_slack_connector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_slack_connector_pack/ecosystem.json",
+          "sha256": "1f4a7bb7d346135867f8a6f498226b75448b6cc1369bb0ed5175a27699fc4ce4"
         }
       ]
     },
@@ -1417,7 +2881,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_sop_mining_pack/ecosystem.json",
-          "sha256": "349e0111447ba367f6e51b5e6425295c86668ee6fddc4e0fab09d86a8227875a"
+          "sha256": "675eb532fca90919d8fa8f4c0c57b9ca589298a982c73fc06b9a58195aa513d7"
         }
       ]
     },
@@ -1441,7 +2905,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_study_coach_pack/ecosystem.json",
-          "sha256": "d8d16995751ea7c7f8e570f1d126c8d26510aa178141a6f0b3dccc22313a52ec"
+          "sha256": "260e7766f1e7e8583f6180279fa937e9db5bc4954a9c0f8a2001ecd099be5d85"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_subagent_placement_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_subagent_placement_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_subagent_placement_pack/ecosystem.json",
+          "sha256": "4b516b96bf738e8d9140cc963eff00284e48a8152cbb00f9216fc589fc82aed0"
         }
       ]
     },
@@ -1465,7 +2953,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_subagent_pr_manager_pack/ecosystem.json",
-          "sha256": "24044c17f4a9e52ef5f307adb6ddc38edccd2972b0cb3b88d0df5cd791ef5248"
+          "sha256": "6b1e44b98e0ba18a27ed4654b7ac2fb8abdd72cc0a11c7e81185e74810994cd0"
         }
       ]
     },
@@ -1489,7 +2977,415 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
-          "sha256": "ac107029729c734e8434c49dcbe7119eff29bf931354e19320f4db124835a2bf"
+          "sha256": "99b86aff6f9e1cd575aa91937719dbdf705f42241337fc424c6a978e9f0758e0"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_terminal_session_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_terminal_session_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_terminal_session_pack/ecosystem.json",
+          "sha256": "077f0acee13b412f505d4efee6951b2f171b1f41e65249f0bc5aa03466cf2883"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_approval_bridge_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_approval_bridge_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_approval_bridge_pack/ecosystem.json",
+          "sha256": "e96b9a8e067e42ed1f0aab7b12d7c4e08e27b452cc5df4bc4d4e6560d36d3383"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_audit_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_audit_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_audit_pack/ecosystem.json",
+          "sha256": "afed50aa2a2ee4a1b2979e9958910948373f8ead65f6a30dfdae77a2b18701a4"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_authoring_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_authoring_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_authoring_pack/ecosystem.json",
+          "sha256": "ba896dc5e85f9b1b47f21cd48088ac96f4535d48be85888617d63011f20ba232"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_broker_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_broker_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_broker_pack/ecosystem.json",
+          "sha256": "4664969d6f26ad3d3815f10e3d5a9ff15ff33912bb9d1d7d0e56f213fbedab51"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_capability_executor_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_capability_executor_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_capability_executor_pack/ecosystem.json",
+          "sha256": "8b96b0194de2c623123779aa8489cd1ebf17602b999a165ba15bbf362a982928"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_executor_selector_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_executor_selector_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_executor_selector_pack/ecosystem.json",
+          "sha256": "f65540594b7011e45c7dbdef6aa80799dafeb8a5a7488a398fd97249d7e14860"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_guard_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_guard_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_guard_pack/ecosystem.json",
+          "sha256": "a41e9a5543c893327af742cf21dc1311dfc4c62b0240f64930f6fda88497c7c7"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_local_executor_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_local_executor_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_local_executor_pack/ecosystem.json",
+          "sha256": "9e03c13daa327a0e4cb3ca869aa564139af131028d49e9b39742eb83e4302dcf"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_mcp_executor_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_mcp_executor_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_mcp_executor_pack/ecosystem.json",
+          "sha256": "8faa5b83596caa6302908dd4194ac400062d8f3ced1d2e904949523933c5b942"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_policy_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_policy_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_policy_pack/ecosystem.json",
+          "sha256": "6b204137d2027b0b82a1d9a2511c7e217529d1d47d8a9265fb445d7f13bc2a39"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_registry_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_registry_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_registry_pack/ecosystem.json",
+          "sha256": "8bf322d39e38f2977ff8a5a6d7c68b8f9bc36803b0f4a579b1b39d702d0bb9f2"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_remote_executor_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_remote_executor_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_remote_executor_pack/ecosystem.json",
+          "sha256": "3382f6fc7d1badf4be55443f763239324f88eefdd1513eec5b2778f4087b3a9b"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_result_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_result_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_result_pack/ecosystem.json",
+          "sha256": "67a8ccf61ee6355e24fabb75a0cb8b8c566ff64d8e7a4581d39e2e74917fca57"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_sandbox_executor_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_sandbox_executor_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_sandbox_executor_pack/ecosystem.json",
+          "sha256": "f6cc3fe114c780d09b84a4b3ed2cedd302e72dc6823cefc21b03cd8c9be92c61"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_tool_validation_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_tool_validation_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_tool_validation_pack/ecosystem.json",
+          "sha256": "68e962f94f8cd154d37d2d6bd9288f37e4a4227ce3a97d31d10e08284495cfa9"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_turn_runtime_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_turn_runtime_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_turn_runtime_pack/ecosystem.json",
+          "sha256": "9dd8240d8e4e8a696cd3d2f6ce375e5ca6dde1fd05b58c6a87dc0ea5da23807c"
         }
       ]
     },
@@ -1513,7 +3409,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_voice_mobile_pack/ecosystem.json",
-          "sha256": "d6ea5409f79ec15b8ceace0bd77fdd3849b548cc550873f954b639c76b711a7f"
+          "sha256": "9fefc0375915720d9e627509f8d7b4ab48ed0216a55ea319acdf15a0341eab0a"
         }
       ]
     },
@@ -1537,7 +3433,31 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_workflow_scheduler_pack/ecosystem.json",
-          "sha256": "c8c86836fcf5fd59b3d11e53d64b528b9a9af118d16f5ca0847d5db1789f1d75"
+          "sha256": "e6b1bf557256bb53b8ff47e3c8f4a9b47fe14e78d5a4df17dd794d1e1c6987ac"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "rumi_workspace_mount_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_workspace_mount_pack/ecosystem.json",
+          "sha256": "958a508cadc65a49a8056059163f88281e45a7b728efb024504f4faf552cf70a"
         }
       ]
     },
@@ -1561,7 +3481,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_workspace_pack/ecosystem.json",
-          "sha256": "80849113b034306ae163dd1e277359ce1f7dade71e238e22d7115f4b83bda8b5"
+          "sha256": "7f9bd3159c3fe71a74ffc7281478f8d24ac8ae294a1ca3feace76405d2bed3a8"
         }
       ]
     },
@@ -1585,7 +3505,55 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
-          "sha256": "a22659a461eced5c53452097526425fc69ac289b78d93258a915246a511aff59"
+          "sha256": "833d98858c4df83d2d4e1ee71f91b621f2bcbcf353c0ae8c348becfbe0e5509a"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "tobkiri_host_pack_control",
+      "manifest_path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/tobkiri_host_pack_control/ecosystem.json",
+          "sha256": "9f201830e6d98c1fa753340168ad2b84b4ae9e800377bdec0904f9bba3652a14"
+        }
+      ]
+    },
+    {
+      "observed_pack_id": "tobkiri_workflow_pack",
+      "manifest_path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+      "review_status": "unreviewed",
+      "lifecycle_owner": "unknown",
+      "state_owner": "unknown",
+      "external_effects": [
+        "unknown"
+      ],
+      "trust_domain": "unknown",
+      "execution_mode": "unknown",
+      "canonical_owner": "unresolved",
+      "disposition": "undecided",
+      "deprecated_ids": [],
+      "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
+      "evidence": [
+        {
+          "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/ecosystem.json",
+          "sha256": "1dfc6279131474369e27aa3fe46358dc9af0e0262ef6a5fdf43e33df6e6d7177"
         }
       ]
     }

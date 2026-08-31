@@ -25,7 +25,7 @@ use crate::host_contract::ExecutionProfileIdentity;
 /// Bundle identifier used only to select the presentation-only Shell runtime.
 pub(crate) const SHELL_BUNDLE_IDENTIFIER: &str = "io.tobkiri.shell.tauri";
 pub(crate) const HANDOFF_ARGUMENT: &str = "--tobkiri-shell-handoff";
-const LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher";
+const LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.rumiai.app";
 const CI_E2E_LAUNCHER_BUNDLE_IDENTIFIER: &str = "dev.tobkiri.launcher.ci-e2e";
 const MACOS_ARTIFACT_POLICY: &str = env!("TOBKIRI_MACOS_ARTIFACT_POLICY");
 // v3 existed only in the immediately preceding, unmerged Launcher selector

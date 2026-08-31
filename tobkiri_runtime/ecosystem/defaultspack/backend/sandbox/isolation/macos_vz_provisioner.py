@@ -1535,26 +1535,34 @@ class MacOSVZProvisioner:
             or not _is_digest(helper.get("code_sha256"))
             or not isinstance(signing, Mapping)
             or set(signing) != {"signing_mode", "team_id", "authority"}
-            or signing.get("signing_mode") != "developer-id"
-            or not isinstance(signing.get("team_id"), str)
-            or not isinstance(signing.get("authority"), str)
         ):
             raise ValueError("packaged macOS VZ helper production identity is unavailable")
-        team_id = str(signing["team_id"])
-        authority = str(signing["authority"])
-        if (
-            len(team_id) != 10
-            or not team_id.isascii()
-            or not team_id.isalnum()
-            or team_id != team_id.upper()
-            or not authority.startswith("Developer ID Application: ")
-            or not authority.endswith(f" ({team_id})")
-            or len(authority) > 512
-        ):
-            raise ValueError("packaged macOS VZ helper production identity is invalid")
+        signing_mode = signing.get("signing_mode")
+        if signing_mode == "ad-hoc":
+            if signing.get("team_id") is not None or signing.get("authority") is not None:
+                raise ValueError("packaged macOS VZ helper ad-hoc identity is invalid")
+            team_id = ""
+            authority = ""
+        elif signing_mode == "developer-id":
+            team_id = signing.get("team_id")
+            authority = signing.get("authority")
+            if (
+                not isinstance(team_id, str)
+                or not isinstance(authority, str)
+                or len(team_id) != 10
+                or not team_id.isascii()
+                or not team_id.isalnum()
+                or team_id != team_id.upper()
+                or not authority.startswith("Developer ID Application: ")
+                or not authority.endswith(f" ({team_id})")
+                or len(authority) > 512
+            ):
+                raise ValueError("packaged macOS VZ helper production identity is invalid")
+        else:
+            raise ValueError("packaged macOS VZ helper signing mode is invalid")
         binding = self._bundle_binding
-        if binding is not None and (
-            not binding.helper_team_id or not hmac.compare_digest(team_id, binding.helper_team_id)
+        if binding is not None and not hmac.compare_digest(
+            team_id, binding.helper_team_id
         ):
             raise ValueError("packaged macOS VZ helper Team ID binding changed")
         bundle_root = resource_root.parent.parent

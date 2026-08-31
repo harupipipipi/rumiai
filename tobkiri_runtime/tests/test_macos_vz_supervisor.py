@@ -40,6 +40,24 @@ def _b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
+def test_helper_identity_requires_a_complete_signing_domain() -> None:
+    """Ad-hoc metadata is empty; certificate metadata is an exact pair."""
+
+    MacOSVZHelperIdentity(
+        binary_digest=_digest(b"helper"),
+        bundle_id="dev.tobkiri.launcher.packvm-vz-helper",
+        team_id="",
+        signing_identity="",
+    )
+    with pytest.raises(BackendUnavailableError, match="incomplete"):
+        MacOSVZHelperIdentity(
+            binary_digest=_digest(b"helper"),
+            bundle_id="dev.tobkiri.launcher.packvm-vz-helper",
+            team_id="ABCDEFGHIJ",
+            signing_identity="",
+        )
+
+
 class _Verifier:
     def __init__(self, ready: bool = True) -> None:
         self.ready = ready

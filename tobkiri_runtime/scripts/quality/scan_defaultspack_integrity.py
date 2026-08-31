@@ -32,6 +32,13 @@ V4_DOCUMENT_SCHEMAS = {
 }
 V4_BUNDLE_LOCK = "bundle.lock.json"
 V4_BUNDLE_DEFAULTSPACK = "packs/defaultspack.pack.v4.json"
+V4_SOURCE_ONLY_COMPANIONS = frozenset(
+    {
+        "defaults.profile.intent.v1.json",
+        "defaults.profile.lock.v5.json",
+        "defaults.release.provenance.json",
+    }
+)
 V4_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -443,7 +450,7 @@ def _check_bundle(
             errors.append(f"v4 bundle artifact must not be a symlink: {relative}")
         elif path.is_file() and relative != V4_BUNDLE_LOCK:
             actual_paths.add(relative)
-    for relative in sorted(actual_paths - seen_paths):
+    for relative in sorted(actual_paths - seen_paths - V4_SOURCE_ONLY_COMPANIONS):
         errors.append(f"v4 bundle contains an extra artifact: {relative}")
     for relative in sorted(seen_paths - actual_paths):
         errors.append(f"v4 bundle is missing an artifact: {relative}")

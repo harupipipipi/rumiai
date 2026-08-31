@@ -69,7 +69,7 @@ LEASE_CONTENT = "io.tobkiri.sealed-python-lease.v1\n"
 UV_VERSION = "0.11.14"
 PYTHON_VERSION = "3.13.13"
 PYTHON_BUILD_REVISION = "20260510"
-PACKAGE_ID = "dev.tobkiri.launcher"
+PACKAGE_ID = "dev.rumiai.app"
 UV_ARCHIVE_SHA256_BY_TARGET = {
     "aarch64-apple-darwin": "4333af5c0730d94323a7819bbdf87ce92dd07fc857d67fff0059e0fca31b5c02",
     "x86_64-apple-darwin": "9836c1440b0bd6aa5f81793648a339bd01d593b7b8f575de3b855dae4ab64654",

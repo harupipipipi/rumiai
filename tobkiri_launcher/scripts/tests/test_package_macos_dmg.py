@@ -391,7 +391,7 @@ def _command(app: Path, output_dir: Path) -> list[str]:
         str(app),
         "--target",
         "x86_64-apple-darwin",
-        "--allow-ad-hoc-local",
+        "--ad-hoc",
         "--output-dir",
         str(output_dir),
     ]

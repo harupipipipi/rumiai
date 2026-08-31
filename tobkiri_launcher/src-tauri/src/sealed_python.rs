@@ -2046,7 +2046,7 @@ fn validate_manifest_contract(manifest: &SealedEnvironmentManifest) -> Result<()
         || normalize_architecture(&manifest.architecture)
             != normalize_architecture(std::env::consts::ARCH)
         || manifest.package_provenance.kind != required_package_provenance_kind()
-        || manifest.package_provenance.package_id != "dev.tobkiri.launcher"
+        || manifest.package_provenance.package_id != "dev.rumiai.app"
     {
         bail!("[PYTHON_SEALED_INVALID] sealed Python platform/package contract mismatch");
     }
@@ -2841,19 +2841,10 @@ fn verify_macos_static_code(bundle: &Path) -> Result<()> {
 fn macos_code_requirement(policy: &str, identity: &str) -> Result<(&'static str, String)> {
     match policy {
         "production-v1" => {
-            if identity.len() != 10
-                || !identity
-                    .bytes()
-                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
-            {
-                bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] production signing identity is not build-bound");
+            if !identity.is_empty() {
+                bail!("[PYTHON_SEALED_PROVENANCE_UNAVAILABLE] OSS production artifacts may not claim an Apple signing identity");
             }
-            Ok((
-                "dev.tobkiri.launcher",
-                format!(
-                    "identifier \"dev.tobkiri.launcher\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"{identity}\""
-                ),
-            ))
+            Ok(("dev.rumiai.app", "identifier \"dev.rumiai.app\"".to_owned()))
         }
         "ci-e2e-v1" => {
             require_sha256(identity).context(
@@ -3191,25 +3182,26 @@ fn verify_macos_static_code_for_policy(bundle: &Path, policy: &str, identity: &s
         bail!("[PYTHON_SEALED_PROVENANCE_INVALID] outer app signature rejected ({validity})");
     }
 
+    let mut signing_information = ptr::null();
+    let info_status =
+        unsafe { SecCodeCopySigningInformation(code, 1 << 1, &mut signing_information) };
+    if info_status != 0 || signing_information.is_null() {
+        unsafe { CFRelease(code) };
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] signing certificate information unavailable ({info_status})");
+    }
+    let certificates = unsafe {
+        CFDictionaryGetValue(signing_information, kSecCodeInfoCertificates) as CFArrayRef
+    };
+    if !certificates.is_null() && unsafe { CFArrayGetCount(certificates) } != 0 {
+        unsafe {
+            CFRelease(signing_information);
+            CFRelease(code);
+        }
+        bail!("[PYTHON_SEALED_PROVENANCE_INVALID] outer signature must remain explicitly ad-hoc");
+    }
+    unsafe { CFRelease(signing_information) };
+
     if policy == "ci-e2e-v1" {
-        let mut signing_information = ptr::null();
-        let info_status =
-            unsafe { SecCodeCopySigningInformation(code, 1 << 1, &mut signing_information) };
-        if info_status != 0 || signing_information.is_null() {
-            unsafe { CFRelease(code) };
-            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] signing certificate information unavailable ({info_status})");
-        }
-        let certificates = unsafe {
-            CFDictionaryGetValue(signing_information, kSecCodeInfoCertificates) as CFArrayRef
-        };
-        if !certificates.is_null() && unsafe { CFArrayGetCount(certificates) } != 0 {
-            unsafe {
-                CFRelease(signing_information);
-                CFRelease(code);
-            }
-            bail!("[PYTHON_SEALED_PROVENANCE_INVALID] CI outer signature must remain explicitly ad-hoc");
-        }
-        unsafe { CFRelease(signing_information) };
         let attestation = verify_macos_ci_attestation(bundle, identity);
         unsafe { CFRelease(code) };
         attestation?;
@@ -3360,7 +3352,7 @@ mod tests {
             python_version: "3.13.13".into(),
             package_provenance: PackageProvenance {
                 kind: required_package_provenance_kind().into(),
-                package_id: "dev.tobkiri.launcher".into(),
+                package_id: "dev.rumiai.app".into(),
                 release_digest: digest('b'),
             },
             sentinels: SentinelContract {
@@ -4252,13 +4244,12 @@ mod tests {
             random_nonce()
         ));
         fs::create_dir(&path).unwrap();
-        let error =
-            verify_macos_static_code_for_policy(&path, "production-v1", "ABC1234567").unwrap_err();
+        let error = verify_macos_static_code_for_policy(&path, "production-v1", "").unwrap_err();
         assert!(error
             .to_string()
             .contains("PYTHON_SEALED_PROVENANCE_INVALID"));
         let unavailable =
-            verify_macos_static_code_for_policy(&path, "production-v1", "").unwrap_err();
+            verify_macos_static_code_for_policy(&path, "production-v1", "ABC1234567").unwrap_err();
         assert!(unavailable
             .to_string()
             .contains("PYTHON_SEALED_PROVENANCE_UNAVAILABLE"));
@@ -4268,16 +4259,15 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn macos_artifact_policy_rejects_identity_and_domain_swaps() {
-        let production = macos_code_requirement("production-v1", "ABC1234567").unwrap();
-        assert_eq!(production.0, "dev.tobkiri.launcher");
-        assert!(production.1.contains("anchor apple generic"));
-        assert!(production.1.contains("ABC1234567"));
+        let production = macos_code_requirement("production-v1", "").unwrap();
+        assert_eq!(production.0, "dev.rumiai.app");
+        assert_eq!(production.1, "identifier \"dev.rumiai.app\"");
 
         let ci = macos_code_requirement("ci-e2e-v1", &digest('a')).unwrap();
         assert_eq!(ci.0, "dev.tobkiri.launcher.ci-e2e");
-        assert!(!ci.1.contains("dev.tobkiri.launcher\" and anchor"));
+        assert!(!ci.1.contains("dev.rumiai.app\" and anchor"));
         for (policy, identity) in [
-            ("production-v1", &digest('b')[..]),
+            ("production-v1", "ABC1234567"),
             ("ci-e2e-v1", "ABC1234567"),
             ("ad-hoc", &digest('c')[..]),
         ] {

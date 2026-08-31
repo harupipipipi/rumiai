@@ -401,6 +401,70 @@ def test_release_workflow_inventory_target_matches_real_build_matrix() -> None:
     assert "TOBKIRI_REQUIRED_RELEASE_TARGET:" not in workflow_text
 
 
+def test_release_workflow_builds_a_single_unsigned_ad_hoc_macos_target() -> None:
+    """The OSS release path has no publisher credential or notary dependency."""
+    workflow_path = ROOT / ".github/workflows/release.yml"
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(workflow_text)
+    build = workflow["jobs"]["build"]
+    assert build["strategy"]["matrix"]["include"] == [
+        {
+            "os": "macos-latest",
+            "target": "aarch64-apple-darwin",
+            "shell_bundles": "app",
+            "signing_args": "--no-sign",
+            "presentation_variant": "shell.tauri.default.macos-arm64",
+            "presentation_platform": "macos",
+            "presentation_architecture": "arm64",
+        }
+    ]
+    steps = {
+        step["name"]: step
+        for step in build["steps"]
+        if isinstance(step, dict) and isinstance(step.get("name"), str)
+    }
+    for name in (
+        "Build unsigned Tauri Shell artifact",
+        "Build unsigned macOS application",
+    ):
+        assert "${{ matrix.signing_args }}" in steps[name]["run"]
+    signing = steps[
+        "Stage and ad-hoc sign macOS PackVM VZ helper and application"
+    ]["run"]
+    assert signing.count("/usr/bin/codesign --force --sign - --timestamp=none") == 2
+    assert "dev.rumiai.app" in signing
+    assert "dev.tobkiri.launcher.packvm-vz-helper" in signing
+    assert "--expected-signing-mode ad-hoc" in signing
+    assert "--ad-hoc" in steps["Build macOS DMG installer"]["run"]
+
+    for forbidden in (
+        "APPLE_CERTIFICATE",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_TEAM_ID",
+        "APPLE_ID",
+        "APPLE_PASSWORD",
+        "Developer ID Application:",
+        "sign-artifacts",
+        "--signing-identity",
+        "TOBKIRI_MACOS_ARTIFACT_POLICY",
+        "ci-e2e",
+    ):
+        assert forbidden not in workflow_text
+    assert not any(
+        "notar" in name.lower() or "staple" in name.lower()
+        for name in steps
+    )
+
+    upload = next(
+        step
+        for step in workflow["jobs"]["gather"]["steps"]
+        if step.get("name") == "Upload one reviewable draft release"
+    )
+    assert upload["with"]["draft"] is True
+    assert upload["with"]["generate_release_notes"] is True
+    assert "unsigned/ad-hoc" in upload["with"]["body"]
+
+
 def test_release_workflow_passes_json_target_set_to_inventory_commands() -> None:
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

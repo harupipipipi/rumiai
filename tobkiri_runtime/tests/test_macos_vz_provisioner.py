@@ -346,8 +346,30 @@ def test_authenticated_bundle_binding_is_the_expected_helper_team_source(
         mismatched._parse_bundle_helper_manifest(resources, provisioning_path)
 
 
+def test_authenticated_bundle_accepts_exact_ad_hoc_helper_domain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OSS release helpers carry no Team ID or certificate authority."""
+
+    provisioner, provisioning_path, resources, binding = _bound_bundle_fixture(
+        tmp_path, signing_mode="ad-hoc"
+    )
+    monkeypatch.setattr(
+        macos_vz_provisioner,
+        "_macho_code_digest",
+        lambda _path: _digest(b"helper-code"),
+    )
+
+    parsed = provisioner._parse_bundle_helper_manifest(resources, provisioning_path)
+    assert parsed["helper_team_id"] == ""
+    assert parsed["helper_signing_identity"] == ""
+    assert binding.helper_team_id == ""
+
+
 def _bound_bundle_fixture(
     tmp_path: Path,
+    *,
+    signing_mode: str = "developer-id",
 ) -> tuple[MacOSVZProvisioner, Path, Path, SimpleNamespace]:
     """Build only the two Launcher-attested resource manifests for a unit test."""
 
@@ -369,7 +391,16 @@ def _bound_bundle_fixture(
         ).encode("utf-8"),
         0o444,
     )
-    team_id = "ABCDEFGHIJ"
+    team_id = "ABCDEFGHIJ" if signing_mode == "developer-id" else ""
+    signing = (
+        {
+            "signing_mode": "developer-id",
+            "team_id": team_id,
+            "authority": f"Developer ID Application: Tobkiri ({team_id})",
+        }
+        if signing_mode == "developer-id"
+        else {"signing_mode": "ad-hoc", "team_id": None, "authority": None}
+    )
     helper_manifest = {
         "schema": VZ_BUNDLE_MANIFEST_SCHEMA,
         "helper": {
@@ -377,11 +408,7 @@ def _bound_bundle_fixture(
             "code_sha256": _digest(b"helper-code"),
             "identifier": "dev.tobkiri.launcher.packvm-vz-helper",
             "entitlements": ["com.apple.security.virtualization"],
-            "signing": {
-                "signing_mode": "developer-id",
-                "team_id": team_id,
-                "authority": f"Developer ID Application: Tobkiri ({team_id})",
-            },
+            "signing": signing,
         },
         "provisioning": {
             "path": "Contents/Resources/packvm-vz-provisioning.v1.json",

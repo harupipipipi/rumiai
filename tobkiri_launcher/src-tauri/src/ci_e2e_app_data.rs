@@ -147,7 +147,7 @@ mod tests {
 
         assert_eq!(
             resolve_app_data_dir(
-                "dev.tobkiri.launcher",
+                "dev.rumiai.app",
                 &default_path,
                 Some(OsStr::new("relative")),
             )
