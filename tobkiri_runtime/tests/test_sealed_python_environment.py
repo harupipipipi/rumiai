@@ -3733,35 +3733,27 @@ def test_all_tauri_build_callsites_are_mac_release_gated() -> None:
         .decode("utf-8")
         .split("\0")
     )
-    needle = "cargo tauri " + "build"
-    all_hits = []
-    callsites = []
+    raw_needle = "cargo tauri " + "build"
+    bound_needle = "python -B scripts/run_tauri_build.py build"
+    raw_callsites = []
+    bound_callsites = []
     for relative in tracked:
         if not relative:
+            continue
+        if Path(relative).suffix not in {".sh", ".yml", ".yaml"}:
             continue
         try:
             text = (ROOT / relative).read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if needle in text:
-            all_hits.append(relative)
-        if Path(relative).suffix not in {".sh", ".yml", ".yaml"}:
-            continue
-        if needle in text:
-            callsites.append(relative)
-    assert set(all_hits) == {
+        if raw_needle in text:
+            raw_callsites.append(relative)
+        if bound_needle in text:
+            bound_callsites.append(relative)
+    assert set(raw_callsites) == {"scripts/build-and-sign.sh"}
+    assert set(bound_callsites) == {
         ".github/workflows/desktop-installers.yml",
         ".github/workflows/release.yml",
-        "scripts/build-and-sign.sh",
-        "tobkiri_runtime/docs/ci_build_guide.md",
-        "tobkiri_runtime/docs/quality_pack/claude_desktop_quality_pack.md",
-        "tobkiri_runtime/tests/test_claude_quality_pack_contract.py",
-        "tobkiri_runtime/tests/test_viewer_build_contract.py",
-    }
-    assert set(callsites) == {
-        ".github/workflows/desktop-installers.yml",
-        ".github/workflows/release.yml",
-        "scripts/build-and-sign.sh",
     }
 
     desktop = (ROOT / ".github/workflows/desktop-installers.yml").read_text(encoding="utf-8")
@@ -3775,10 +3767,10 @@ def test_all_tauri_build_callsites_are_mac_release_gated() -> None:
         assert "if: runner.os != 'macOS'" not in workflow
         assert "--features" not in workflow
         for line in workflow.splitlines():
-            if needle in line:
+            if bound_needle in line:
                 assert "${{ matrix.target }}" in line
 
     helper = (ROOT / "scripts/build-and-sign.sh").read_text(encoding="utf-8")
     guard = 'if [[ "$mode" == "production" && "$presentation_platform" != "macos" ]]'
     assert guard in helper
-    assert helper.index(guard) < helper.index(needle)
+    assert helper.index(guard) < helper.index(raw_needle)
