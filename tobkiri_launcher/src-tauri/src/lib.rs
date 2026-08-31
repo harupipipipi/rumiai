@@ -2,7 +2,6 @@
 //!
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
-mod app_data_migration;
 mod config;
 mod desktop_system_info;
 mod health_check;
@@ -1548,10 +1547,6 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .context("failed to resolve app_data_dir")?;
-            if app_data_migration::migrate_legacy_app_data(&app_data_dir)? {
-                info!("copied legacy Rumi Viewer application data into Tobkiri Launcher storage");
-            }
-
             let mut config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .context("failed to build AppConfig")?;
 

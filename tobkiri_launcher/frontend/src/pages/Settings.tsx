@@ -556,10 +556,6 @@ export function Settings() {
                   </Button>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-xs leading-5 text-text-muted">
-                    Tobkiri Launcher uses a new macOS app identity. You may need to grant its
-                    permissions again in System Settings; legacy Rumi Viewer permissions are not copied.
-                  </div>
                   <div className="rounded-lg border border-border bg-bg-main/50 p-4">
                     <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? LAUNCHER_DISPLAY_NAME}</p>
                     <p className="mt-2 text-xs leading-5 text-text-muted">
