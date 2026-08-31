@@ -2859,6 +2859,47 @@ mod tests {
         assert_source_manifest_exact(source_checkout);
     }
 
+    fn selected_fixture_pack_digests(
+        bundle_root: &Path,
+        selected: &serde_json::Map<String, Value>,
+    ) -> Result<serde_json::Map<String, Value>> {
+        if selected.is_empty() {
+            bail!("fixture catalog selected Pack set is empty");
+        }
+        let canonical_bundle_root = bundle_root
+            .canonicalize()
+            .context("generated fixture bundle root is unavailable")?;
+        let bundle_lock = verify_bundle_lock(&canonical_bundle_root)
+            .context("generated fixture bundle lock is invalid")?;
+        let mut digests = serde_json::Map::new();
+        for pack_id in selected.keys() {
+            let relative = bundle_lock.pack_paths.get(pack_id).with_context(|| {
+                format!("generated fixture bundle is missing selected Pack: {pack_id}")
+            })?;
+            let digest = bundle_lock
+                .authority_digests
+                .get(relative)
+                .with_context(|| format!("generated fixture Pack has no digest: {pack_id}"))?;
+            if !valid_digest(digest) {
+                bail!("generated fixture Pack digest is invalid: {pack_id}");
+            }
+            if digests
+                .insert(pack_id.clone(), Value::String(digest.clone()))
+                .is_some()
+            {
+                bail!("generated fixture bundle contains a duplicate selected Pack");
+            }
+        }
+        if digests.len() != selected.len()
+            || selected
+                .keys()
+                .any(|pack_id| !digests.contains_key(pack_id))
+        {
+            bail!("generated fixture bundle is missing a selected catalog Pack");
+        }
+        Ok(digests)
+    }
+
     fn package_fixture_application(
         config: &AppConfig,
         source_checkout: &Path,
@@ -2999,6 +3040,18 @@ mod tests {
         )
         .unwrap();
         catalog["default_profile_digest"] = Value::String(sha256(&profile_raw));
+        let selected = catalog["source_manifest_digests"]
+            .as_object()
+            .expect("fixture catalog selected Pack set should be an object")
+            .clone();
+        let generated_digests = selected_fixture_pack_digests(&bundle_root, &selected)
+            .expect("generated fixture must contain the complete selected Pack set");
+        assert_eq!(
+            generated_digests.keys().collect::<BTreeSet<_>>(),
+            selected.keys().collect::<BTreeSet<_>>(),
+            "generated fixture digest projection must preserve the exact catalog selection"
+        );
+        catalog["source_manifest_digests"] = Value::Object(generated_digests);
         fs::write(
             config.app_dir.join("bundled/presentation_catalog.json"),
             serde_json::to_vec(&catalog).unwrap(),
