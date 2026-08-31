@@ -46,8 +46,10 @@ supporting evidence beyond the Pack manifest itself. Each evidence item records 
 canonical repository-relative path and a SHA-256 digest. A reviewed row must
 include exactly one such manifest evidence item, whose digest is independently
 compared with the current manifest, plus at least one canonically distinct,
-non-ADR supporting item. A changed manifest or evidence file resets a reviewed
-row to `unreviewed` when the inventory is regenerated.
+non-ADR supporting item. Canonically different spelling is not enough: evidence
+items that resolve to the same filesystem identity, including case aliases or
+hard links, are treated as the same file. A changed manifest or evidence file
+resets a reviewed row to `unreviewed` when the inventory is regenerated.
 
 ## Inventory contract
 
