@@ -20,6 +20,7 @@ def _run(
     name: str,
     *fixture_arguments: str,
     timeout_seconds: float | None = None,
+    parent_stdio_encoding: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     log_path = tmp_path / f"{name}.log"
     runner_arguments = [
@@ -40,12 +41,17 @@ def _run(
             *fixture_arguments,
         )
     )
+    environment = os.environ.copy()
+    if parent_stdio_encoding is not None:
+        environment["PYTHONIOENCODING"] = parent_stdio_encoding
     result = subprocess.run(
         runner_arguments,
         cwd=ROOT,
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env=environment,
     )
     return result, log_path
 
@@ -113,6 +119,7 @@ def test_unicode_is_kept_in_full_log_and_console_summary_stays_compact(
         "--framework",
         "pytest",
         "--unicode",
+        parent_stdio_encoding="cp1252",
     )
 
     assert result.returncode == 0
@@ -155,6 +162,7 @@ def test_terminal_spoofing_controls_are_removed_but_unicode_is_preserved(
         "failure",
         "--message",
         message,
+        parent_stdio_encoding="cp1252",
     )
 
     assert result.returncode == 1

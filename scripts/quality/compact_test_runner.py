@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 from types import FrameType
-from typing import BinaryIO, Sequence
+from typing import BinaryIO, Sequence, TextIO
 
 
 MAX_SUCCESS_LINES = 10
@@ -90,6 +90,26 @@ class SafeArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         """Convert parser errors into the runner's generic fail-closed error."""
         raise ValueError("invalid compact runner arguments")
+
+
+def _configure_standard_stream(stream: TextIO) -> None:
+    """Emit runner diagnostics as UTF-8 even under a legacy parent locale."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="backslashreplace")
+    except (OSError, ValueError):
+        # In-process callers may replace stdio with a stream that cannot be
+        # reconfigured. It already accepts text, so leave it untouched.
+        return
+
+
+def _child_environment() -> dict[str, str]:
+    """Return an environment that makes Python child stdio UTF-8."""
+    environment = os.environ.copy()
+    environment["PYTHONIOENCODING"] = "utf-8"
+    return environment
 
 
 class OutputTracker:
@@ -375,6 +395,7 @@ def run(arguments: argparse.Namespace, command: list[str]) -> int:
         proc = subprocess.Popen(
             command,
             cwd=arguments.cwd,
+            env=_child_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             start_new_session=os.name == "posix",
@@ -514,6 +535,8 @@ def run(arguments: argparse.Namespace, command: list[str]) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point."""
+    _configure_standard_stream(sys.stdout)
+    _configure_standard_stream(sys.stderr)
     try:
         arguments, command = _parse_arguments(sys.argv[1:] if argv is None else argv)
         return run(arguments, command)
