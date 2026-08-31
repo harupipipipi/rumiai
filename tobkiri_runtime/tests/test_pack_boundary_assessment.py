@@ -31,7 +31,11 @@ def _write_manifest(path: Path, contents: str = "{}") -> None:
     path.write_text(contents, encoding="utf-8")
 
 
-def _accepted_row(payload: dict[str, object]) -> dict[str, object]:
+def _accepted_row(
+    payload: dict[str, object],
+    repo_root: Path = REPO_ROOT,
+    support_path: Path | None = None,
+) -> dict[str, object]:
     row = payload["records"][0]
     assert isinstance(row, dict)
     row.update(
@@ -50,10 +54,12 @@ def _accepted_row(payload: dict[str, object]) -> dict[str, object]:
     )
     evidence = row["evidence"]
     assert isinstance(evidence, list)
-    support_path = REPO_ROOT / "tobkiri_runtime/docs/macos-unsigned-distribution.md"
+    support_path = support_path or (
+        repo_root / "tobkiri_runtime/docs/macos-unsigned-distribution.md"
+    )
     evidence.append(
         {
-            "path": support_path.relative_to(REPO_ROOT).as_posix(),
+            "path": support_path.relative_to(repo_root).as_posix(),
             "sha256": hashlib.sha256(support_path.read_bytes()).hexdigest(),
         }
     )
@@ -114,6 +120,7 @@ def test_regeneration_resets_reviewed_rows_when_manifest_evidence_changes(
 ) -> None:
     manifest = tmp_path / "tobkiri_runtime/ecosystem/demo/ecosystem.json"
     _write_manifest(manifest, '{"pack_id": "demo"}\n')
+    _write_manifest(tmp_path / "tobkiri_runtime/docs/adr/review.md", "ADR evidence\n")
     reviewed = render_assessment(tmp_path)
     row = _accepted_row(reviewed)
     support = tmp_path / "tobkiri_runtime/review/demo.md"
@@ -253,9 +260,36 @@ def test_reviewed_evidence_rejects_case_alias_of_manifest_on_casefolding_fs() ->
     )
 
 
+def test_casefolding_adr_alias_is_not_non_adr_support() -> None:
+    payload = copy.deepcopy(_payload())
+    row = _accepted_row(payload)
+    adr_path = REPO_ROOT / "tobkiri_runtime/docs/adr/0001-pack-boundary-criteria.md"
+    alias_parts = adr_path.relative_to(REPO_ROOT).parts
+    case_alias = Path(alias_parts[0].upper(), *alias_parts[1:])
+    alias_file = REPO_ROOT / case_alias
+    try:
+        aliases_adr = alias_file.is_file() and alias_file.samefile(adr_path)
+    except OSError:
+        aliases_adr = False
+    if not aliases_adr:
+        pytest.skip("requires a case-insensitive filesystem alias")
+
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    evidence[1] = {
+        "path": case_alias.as_posix(),
+        "sha256": hashlib.sha256(alias_file.read_bytes()).hexdigest(),
+    }
+
+    errors = validate_assessment(payload, REPO_ROOT)
+
+    assert any("requires non-ADR supporting evidence" in error for error in errors)
+
+
 def test_reviewed_evidence_rejects_hardlink_alias_of_manifest(tmp_path: Path) -> None:
     manifest = tmp_path / "tobkiri_runtime/ecosystem/demo/ecosystem.json"
     _write_manifest(manifest, '{"pack_id": "demo"}\n')
+    _write_manifest(tmp_path / "tobkiri_runtime/docs/adr/review.md", "ADR evidence\n")
     reviewed = render_assessment(tmp_path)
     row = _accepted_row(reviewed)
     support = tmp_path / "tobkiri_runtime/review/demo-hardlink.json"
@@ -278,6 +312,50 @@ def test_reviewed_evidence_rejects_hardlink_alias_of_manifest(tmp_path: Path) ->
     assert any(
         "requires supporting evidence beyond manifest" in error for error in errors
     )
+
+
+def test_reviewed_evidence_rejects_hardlink_alias_of_adr_support(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "tobkiri_runtime/ecosystem/demo/ecosystem.json"
+    adr_evidence = tmp_path / "tobkiri_runtime/docs/adr/review.md"
+    support = tmp_path / "tobkiri_runtime/review/adr-hardlink.md"
+    _write_manifest(manifest, '{"pack_id": "demo"}\n')
+    _write_manifest(adr_evidence, "ADR evidence\n")
+    support.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        support.hardlink_to(adr_evidence)
+    except OSError:
+        pytest.skip("filesystem does not support hard links in the test directory")
+    reviewed = render_assessment(tmp_path)
+    _accepted_row(reviewed, tmp_path, support)
+
+    errors = validate_assessment(reviewed, tmp_path)
+
+    assert any("requires non-ADR supporting evidence" in error for error in errors)
+
+
+def test_reviewed_evidence_fails_closed_for_symlinked_adr_root(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "tobkiri_runtime/ecosystem/demo/ecosystem.json"
+    support = tmp_path / "tobkiri_runtime/review/support.md"
+    adr_target = tmp_path / "adr-target"
+    adr_root = tmp_path / "tobkiri_runtime/docs/adr"
+    _write_manifest(manifest, '{"pack_id": "demo"}\n')
+    _write_manifest(support, "Independent support\n")
+    _write_manifest(adr_target / "review.md", "ADR evidence\n")
+    adr_root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        adr_root.symlink_to(adr_target, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks in the test directory")
+    reviewed = render_assessment(tmp_path)
+    _accepted_row(reviewed, tmp_path, support)
+
+    errors = validate_assessment(reviewed, tmp_path)
+
+    assert any("ADR evidence identities are unavailable" in error for error in errors)
 
 
 @pytest.mark.parametrize(
@@ -367,6 +445,66 @@ def test_static_non_consumption_guard_excludes_only_tauri_generated_prefix(
 
     assert references == [
         "tobkiri_runtime/core_runtime/gen/check.py " f"({SCHEMA_VERSION})"
+    ]
+
+
+@pytest.mark.parametrize(
+    "target_path",
+    [
+        "tobkiri_runtime/docs/hidden.py",
+        "tobkiri_launcher/src-tauri/gen/hidden.rs",
+    ],
+)
+def test_static_guard_scans_production_symlink_to_lexically_excluded_target(
+    tmp_path: Path,
+    target_path: str,
+) -> None:
+    target = tmp_path / target_path
+    source = tmp_path / "tobkiri_runtime/core_runtime/linked_consumer.py"
+    _write_manifest(target, SCHEMA_VERSION)
+    source.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        source.symlink_to(target)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks in the test directory")
+
+    references = find_runtime_references(tmp_path)
+
+    assert references == [
+        "tobkiri_runtime/core_runtime/linked_consumer.py " f"({SCHEMA_VERSION})"
+    ]
+
+
+def test_static_guard_keeps_lexically_excluded_tauri_prefix_out_of_scope(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "tobkiri_runtime/docs/consumer.rs"
+    excluded_link = tmp_path / "tobkiri_launcher/src-tauri/gen/linked.rs"
+    _write_manifest(target, SCHEMA_VERSION)
+    excluded_link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        excluded_link.symlink_to(target)
+    except OSError:
+        pytest.skip("filesystem does not support symlinks in the test directory")
+
+    assert find_runtime_references(tmp_path) == []
+
+
+def test_static_guard_fails_closed_for_production_symlink_outside_repository(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "tobkiri_runtime/core_runtime/external_consumer.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        source.symlink_to("/dev/null")
+    except OSError:
+        pytest.skip("filesystem does not support symlinks in the test directory")
+
+    references = find_runtime_references(tmp_path)
+
+    assert references == [
+        "tobkiri_runtime/core_runtime/external_consumer.py "
+        "(target escapes repository)"
     ]
 
 

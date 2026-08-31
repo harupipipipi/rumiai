@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,6 +126,7 @@ PRODUCTION_GUARD_EXCLUDED_PREFIXES = (Path("tobkiri_launcher/src-tauri/gen"),)
 FORBIDDEN_CONSUMPTION_TOKENS = frozenset(
     {ASSESSMENT_FILENAME, SCHEMA_VERSION, DOCUMENT_ROLE}
 )
+ADR_EVIDENCE_ROOT = Path("tobkiri_runtime/docs/adr")
 
 
 @dataclass(frozen=True)
@@ -289,6 +291,49 @@ def _regular_file_identity(path: Path) -> tuple[int, int] | None:
     if not stat.S_ISREG(metadata.st_mode):
         return None
     return metadata.st_dev, metadata.st_ino
+
+
+def _adr_file_identities(repo_root: Path) -> set[tuple[int, int]] | None:
+    """Return every readable, in-repository ADR file identity or fail closed.
+
+    Identity membership prevents case aliases and hard links from laundering ADR
+    evidence into a purported non-ADR supporting file. A missing, unreadable, or
+    repository-escaping ADR entry makes the classification unavailable.
+    """
+    root = repo_root.resolve()
+    adr_root = root / ADR_EVIDENCE_ROOT
+    if adr_root.is_symlink() or not adr_root.is_dir():
+        return None
+
+    walk_errors: list[OSError] = []
+    identities: set[tuple[int, int]] = set()
+    for directory, subdirectories, filenames in os.walk(
+        adr_root,
+        onerror=walk_errors.append,
+        followlinks=False,
+    ):
+        for subdirectory in subdirectories:
+            if (Path(directory) / subdirectory).is_symlink():
+                return None
+        for filename in filenames:
+            candidate = Path(directory) / filename
+            try:
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(root)
+            except (OSError, RuntimeError, ValueError):
+                return None
+            file_identity = _regular_file_identity(candidate)
+            if file_identity is None:
+                continue
+            try:
+                with candidate.open("rb") as handle:
+                    handle.read(1)
+            except OSError:
+                return None
+            identities.add(file_identity)
+    if walk_errors:
+        return None
+    return identities
 
 
 def _evidence_item(path: Path, repo_root: Path) -> dict[str, str]:
@@ -486,7 +531,10 @@ def _validate_reviewed_evidence(
     manifest_items: list[dict[str, object]] = []
     supporting_file_identities: set[tuple[int, int]] = set()
     non_adr_supporting_file_identities: set[tuple[int, int]] = set()
-    adr_prefix = Path("tobkiri_runtime/docs/adr")
+    adr_file_identities = _adr_file_identities(repo_root)
+    if adr_file_identities is None:
+        errors.append(f"{record_label}: ADR evidence identities are unavailable")
+        return
     for item in evidence:
         if not isinstance(item, dict):
             continue
@@ -502,8 +550,7 @@ def _validate_reviewed_evidence(
             manifest_items.append(item)
             continue
         supporting_file_identities.add(file_identity)
-        relative_path = Path(canonical_path)
-        if not relative_path.is_relative_to(adr_prefix):
+        if file_identity not in adr_file_identities:
             non_adr_supporting_file_identities.add(file_identity)
 
     if len(manifest_items) != 1:
@@ -683,7 +730,7 @@ def validate_assessment(
 def _is_guard_candidate(path: Path, repo_root: Path) -> bool:
     """Return whether a production file is covered by the static guard."""
     try:
-        relative = path.resolve().relative_to(repo_root.resolve())
+        relative = path.relative_to(repo_root)
     except ValueError:
         return False
     if path.suffix not in PRODUCTION_GUARD_SUFFIXES:
@@ -699,6 +746,14 @@ def _is_guard_candidate(path: Path, repo_root: Path) -> bool:
     )
 
 
+def _lexical_relative(path: Path, repo_root: Path) -> str | None:
+    """Return a repository-relative lexical path without resolving symlinks."""
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return None
+
+
 def find_runtime_references(repo_root: Path = REPO_ROOT) -> list[str]:
     """Find static assessment-token consumption in covered production files.
 
@@ -706,8 +761,10 @@ def find_runtime_references(repo_root: Path = REPO_ROOT) -> list[str]:
     ``tobkiri_launcher``, and ``.github`` with the extensions listed in
     :data:`PRODUCTION_GUARD_SUFFIXES`. Documentation, tests, vendor outputs, and
     the Tauri-generated ``tobkiri_launcher/src-tauri/gen/`` prefix are
-    intentionally out of scope, so this is a drift guard rather than a claim to
-    prove the absence of every dynamic consumption path.
+    intentionally out of scope by lexical repository path. Symlink targets are
+    resolved only after that decision; targets outside the repository are
+    reported as references. This is a drift guard rather than a claim to prove
+    the absence of every dynamic consumption path.
     """
     root = repo_root.resolve()
     references: list[str] = []
@@ -716,17 +773,31 @@ def find_runtime_references(repo_root: Path = REPO_ROOT) -> list[str]:
         if not scan_root.exists():
             continue
         for candidate in scan_root.rglob("*"):
-            if not candidate.is_file() or not _is_guard_candidate(candidate, root):
+            if not _is_guard_candidate(candidate, root):
+                continue
+            lexical_path = _lexical_relative(candidate, root)
+            if lexical_path is None:
                 continue
             try:
-                contents = candidate.read_text(encoding="utf-8")
+                resolved = candidate.resolve(strict=True)
+                resolved.relative_to(root)
+            except (OSError, RuntimeError, ValueError):
+                references.append(f"{lexical_path} (target escapes repository)")
+                continue
+            if not resolved.is_file():
+                continue
+            try:
+                contents = resolved.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
+                references.append(
+                    f"{lexical_path} (unreadable production source/config)"
+                )
                 continue
             tokens = sorted(
                 token for token in FORBIDDEN_CONSUMPTION_TOKENS if token in contents
             )
             if tokens:
-                references.append(f"{_relative(candidate, root)} ({', '.join(tokens)})")
+                references.append(f"{lexical_path} ({', '.join(tokens)})")
     return sorted(references)
 
 
