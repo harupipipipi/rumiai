@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -274,6 +275,22 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _regular_file_identity(path: Path) -> tuple[int, int] | None:
+    """Return a regular file's stable filesystem identity from its existing stat.
+
+    Callers use this in place of a separate ``is_file()`` check, so identity
+    comparison does not introduce an additional path-resolution/stat window
+    before the existing content-digest verification.
+    """
+    try:
+        metadata = path.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(metadata.st_mode):
+        return None
+    return metadata.st_dev, metadata.st_ino
+
+
 def _evidence_item(path: Path, repo_root: Path) -> dict[str, str]:
     return {"path": _relative(path, repo_root), "sha256": _digest(path)}
 
@@ -398,6 +415,7 @@ def _validate_evidence(
         errors.append(f"{record_label}: evidence must be a non-empty list")
         return
     seen_paths: set[str] = set()
+    seen_file_identities: set[tuple[int, int]] = set()
     for index, item in enumerate(evidence):
         item_label = f"{record_label}: evidence[{index}]"
         if not isinstance(item, dict):
@@ -420,9 +438,14 @@ def _validate_evidence(
             errors.append(f"{item_label}.path duplicates canonical evidence")
             continue
         seen_paths.add(canonical_path)
-        if not candidate.is_file():
+        file_identity = _regular_file_identity(candidate)
+        if file_identity is None:
             errors.append(f"{item_label}.path does not exist: {path_value}")
             continue
+        if file_identity in seen_file_identities:
+            errors.append(f"{item_label}.path duplicates filesystem evidence")
+            continue
+        seen_file_identities.add(file_identity)
         if _digest(candidate) != digest:
             errors.append(f"{item_label}.sha256 does not match current file")
 
@@ -452,7 +475,8 @@ def _validate_reviewed_evidence(
             f"{record_label}: manifest_path must be canonical and in-repository"
         )
         return
-    if not manifest_file.is_file():
+    manifest_identity = _regular_file_identity(manifest_file)
+    if manifest_identity is None:
         errors.append(f"{record_label}: manifest_path does not exist")
         return
     if not isinstance(evidence, list):
@@ -460,8 +484,8 @@ def _validate_reviewed_evidence(
         return
 
     manifest_items: list[dict[str, object]] = []
-    supporting_paths: set[str] = set()
-    non_adr_supporting_paths: set[str] = set()
+    supporting_file_identities: set[tuple[int, int]] = set()
+    non_adr_supporting_file_identities: set[tuple[int, int]] = set()
     adr_prefix = Path("tobkiri_runtime/docs/adr")
     for item in evidence:
         if not isinstance(item, dict):
@@ -471,14 +495,16 @@ def _validate_reviewed_evidence(
         )
         if path_error is not None or candidate is None or canonical_path is None:
             continue
-        if canonical_path == canonical_manifest:
+        file_identity = _regular_file_identity(candidate)
+        if file_identity is None:
+            continue
+        if file_identity == manifest_identity:
             manifest_items.append(item)
             continue
-        if candidate.is_file():
-            supporting_paths.add(canonical_path)
-            relative_path = Path(canonical_path)
-            if not relative_path.is_relative_to(adr_prefix):
-                non_adr_supporting_paths.add(canonical_path)
+        supporting_file_identities.add(file_identity)
+        relative_path = Path(canonical_path)
+        if not relative_path.is_relative_to(adr_prefix):
+            non_adr_supporting_file_identities.add(file_identity)
 
     if len(manifest_items) != 1:
         errors.append(
@@ -488,11 +514,11 @@ def _validate_reviewed_evidence(
         manifest_digest = manifest_items[0].get("sha256")
         if manifest_digest != _digest(manifest_file):
             errors.append(f"{record_label}: manifest evidence SHA-256 is not current")
-    if not supporting_paths:
+    if not supporting_file_identities:
         errors.append(
             f"{record_label}: reviewed row requires supporting evidence beyond manifest"
         )
-    elif not non_adr_supporting_paths:
+    elif not non_adr_supporting_file_identities:
         errors.append(
             f"{record_label}: reviewed row requires non-ADR supporting evidence"
         )

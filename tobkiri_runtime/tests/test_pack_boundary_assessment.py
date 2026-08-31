@@ -221,6 +221,65 @@ def test_reviewed_evidence_rejects_absolute_alias_of_manifest() -> None:
     assert not any("requires one manifest evidence item" in error for error in errors)
 
 
+def test_reviewed_evidence_rejects_case_alias_of_manifest_on_casefolding_fs() -> None:
+    payload = copy.deepcopy(_payload())
+    row = _accepted_row(payload)
+    manifest_path = row["manifest_path"]
+    assert isinstance(manifest_path, str)
+    parts = Path(manifest_path).parts
+    case_alias = Path(parts[0].upper(), *parts[1:])
+    manifest_file = REPO_ROOT / manifest_path
+    alias_file = REPO_ROOT / case_alias
+    try:
+        aliases_manifest = alias_file.is_file() and alias_file.samefile(manifest_file)
+    except OSError:
+        aliases_manifest = False
+    if not aliases_manifest:
+        pytest.skip("requires a case-insensitive filesystem alias")
+
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    evidence[1] = {
+        "path": case_alias.as_posix(),
+        "sha256": hashlib.sha256(alias_file.read_bytes()).hexdigest(),
+    }
+
+    errors = validate_assessment(payload, REPO_ROOT)
+
+    assert any("duplicates filesystem evidence" in error for error in errors)
+    assert any("requires one manifest evidence item" in error for error in errors)
+    assert any(
+        "requires supporting evidence beyond manifest" in error for error in errors
+    )
+
+
+def test_reviewed_evidence_rejects_hardlink_alias_of_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "tobkiri_runtime/ecosystem/demo/ecosystem.json"
+    _write_manifest(manifest, '{"pack_id": "demo"}\n')
+    reviewed = render_assessment(tmp_path)
+    row = _accepted_row(reviewed)
+    support = tmp_path / "tobkiri_runtime/review/demo-hardlink.json"
+    support.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        support.hardlink_to(manifest)
+    except OSError:
+        pytest.skip("filesystem does not support hard links in the test directory")
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    evidence[1] = {
+        "path": support.relative_to(tmp_path).as_posix(),
+        "sha256": hashlib.sha256(support.read_bytes()).hexdigest(),
+    }
+
+    errors = validate_assessment(reviewed, tmp_path)
+
+    assert any("duplicates filesystem evidence" in error for error in errors)
+    assert any("requires one manifest evidence item" in error for error in errors)
+    assert any(
+        "requires supporting evidence beyond manifest" in error for error in errors
+    )
+
+
 @pytest.mark.parametrize(
     "path, expected_error",
     [
