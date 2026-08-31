@@ -276,6 +276,7 @@ impl SignedApplicationResolver {
         let bundle_root = packaged_bundle_root(&app_root, bootstrap_profile_source)?;
         verify_symlink_free_tree(&bundle_root, &bundle_root)?;
         let bundle_lock = verify_bundle_lock(&bundle_root)?;
+        let pack_root = canonical_pack_root(&bundle_root)?;
         #[cfg(test)]
         let catalog = fixture_catalog_with_shell_variant(catalog, &app_root)?;
         let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
@@ -287,7 +288,7 @@ impl SignedApplicationResolver {
             bundle_pack_path(&bundle_root, &bundle_lock, &selected.application_pack_id)?;
         let application_pack = read_json(&application_path, "selected Application Pack v4")?;
         let launch = validate_application_pack(
-            &app_root,
+            &pack_root,
             &application_pack,
             selected_variant,
             selected.launch_contribution.as_ref(),
@@ -299,15 +300,15 @@ impl SignedApplicationResolver {
         // but its identity is obtained from the selected closure. This keeps
         // the PackVM/artifact-index reconciliation in place while removing the
         // old Defaultspack-only authority rule.
-        let root_pack = read_json(&app_root.join("pack.v4.json"), "materialized Pack")?;
+        let root_pack = read_json(&pack_root.join("pack.v4.json"), "materialized Pack")?;
         let root_pack_id = value_str(&root_pack, "/pack/id")
             .context("materialized Pack is missing its Pack identity")?;
         ensure_materialized_application_pack(root_pack_id, &selected.application_pack_id)?;
-        verify_pack_artifact_index(&app_root, &bundle_root, root_pack_id)?;
+        verify_pack_artifact_index(&pack_root, &bundle_root, root_pack_id)?;
 
         let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
         Ok(ApplicationAuthority {
-            pack_root: app_root,
+            pack_root,
             launch,
             profile_id: selected.profile_id,
             profile_digest: selected.profile_digest,
@@ -628,6 +629,24 @@ fn packaged_bundle_root(app_root: &Path, source: &str) -> Result<PathBuf> {
     }
     let relative = bundle_components.iter().collect::<PathBuf>();
     canonical_child_directory(app_root, &relative, "selected Pack v4 root")
+}
+
+fn canonical_pack_root(bundle_root: &Path) -> Result<PathBuf> {
+    let parent = bundle_root
+        .parent()
+        .context("selected Pack v4 root has no Pack root parent")?;
+    let pack_root = canonical_directory(parent, "selected Pack root")?;
+    let bundle_name = bundle_root
+        .file_name()
+        .context("selected Pack v4 root has no directory name")?;
+    let revalidated_bundle_root = pack_root
+        .join(bundle_name)
+        .canonicalize()
+        .context("failed to revalidate selected Pack v4 root from its Pack root")?;
+    if revalidated_bundle_root.as_path() != bundle_root {
+        bail!("selected Pack v4 root does not remain beneath its Pack root");
+    }
+    Ok(pack_root)
 }
 
 fn select_profile_authority(
