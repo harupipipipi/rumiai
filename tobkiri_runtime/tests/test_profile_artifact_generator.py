@@ -10,8 +10,10 @@ import shutil
 import pytest
 
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from scripts import generate_defaultspack_v4_bundle as canonical_generator
 from scripts import generate_profile_artifacts as generator
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.provenance import repository_tree_digest
 from tobkiri_protocol.validation import validate_document
 
 
@@ -103,6 +105,13 @@ def test_checked_in_profile_artifacts_are_deterministic_and_schema_valid() -> No
     assert compatibility["provenance"]["schema"] == "io.tobkiri.provenance.v1"
     assert compatibility["provenance"]["normative"] is False
     assert compatibility["provenance"]["repository_commit"] == "working-tree"
+    assert compatibility["provenance"]["repository_tree"] == repository_tree_digest(
+        ROOT,
+        [Path(generator.__file__), *generator.COMPATIBILITY_PROVENANCE_INPUTS],
+    )
+    evidence_paths = [item["path"] for item in compatibility["provenance"]["evidence"]]
+    assert evidence_paths == sorted(evidence_paths)
+    assert "scripts/profile_compatibility_provenance.py" in evidence_paths
     assert lock["profile_revision"] == canonical_digest(compatibility)
     assert lock["activation_authority"] == "unbound"
     assert lock["profile_definition_digest"] == canonical_digest(intent)
@@ -120,7 +129,8 @@ def test_checked_in_profile_artifacts_are_deterministic_and_schema_valid() -> No
     assert provenance["profile_revision"] == lock["profile_revision"]
     source_paths = {item["path"] for item in provenance["source_inputs"]}
     assert any(path.endswith("defaults.profile.intent.v1.json") for path in source_paths)
-    assert any(path.endswith("generate_defaultspack_v4_bundle.py") for path in source_paths)
+    assert provenance["generator"]["path"].endswith("generate_profile_artifacts.py")
+    assert not any(path.endswith("generate_defaultspack_v4_bundle.py") for path in source_paths)
     assert provenance["release_digest"] == canonical_digest(
         {key: value for key, value in provenance.items() if key != "release_digest"}
     )
@@ -141,8 +151,19 @@ def test_compatibility_profile_rejects_normative_unresolved_provenance(
     profile["provenance"]["normative"] = True
     profile["provenance"]["repository_commit"] = repository_commit
 
-    with pytest.raises(ValueError, match="cannot claim normative provenance"):
-        generator._validate_compatibility_profile_provenance(profile)
+    with pytest.raises(ValueError, match="normative provenance"):
+        generator.validate_compatibility_profile(profile)
+
+
+def test_canonical_bundle_render_preserves_non_authoritative_profile() -> None:
+    """The compatibility projection cannot regain authority during canonicalization."""
+
+    profile_path = BUNDLE / "defaults.profile.v4.json"
+    rendered = canonical_generator._render()
+    profile = json.loads(rendered[profile_path])
+
+    assert profile["provenance"]["normative"] is False
+    generator.validate_compatibility_profile(profile)
 
 
 def test_roundtrip_preserves_bundle_compatibility_and_output_bytes(tmp_path: Path) -> None:

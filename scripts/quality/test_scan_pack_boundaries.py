@@ -199,6 +199,23 @@ def test_committed_baseline_does_not_excuse_the_non_authoritative_profile(
     )
 
 
+def test_committed_baseline_exactly_matches_current_violations(
+    scanner: ModuleType,
+) -> None:
+    """The reviewed baseline must neither hide new edges nor retain stale ones."""
+
+    repo_root = SCRIPT.parents[2]
+    baseline_path = SCRIPT.with_name("pack_boundary_baseline.json")
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    actual = scanner.scan_repository(repo_root)
+
+    baseline_ids = {item["fingerprint"] for item in baseline["violations"]}
+    actual_ids = {item["fingerprint"] for item in actual}
+    assert actual_ids - baseline_ids == set()
+    assert baseline_ids - actual_ids == set()
+    assert baseline["violations"] == actual
+
+
 def test_false_positive_guards(scanner: ModuleType, tmp_path: Path) -> None:
     host = _pack(
         "host",

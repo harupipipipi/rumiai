@@ -37,6 +37,9 @@ from tobkiri_protocol.provenance import (  # noqa: E402
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
+from scripts.profile_compatibility_provenance import (  # noqa: E402
+    validate_compatibility_profile,
+)
 
 
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -110,6 +113,11 @@ TAURI_ROLE_PACKS = {
 }
 DEFAULTSPACK_DESKTOP_ENTRYPOINT = "defaultspack/desktop_app.py"
 DEFAULTSPACK_FRONTEND_CONTRACT_MAP = "defaultspack/frontend_contract_map.v4.json"
+PROFILE_ARTIFACT_COMPANIONS = (
+    Path("defaults.profile.intent.v1.json"),
+    Path("defaults.profile.lock.v5.json"),
+    Path("defaults.release.provenance.json"),
+)
 
 
 def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
@@ -626,11 +634,6 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
         shells.append((path, validate_document(shell, "shell")))
     for profile_path in profile_paths:
         profile = _normalize_profile(json.loads(profile_path.read_text(encoding="utf-8")))
-        profile["provenance"] = _generated_provenance(
-            profile,
-            profile_path.relative_to(ROOT).as_posix(),
-            source_commit,
-        )
         for pack in profile["packs"]:
             if pack["pack_id"] == "rumi-file-inspect":
                 pack["pack_id"] = "rumi_file_inspect_pack"
@@ -687,7 +690,9 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                 operation_id=edge["operation_id"],
                 semantics_digest=contract_digests[0],
             )
-        rendered[profile_path] = _pretty(validate_document(profile, "profile"))
+        profile = validate_document(profile, "profile")
+        validate_compatibility_profile(profile)
+        rendered[profile_path] = _pretty(profile)
     rendered[base_path] = _pretty(base)
     for shell_path, shell in shells:
         rendered[shell_path] = _pretty(shell)
@@ -855,6 +860,15 @@ def _publish(
     backup.rmdir()
     moved_original = False
     try:
+        for relative in PROFILE_ARTIFACT_COMPANIONS:
+            source = BUNDLE / relative
+            if not source.exists():
+                continue
+            if source.is_symlink() or not source.is_file():
+                raise ValueError(f"Profile artifact companion must be a regular file: {relative}")
+            target = stage / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
         for path, raw in sorted(rendered.items(), key=lambda item: item[0].as_posix()):
             target = stage / path.relative_to(BUNDLE)
             target.parent.mkdir(parents=True, exist_ok=True)

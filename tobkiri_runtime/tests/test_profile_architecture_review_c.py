@@ -36,10 +36,13 @@ from tobkiri_protocol import platform_artifact
 from tobkiri_protocol.provenance import (
     informational_source_commit,
     normative_generated_provenance,
+    repository_tree_digest,
     trusted_source_commit,
 )
 from scripts import generate_defaultspack_v4_bundle
+from scripts import generate_packaged_defaultspack_v4_bundle
 from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bundle
+from scripts.profile_compatibility_provenance import validate_compatibility_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -566,6 +569,16 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
         architecture="arm64",
         bundle_identity="io.tobkiri.shell.tauri",
         source_provenance_file=provenance,
+    )
+    profile = json.loads((bundle / "defaults.profile.v4.json").read_text())
+    assert profile["provenance"]["normative"] is False
+    validate_compatibility_profile(profile)
+    assert profile["provenance"]["repository_tree"] == repository_tree_digest(
+        ROOT,
+        [
+            Path(generate_packaged_defaultspack_v4_bundle.__file__),
+            *generate_packaged_defaultspack_v4_bundle.COMPATIBILITY_PROVENANCE_INPUTS,
+        ],
     )
     shell = json.loads((bundle / "shell.tauri.default.shell.v1.json").read_text())
     variant = shell["launch"]["variants"][0]

@@ -42,6 +42,24 @@ from tobkiri_protocol.platform_artifact import (  # noqa: E402
     verify_platform_artifact,
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
+from .profile_compatibility_provenance import (  # noqa: E402
+    compatibility_profile_provenance,
+    validate_compatibility_profile,
+)
+
+
+COMPATIBILITY_PROVENANCE_INPUTS = (
+    ROOT / "scripts" / "generate_defaultspack_v4_bundle.py",
+    ROOT / "scripts" / "generator_source_manifest.py",
+    ROOT / "scripts" / "packaging_cleanup.py",
+    ROOT / "scripts" / "profile_compatibility_provenance.py",
+    ROOT / "tobkiri_protocol" / "canonical.py",
+    ROOT / "tobkiri_protocol" / "defaultspack_bundle_order.py",
+    ROOT / "tobkiri_protocol" / "platform_artifact.py",
+    ROOT / "tobkiri_protocol" / "profile_scope.py",
+    ROOT / "tobkiri_protocol" / "provenance.py",
+    ROOT / "tobkiri_protocol" / "validation.py",
+)
 
 
 class _PublishRecord(TypedDict):
@@ -840,13 +858,18 @@ def _package_transaction(
             executable_artifact_digest=entrypoint_digest,
             definition_revision=shell["definition_revision"],
         )
-        profile["provenance"] = _generated_provenance(
-            profile,
-            "ecosystem/defaultspack/v4/defaults.profile.v4.json",
-            commit,
+        profile["provenance"] = compatibility_profile_provenance(
+            root=ROOT,
+            profile=profile,
+            source_path="ecosystem/defaultspack/v4/defaults.profile.v4.json",
+            generator="defaultspack-v4-packager",
+            generator_version="2.0.0",
             generator_path=Path(__file__),
+            input_paths=COMPATIBILITY_PROVENANCE_INPUTS,
         )
-        _write_json(profile_path, validate_document(profile, "profile"))
+        profile = validate_document(profile, "profile")
+        validate_compatibility_profile(profile)
+        _write_json(profile_path, profile)
 
         lock_path = staged_bundle / "bundle.lock.json"
         lock = _read_json(lock_path, "bundle lock")
