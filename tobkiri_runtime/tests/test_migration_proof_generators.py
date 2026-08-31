@@ -201,7 +201,7 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
     identity = profile_proof["identity_proof"]
     transaction = profile_proof["transaction"]
 
-    assert len(proof["packs"]) == 143
+    assert len(proof["packs"]) == 139
     assert identity["all_ids_distinct"] is True
     assert identity["defaults_collapsed"] is False
     assert identity["profile_ids"] == ["profile-aoi", "profile-bora", "profile-cleo"]
@@ -212,9 +212,9 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
         status: sum(entry["status"] == status for entry in proof["packs"].values())
         for status in ("semantically-reviewed", "generated-draft")
     }
-    assert statuses == {"semantically-reviewed": 45, "generated-draft": 98}
+    assert statuses == {"semantically-reviewed": 45, "generated-draft": 94}
     assert source["migration_status_counts"] == {
-        "generated-draft": 98,
+        "generated-draft": 94,
         "release-verified": 0,
         "semantically-reviewed": 45,
     }

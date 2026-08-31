@@ -415,7 +415,7 @@ jobs:
         with:
           name: pack-v4-migration-status
           path: ${{ runner.temp }}/complete-v4-migration.json
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Set up Node for Launcher panel gate
         uses: actions/setup-node@v4

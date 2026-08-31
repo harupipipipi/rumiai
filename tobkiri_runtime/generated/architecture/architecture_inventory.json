@@ -8468,7 +8468,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:a7139c75869d8ba5e19e182719ef318b61d83250b3792f6bac7d9308c63805f2",
+        "digest": "sha256:399befb7c7dc34a9c2d13db5e2406aa38ed9c00fceb64bb7fc5313666a5ebfea",
         "identity": "rumi_connector_gateway_pack",
         "kind": "manifest",
         "legacy": true,
@@ -9588,7 +9588,7 @@
         "version": "0.1.0"
       },
       {
-        "digest": "sha256:99b86aff6f9e1cd575aa91937719dbdf705f42241337fc424c6a978e9f0758e0",
+        "digest": "sha256:680d8ccc9ca9c7ca139028ab1c7a6e1b6e53ea5b51a72e373a310fb553a937ae",
         "identity": "rumi_telephony_delegate_pack",
         "kind": "manifest",
         "legacy": true,
@@ -14434,7 +14434,7 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:99b86aff6f9e1cd575aa91937719dbdf705f42241337fc424c6a978e9f0758e0",
+        "evidence_digest": "sha256:680d8ccc9ca9c7ca139028ab1c7a6e1b6e53ea5b51a72e373a310fb553a937ae",
         "line": 6,
         "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
@@ -16904,7 +16904,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:a7139c75869d8ba5e19e182719ef318b61d83250b3792f6bac7d9308c63805f2",
+        "manifest_digest": "sha256:399befb7c7dc34a9c2d13db5e2406aa38ed9c00fceb64bb7fc5313666a5ebfea",
         "pack_id": "rumi_connector_gateway_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/ecosystem.json",
         "version": "0.1.0"
@@ -17884,7 +17884,7 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:99b86aff6f9e1cd575aa91937719dbdf705f42241337fc424c6a978e9f0758e0",
+        "manifest_digest": "sha256:680d8ccc9ca9c7ca139028ab1c7a6e1b6e53ea5b51a72e373a310fb553a937ae",
         "pack_id": "rumi_telephony_delegate_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
         "version": "0.1.0"
@@ -18350,8 +18350,8 @@
     ]
   },
   "repository": {
-    "commit": "e843bd32daa76be119076a044c270c145f7a12b3",
-    "tree_digest": "8aa0f25c2c69657159771cf90a46dde2540974cf359b6f7008aa21ce34a9078b"
+    "commit": "ac37ecfb42779aa9318a5c1d3133d04a134a98ec",
+    "tree_digest": "0d56ed70ee2bade0ce73ad6cd67d6e0de444ee0d1ebfc8572e915e90aa7cb466"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

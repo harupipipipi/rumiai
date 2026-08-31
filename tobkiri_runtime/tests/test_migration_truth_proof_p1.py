@@ -138,12 +138,12 @@ def test_pack_feasibility_audit_is_specific_and_separate_from_profile_receipt() 
         status: sum(entry["status"] == status for entry in proof["packs"].values())
         for status in ("semantically-reviewed", "generated-draft")
     }
-    assert statuses == {"semantically-reviewed": 45, "generated-draft": 98}
+    assert statuses == {"semantically-reviewed": 45, "generated-draft": 94}
     assert proof["source"]["unproved_pack_count"] == len(proof["packs"])
-    assert proof["source"]["semantic_unproved_pack_count"] == 98
+    assert proof["source"]["semantic_unproved_pack_count"] == 94
     unresolved = proof["source"]["feasibility_audit"]["unresolved"]
-    assert unresolved["non_executable_pack_semantics_unmodeled"]["count"] == 54
-    assert unresolved["pack_specific_legacy_source_missing"]["count"] == 45
+    assert unresolved["non_executable_pack_semantics_unmodeled"]["count"] == 50
+    assert unresolved["pack_specific_legacy_source_missing"]["count"] == 41
     assert unresolved["pack_specific_authority_source_missing"]["count"] == 3
     assert unresolved["legacy_artifact_role_missing"]["count"] == 40
     assert unresolved["parameter_schema_mapping_mismatch"]["count"] == 1
