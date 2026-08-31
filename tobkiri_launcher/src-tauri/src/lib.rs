@@ -2,7 +2,6 @@
 //!
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
-mod app_data_migration;
 mod artifact_integrity;
 mod ci_e2e_app_data;
 mod config;
@@ -2255,10 +2254,6 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                 .context("failed to resolve app_data_dir")?;
             let app_data_dir =
                 ci_e2e_app_data::resolve_app_data_dir_from_env(&app_identifier, &app_data_dir)?;
-            if app_data_migration::migrate_legacy_app_data(&app_data_dir)? {
-                info!("copied legacy Rumi Viewer application data into Tobkiri Launcher storage");
-            }
-
             record_startup_stage(&setup_startup_stage, "building_config");
             let mut config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .context("failed to build AppConfig")?;
