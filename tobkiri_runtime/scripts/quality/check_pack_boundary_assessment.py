@@ -114,13 +114,13 @@ PRODUCTION_GUARD_EXCLUDED_PARTS = frozenset(
         "target",
         "dist",
         "build",
-        "generated",
         "coverage",
         "docs",
         "tests",
         "test",
     }
 )
+PRODUCTION_GUARD_EXCLUDED_PREFIXES = (Path("tobkiri_launcher/src-tauri/gen"),)
 FORBIDDEN_CONSUMPTION_TOKENS = frozenset(
     {ASSESSMENT_FILENAME, SCHEMA_VERSION, DOCUMENT_ROLE}
 )
@@ -278,6 +278,32 @@ def _evidence_item(path: Path, repo_root: Path) -> dict[str, str]:
     return {"path": _relative(path, repo_root), "sha256": _digest(path)}
 
 
+def _canonical_repository_file(
+    repo_root: Path, value: object
+) -> tuple[Path | None, str | None, str | None]:
+    """Resolve one strictly canonical repository-relative evidence path.
+
+    A path is canonical only when its original POSIX text exactly matches the
+    resolved repository-relative path. This rejects absolute paths, ``..``
+    aliases, redundant separators, and symlink paths whose target is elsewhere.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None, None, "must be a non-empty path"
+    raw_path = Path(value)
+    if raw_path.is_absolute():
+        return None, None, "must be repository-relative, not absolute"
+
+    root = repo_root.resolve()
+    candidate = (root / raw_path).resolve()
+    try:
+        canonical = candidate.relative_to(root).as_posix()
+    except ValueError:
+        return None, None, "escapes repository"
+    if value != canonical:
+        return None, None, "must use the canonical repository-relative path"
+    return candidate, canonical, None
+
+
 def new_record(
     location: AssessmentPackLocation, repo_root: Path = REPO_ROOT
 ) -> dict[str, Any]:
@@ -313,6 +339,13 @@ def _reviewed_record_is_current(
         return False
     errors: list[str] = []
     _validate_evidence(repo_root, "reviewed record", record.get("evidence"), errors)
+    _validate_reviewed_evidence(
+        repo_root,
+        "reviewed record",
+        manifest_path,
+        record.get("evidence"),
+        errors,
+    )
     return not errors
 
 
@@ -364,7 +397,7 @@ def _validate_evidence(
     if not isinstance(evidence, list) or not evidence:
         errors.append(f"{record_label}: evidence must be a non-empty list")
         return
-    root = repo_root.resolve()
+    seen_paths: set[str] = set()
     for index, item in enumerate(evidence):
         item_label = f"{record_label}: evidence[{index}]"
         if not isinstance(item, dict):
@@ -372,23 +405,97 @@ def _validate_evidence(
             continue
         path_value = item.get("path")
         digest = item.get("sha256")
-        if not isinstance(path_value, str) or not path_value.strip():
-            errors.append(f"{item_label}.path must be a non-empty path")
+        candidate, canonical_path, path_error = _canonical_repository_file(
+            repo_root, path_value
+        )
+        if path_error is not None:
+            errors.append(f"{item_label}.path {path_error}")
             continue
         if not isinstance(digest, str) or len(digest) != 64:
             errors.append(f"{item_label}.sha256 must be a SHA-256 digest")
             continue
-        candidate = (root / path_value).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError:
-            errors.append(f"{item_label}.path escapes repository: {path_value}")
+        assert candidate is not None
+        assert canonical_path is not None
+        if canonical_path in seen_paths:
+            errors.append(f"{item_label}.path duplicates canonical evidence")
             continue
+        seen_paths.add(canonical_path)
         if not candidate.is_file():
             errors.append(f"{item_label}.path does not exist: {path_value}")
             continue
         if _digest(candidate) != digest:
             errors.append(f"{item_label}.sha256 does not match current file")
+
+
+def _validate_reviewed_evidence(
+    repo_root: Path,
+    record_label: str,
+    manifest_path: object,
+    evidence: object,
+    errors: list[str],
+) -> None:
+    """Require reviewed rows to bind their manifest and distinct evidence.
+
+    The manifest check deliberately recomputes its digest rather than relying on
+    the generic evidence validator. This makes the review-preservation decision
+    independently depend on the exact current manifest bytes.
+    """
+    manifest_file, canonical_manifest, manifest_error = _canonical_repository_file(
+        repo_root, manifest_path
+    )
+    if (
+        manifest_error is not None
+        or manifest_file is None
+        or canonical_manifest is None
+    ):
+        errors.append(
+            f"{record_label}: manifest_path must be canonical and in-repository"
+        )
+        return
+    if not manifest_file.is_file():
+        errors.append(f"{record_label}: manifest_path does not exist")
+        return
+    if not isinstance(evidence, list):
+        errors.append(f"{record_label}: reviewed row requires manifest evidence")
+        return
+
+    manifest_items: list[dict[str, object]] = []
+    supporting_paths: set[str] = set()
+    non_adr_supporting_paths: set[str] = set()
+    adr_prefix = Path("tobkiri_runtime/docs/adr")
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        candidate, canonical_path, path_error = _canonical_repository_file(
+            repo_root, item.get("path")
+        )
+        if path_error is not None or candidate is None or canonical_path is None:
+            continue
+        if canonical_path == canonical_manifest:
+            manifest_items.append(item)
+            continue
+        if candidate.is_file():
+            supporting_paths.add(canonical_path)
+            relative_path = Path(canonical_path)
+            if not relative_path.is_relative_to(adr_prefix):
+                non_adr_supporting_paths.add(canonical_path)
+
+    if len(manifest_items) != 1:
+        errors.append(
+            f"{record_label}: reviewed row requires one manifest evidence item"
+        )
+    else:
+        manifest_digest = manifest_items[0].get("sha256")
+        if manifest_digest != _digest(manifest_file):
+            errors.append(f"{record_label}: manifest evidence SHA-256 is not current")
+    if not supporting_paths:
+        errors.append(
+            f"{record_label}: reviewed row requires supporting evidence beyond manifest"
+        )
+    elif not non_adr_supporting_paths:
+        errors.append(
+            f"{record_label}: reviewed row requires non-ADR supporting evidence"
+        )
 
 
 def _validate_record(
@@ -471,17 +578,6 @@ def _validate_record(
             errors.append(f"{label}: accepted row requires boundary_criteria")
         if not isinstance(justification, str) or not justification.strip():
             errors.append(f"{label}: accepted row requires assessment_justification")
-        evidence = row.get("evidence")
-        supporting_paths = (
-            {item.get("path") for item in evidence if isinstance(item, dict)}
-            if isinstance(evidence, list)
-            else set()
-        )
-        manifest_token = manifest_path if isinstance(manifest_path, str) else None
-        if supporting_paths <= {manifest_token}:
-            errors.append(
-                f"{label}: accepted row requires evidence beyond its manifest"
-            )
 
     removal_phase = row.get("removal_phase")
     if removal_phase is not None:
@@ -492,7 +588,16 @@ def _validate_record(
         if disposition in {"undecided", "keep"}:
             errors.append(f"{label}: removal_phase requires a removal disposition")
 
-    _validate_evidence(repo_root, label, row.get("evidence"), errors)
+    evidence = row.get("evidence")
+    _validate_evidence(repo_root, label, evidence, errors)
+    if review_status != "unreviewed":
+        _validate_reviewed_evidence(
+            repo_root,
+            label,
+            manifest_path,
+            evidence,
+            errors,
+        )
     if isinstance(pack_id, str) and isinstance(manifest_path, str):
         return pack_id, manifest_path
     return None
@@ -559,6 +664,10 @@ def _is_guard_candidate(path: Path, repo_root: Path) -> bool:
         return False
     if any(part in PRODUCTION_GUARD_EXCLUDED_PARTS for part in relative.parts):
         return False
+    if any(
+        relative.is_relative_to(prefix) for prefix in PRODUCTION_GUARD_EXCLUDED_PREFIXES
+    ):
+        return False
     return relative.as_posix() != (
         "tobkiri_runtime/scripts/quality/check_pack_boundary_assessment.py"
     )
@@ -569,9 +678,10 @@ def find_runtime_references(repo_root: Path = REPO_ROOT) -> list[str]:
 
     This checks source/config files under ``tobkiri_runtime``,
     ``tobkiri_launcher``, and ``.github`` with the extensions listed in
-    :data:`PRODUCTION_GUARD_SUFFIXES`. Documentation, tests, and generated or
-    vendor directories are intentionally out of scope, so this is a drift guard
-    rather than a claim to prove the absence of every dynamic consumption path.
+    :data:`PRODUCTION_GUARD_SUFFIXES`. Documentation, tests, vendor outputs, and
+    the Tauri-generated ``tobkiri_launcher/src-tauri/gen/`` prefix are
+    intentionally out of scope, so this is a drift guard rather than a claim to
+    prove the absence of every dynamic consumption path.
     """
     root = repo_root.resolve()
     references: list[str] = []

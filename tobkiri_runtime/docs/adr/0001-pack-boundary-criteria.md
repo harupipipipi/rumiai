@@ -43,8 +43,11 @@ accepted while its lifecycle owner, state owner, trust domain, execution mode,
 canonical owner, or disposition remains unresolved. It must also have a non-empty
 `boundary_criteria` selection, an `assessment_justification`, and content-bound
 supporting evidence beyond the Pack manifest itself. Each evidence item records a
-repository-relative path and a SHA-256 digest; a changed manifest or evidence file
-resets a reviewed row to `unreviewed` when the inventory is regenerated.
+canonical repository-relative path and a SHA-256 digest. A reviewed row must
+include exactly one such manifest evidence item, whose digest is independently
+compared with the current manifest, plus at least one canonically distinct,
+non-ADR supporting item. A changed manifest or evidence file resets a reviewed
+row to `unreviewed` when the inventory is regenerated.
 
 ## Inventory contract
 
@@ -59,10 +62,11 @@ Adding, removing, or moving a Pack manifest therefore creates review drift witho
 making the assessment an executable catalog.
 
 The non-consumption guard is deliberately static and bounded: it excludes
-documentation, tests, vendor, and generated directories, and cannot prove the
-absence of dynamic loading or external-process consumption. It is a regression
-signal, not a runtime security control or a claim that all possible consumers are
-enumerated.
+documentation, tests, vendor directories, and the exact generated-output prefix
+`tobkiri_launcher/src-tauri/gen/`; it does not broadly exclude every directory
+named `gen`. It cannot prove the absence of dynamic loading or external-process
+consumption. It is a regression signal, not a runtime security control or a claim
+that all possible consumers are enumerated.
 
 ## Consequences
 

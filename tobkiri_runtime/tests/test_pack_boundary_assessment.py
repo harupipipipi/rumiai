@@ -50,7 +50,7 @@ def _accepted_row(payload: dict[str, object]) -> dict[str, object]:
     )
     evidence = row["evidence"]
     assert isinstance(evidence, list)
-    support_path = REPO_ROOT / "tobkiri_runtime/docs/adr/0001-pack-boundary-criteria.md"
+    support_path = REPO_ROOT / "tobkiri_runtime/docs/macos-unsigned-distribution.md"
     evidence.append(
         {
             "path": support_path.relative_to(REPO_ROOT).as_posix(),
@@ -175,7 +175,74 @@ def test_accepted_rows_require_supporting_evidence_beyond_manifest() -> None:
 
     errors = validate_assessment(payload, REPO_ROOT)
 
-    assert any("requires evidence beyond its manifest" in error for error in errors)
+    assert any(
+        "requires supporting evidence beyond manifest" in error for error in errors
+    )
+
+
+def test_accepted_rows_reject_adr_as_the_only_supporting_evidence() -> None:
+    payload = copy.deepcopy(_payload())
+    row = _accepted_row(payload)
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    adr_path = REPO_ROOT / "tobkiri_runtime/docs/adr/0001-pack-boundary-criteria.md"
+    row["evidence"] = [
+        evidence[0],
+        {
+            "path": adr_path.relative_to(REPO_ROOT).as_posix(),
+            "sha256": hashlib.sha256(adr_path.read_bytes()).hexdigest(),
+        },
+    ]
+
+    errors = validate_assessment(payload, REPO_ROOT)
+
+    assert any("requires non-ADR supporting evidence" in error for error in errors)
+
+
+def test_reviewed_evidence_rejects_absolute_alias_of_manifest() -> None:
+    payload = copy.deepcopy(_payload())
+    row = _accepted_row(payload)
+    manifest_path = row["manifest_path"]
+    assert isinstance(manifest_path, str)
+    manifest_file = REPO_ROOT / manifest_path
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    evidence.insert(
+        1,
+        {
+            "path": manifest_file.resolve().as_posix(),
+            "sha256": hashlib.sha256(manifest_file.read_bytes()).hexdigest(),
+        },
+    )
+
+    errors = validate_assessment(payload, REPO_ROOT)
+
+    assert any("repository-relative, not absolute" in error for error in errors)
+    assert not any("requires one manifest evidence item" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "path, expected_error",
+    [
+        ("../outside.md", "escapes repository"),
+        (
+            "tobkiri_runtime/docs/../docs/macos-unsigned-distribution.md",
+            "canonical repository-relative path",
+        ),
+    ],
+)
+def test_evidence_paths_reject_outside_and_noncanonical_aliases(
+    path: str, expected_error: str
+) -> None:
+    payload = copy.deepcopy(_payload())
+    row = _accepted_row(payload)
+    evidence = row["evidence"]
+    assert isinstance(evidence, list)
+    evidence.append({"path": path, "sha256": "0" * 64})
+
+    errors = validate_assessment(payload, REPO_ROOT)
+
+    assert any(expected_error in error for error in errors)
 
 
 def test_evidence_digest_detects_tampering() -> None:
@@ -227,6 +294,21 @@ def test_static_non_consumption_guard_detects_production_mutations(
     references = find_runtime_references(tmp_path)
 
     assert references == [f"{path} ({token})"]
+
+
+def test_static_non_consumption_guard_excludes_only_tauri_generated_prefix(
+    tmp_path: Path,
+) -> None:
+    generated = tmp_path / "tobkiri_launcher/src-tauri/gen/schema.rs"
+    similarly_named_source = tmp_path / "tobkiri_runtime/core_runtime/gen/check.py"
+    _write_manifest(generated, SCHEMA_VERSION)
+    _write_manifest(similarly_named_source, SCHEMA_VERSION)
+
+    references = find_runtime_references(tmp_path)
+
+    assert references == [
+        "tobkiri_runtime/core_runtime/gen/check.py " f"({SCHEMA_VERSION})"
+    ]
 
 
 def test_production_runtime_does_not_consume_assessment() -> None:
