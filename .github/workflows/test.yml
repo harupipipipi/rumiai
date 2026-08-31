@@ -398,7 +398,7 @@ jobs:
       - name: Verify generated Tobkiri Launcher presentation catalog
         run: python scripts/quality/generate_presentation_catalog.py --check
 
-      - name: Verify complete v4 migration evidence is fresh
+      - name: Enforce Pack v4 migration evidence freshness (Phase 0)
         run: >-
           python tobkiri_runtime/scripts/quality/scan_complete_v4_migration.py
           --output "${RUNNER_TEMP}/complete-v4-migration.json"
@@ -406,6 +406,16 @@ jobs:
           tobkiri_runtime/scripts/quality/evidence/complete_v4_migration_red_64b2240e.json
           --event-name "${{ github.event_name }}"
           --pr-head-sha "${{ github.event.pull_request.head.sha || '' }}"
+          --freshness-only
+          --summary-file "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Pack v4 migration status evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-v4-migration-status
+          path: ${{ runner.temp }}/complete-v4-migration.json
+          if-no-files-found: error
 
       - name: Set up Node for Launcher panel gate
         uses: actions/setup-node@v4

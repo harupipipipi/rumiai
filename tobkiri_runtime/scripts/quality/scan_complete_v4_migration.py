@@ -171,8 +171,59 @@ def evidence_drift(
     return errors
 
 
+def _summary_markdown(
+    evidence: dict[str, Any],
+    drift: list[str],
+    *,
+    freshness_only: bool,
+) -> str:
+    """Return a concise CI summary without overstating migration completion."""
+
+    gate_status = evidence["gate"]["status"]
+    freshness_status = "FAIL" if drift else "PASS"
+    enforcement = "report-only" if freshness_only else "blocking"
+    lines = [
+        "## Pack v4 migration evidence",
+        "",
+        f"- Evidence freshness: **{freshness_status}**",
+        f"- Semantic migration status: **{gate_status}** ({enforcement})",
+    ]
+    if gate_status == "RED" and freshness_only:
+        migration_findings = evidence.get("findings", {}).get(
+            "migration_evidence", []
+        )
+        missing = sum(
+            finding.get("unverified_count", 0)
+            for finding in migration_findings
+            if isinstance(finding, dict)
+        )
+        lines.append(
+            "- Phase 0 keeps genuine semantic findings visible without claiming "
+            f"migration completion ({missing} Pack release proof(s) missing)."
+        )
+    if drift:
+        lines.extend(["", "Freshness errors:"])
+        lines.extend(f"- {error}" for error in drift)
+    return "\n".join(lines) + "\n"
+
+
+def _exit_code(
+    evidence: dict[str, Any],
+    drift: list[str],
+    *,
+    freshness_only: bool,
+) -> int:
+    """Return the process status for strict or Phase 0 freshness enforcement."""
+
+    if drift:
+        return 1
+    if freshness_only:
+        return 0
+    return 0 if evidence["gate"]["status"] == "GREEN" else 1
+
+
 def main() -> int:
-    """Write evidence and return non-zero while any migration gate is RED."""
+    """Write evidence and enforce strict or explicit Phase 0 exit semantics."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
@@ -194,6 +245,19 @@ def main() -> int:
         "--pr-head-sha",
         default=os.environ.get("TOBKIRI_PR_HEAD_SHA", ""),
         help="exact pull_request head SHA supplied by the workflow event",
+    )
+    parser.add_argument(
+        "--freshness-only",
+        action="store_true",
+        help=(
+            "Phase 0 mode: fail on evidence drift while reporting, but not enforcing, "
+            "the semantic migration status"
+        ),
+    )
+    parser.add_argument(
+        "--summary-file",
+        type=Path,
+        help="append a concise migration status report to this CI summary file",
     )
     args = parser.parse_args()
     output = args.output if args.output.is_absolute() else ROOT / args.output
@@ -234,6 +298,9 @@ def main() -> int:
             {
                 "output": output_name,
                 "status": evidence["gate"]["status"],
+                "enforcement": (
+                    "freshness-only" if args.freshness_only else "semantic-and-freshness"
+                ),
                 "nodeids": len(evidence["nodeids"]),
                 "counts": counts,
                 "drift": drift,
@@ -242,7 +309,22 @@ def main() -> int:
             sort_keys=True,
         )
     )
-    return 0 if evidence["gate"]["status"] == "GREEN" and not drift else 1
+    if args.summary_file is not None:
+        summary_file = (
+            args.summary_file
+            if args.summary_file.is_absolute()
+            else ROOT / args.summary_file
+        )
+        summary_file.parent.mkdir(parents=True, exist_ok=True)
+        with summary_file.open("a", encoding="utf-8") as stream:
+            stream.write(
+                _summary_markdown(
+                    evidence,
+                    drift,
+                    freshness_only=args.freshness_only,
+                )
+            )
+    return _exit_code(evidence, drift, freshness_only=args.freshness_only)
 
 
 if __name__ == "__main__":

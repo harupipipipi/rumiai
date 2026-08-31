@@ -29,6 +29,20 @@ def _evidence(sha: str = PARENT) -> dict[str, object]:
     return evidence
 
 
+def _gate_evidence(status: str) -> dict[str, object]:
+    """Return the minimum gate shape used by Phase 0 enforcement helpers."""
+
+    return {
+        "gate": {"status": status},
+        "counts": {"gates": {"migration_evidence": 1 if status == "RED" else 0}},
+        "findings": {
+            "migration_evidence": (
+                [{"unverified_count": 139}] if status == "RED" else []
+            )
+        },
+    }
+
+
 def test_informational_head_does_not_create_recursive_freshness_requirement() -> None:
     """Different valid commit labels cannot override identical recomputed truth."""
 
@@ -84,3 +98,43 @@ def test_tampered_semantic_digest_fails_closed() -> None:
     assert scanner.evidence_drift(tracked, observed, event_name="push") == [
         "tracked evidence semantic digest is invalid"
     ]
+
+
+def test_phase_zero_freshness_gate_rejects_stale_evidence() -> None:
+    """Freshness-only mode must still fail closed on semantic evidence drift."""
+
+    evidence = _gate_evidence("RED")
+    drift = ["tracked evidence differs from the current semantic scan"]
+
+    assert scanner._exit_code(evidence, drift, freshness_only=True) == 1
+
+
+def test_phase_zero_fresh_red_is_reported_and_passes_freshness_gate() -> None:
+    """A genuine RED remains visible while Phase 0 enforces only freshness."""
+
+    evidence = _gate_evidence("RED")
+
+    assert scanner._exit_code(evidence, [], freshness_only=True) == 0
+    summary = scanner._summary_markdown(evidence, [], freshness_only=True)
+    assert "Semantic migration status: **RED** (report-only)" in summary
+    assert "without claiming migration completion" in summary
+    assert "139 Pack release proof(s) missing" in summary
+
+
+def test_phase_zero_fresh_green_passes() -> None:
+    """Fresh GREEN evidence passes the Phase 0 freshness gate."""
+
+    evidence = _gate_evidence("GREEN")
+
+    assert scanner._exit_code(evidence, [], freshness_only=True) == 0
+    assert "Semantic migration status: **GREEN** (report-only)" in (
+        scanner._summary_markdown(evidence, [], freshness_only=True)
+    )
+
+
+def test_default_mode_keeps_semantic_red_fail_closed() -> None:
+    """The opt-in Phase 0 split must not weaken the scanner's default mode."""
+
+    assert scanner._exit_code(
+        _gate_evidence("RED"), [], freshness_only=False
+    ) == 1

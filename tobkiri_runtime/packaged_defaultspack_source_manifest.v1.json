@@ -1209,15 +1209,15 @@
     {
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
-      "size": 84550,
-      "sha256": "50c73f7566a93dd2f5b5dcb18d65fc45bab98b76bd41d719d321a067d54a41e6",
+      "size": 83016,
+      "sha256": "8b5ef20c4f7769954d7451defa21a50c56677c69f7c246f687b93d6042ea239d",
       "executable": false
     },
     {
       "path": "scripts/quality/evidence/pack_migration_proof.v1.json",
       "type": "regular-file",
       "size": 847745,
-      "sha256": "a9b684722a48c6e0ce6b98a183999867790a12bcd8b90e8e81d23aae4ee8ad8f",
+      "sha256": "40a27b4f8438391792ebedd99a8562ef4d3fdf052efc71a91833bb2c94ebf7d8",
       "executable": false
     },
     {
@@ -1265,8 +1265,8 @@
     {
       "path": "scripts/quality/scan_complete_v4_migration.py",
       "type": "regular-file",
-      "size": 8952,
-      "sha256": "949891310237a13ccd7c61a32645fd2158f2ea4f49c9dfd597ed9a6e931e22a3",
+      "size": 11589,
+      "sha256": "537920ac60e94ea92bfb3a4354b02e6f570384404778e51ce5cac4b7c63ce98a",
       "executable": false
     },
     {
