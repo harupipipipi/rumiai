@@ -1399,10 +1399,8 @@ def verify_macos_vz_helper_identity(
         entitlements = plistlib.loads(entitlement_source[start:].encode("utf-8"))
     except (ValueError, TypeError):
         return False, "macOS VZ native helper virtualization entitlement is invalid"
-    if not isinstance(entitlements, Mapping) or entitlements.get(
-        "com.apple.security.virtualization"
-    ) is not True:
-        return False, "macOS VZ native helper virtualization entitlement is missing"
+    if entitlements != {"com.apple.security.virtualization": True}:
+        return False, "macOS VZ native helper entitlements are not exact"
     return True, None
 
 

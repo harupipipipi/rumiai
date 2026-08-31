@@ -9,9 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
 
-import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+import pytest
+import tobkiri_host.macos_vz_supervisor as macos_vz_supervisor
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 
 from tobkiri_host.artifact_materialization import (
@@ -27,6 +28,7 @@ from tobkiri_host.macos_vz_supervisor import (
     MacOSVZLaunchAssets,
     MacOSVZRuntime,
     MacOSVZSupervisorDriver,
+    verify_macos_vz_helper_identity,
 )
 from tobkiri_host.platform_backends import IsolationLaunch, IsolationLease
 
@@ -56,6 +58,50 @@ def test_helper_identity_requires_a_complete_signing_domain() -> None:
             team_id="ABCDEFGHIJ",
             signing_identity="",
         )
+
+
+def test_native_helper_rejects_extra_entitlement_after_ad_hoc_resign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Runtime verification rejects privilege outside the canonical plist."""
+    helper = tmp_path / "tobkiri-packvm-vz-helper"
+    helper.write_bytes(b"fixture")
+    digest = _digest(b"helper-code")
+    identity = MacOSVZHelperIdentity(
+        binary_digest=digest,
+        bundle_id="dev.tobkiri.launcher.packvm-vz-helper",
+        team_id="",
+        signing_identity="",
+    )
+    entitlements = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b"<plist><dict><key>com.apple.security.virtualization</key><true/>"
+        b"<key>com.apple.security.get-task-allow</key><true/></dict></plist>"
+    ).decode("utf-8")
+
+    monkeypatch.setattr(
+        macos_vz_supervisor,
+        "_secure_macho_code_digest",
+        lambda _path: ((1, 2), digest),
+    )
+    monkeypatch.setattr(macos_vz_supervisor.host_platform, "system", lambda: "Darwin")
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        if "--display" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="",
+                stderr=(
+                    "Identifier=dev.tobkiri.launcher.packvm-vz-helper\n"
+                    "Signature=adhoc\n" + entitlements
+                ),
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(macos_vz_supervisor.subprocess, "run", run)
+    verified, error = verify_macos_vz_helper_identity(helper, identity)
+    assert verified is False
+    assert error == "macOS VZ native helper entitlements are not exact"
 
 
 class _Verifier:

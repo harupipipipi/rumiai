@@ -479,9 +479,8 @@ verify_packvm_helper_signature() {
     }
   fi
   codesign -d --entitlements :- "$helper_path" 2>/dev/null \
-    | plutil -extract 'com\.apple\.security\.virtualization' raw -o - - \
-    | grep -qx true || {
-      printf '%s\n' 'PackVM VZ helper lacks the virtualization entitlement' >&2
+    | run_formal_python "$script_dir/verify_packvm_vz_entitlements.py" || {
+      printf '%s\n' 'PackVM VZ helper entitlements are not exact' >&2
       return 1
     }
 }
