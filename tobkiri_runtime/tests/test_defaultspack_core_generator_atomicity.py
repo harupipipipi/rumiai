@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,16 +12,15 @@ from types import ModuleType
 
 import pytest
 
+from scripts.profile_compatibility_provenance import validate_compatibility_profile
+from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_protocol.validation import validate_document
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
 GENERATOR = ROOT / "scripts" / "generate_defaultspack_v4_bundle.py"
 SOURCE_COMMIT = "f297890d29194ed5fb256a2d8351f00472c3d46d"
-PROFILE_RELEASE_ARTIFACTS = {
-    "defaults.profile.intent.v1.json",
-    "defaults.profile.lock.v5.json",
-    "defaults.release.provenance.json",
-}
 
 
 def _load_generator() -> ModuleType:
@@ -34,8 +35,62 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.relative_to(root).as_posix() not in PROFILE_RELEASE_ARTIFACTS
+        if path.is_file()
     }
+
+
+def _sha256(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _provenance_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def _assert_complete_profile_release(bundle: Path) -> None:
+    """Assert the immutable Profile closure that canonical publication owns."""
+
+    profile_path = bundle / "defaults.profile.v4.json"
+    lock_path = bundle / "defaults.profile.lock.v5.json"
+    provenance_path = bundle / "defaults.release.provenance.json"
+    profile_raw = profile_path.read_bytes()
+    lock_raw = lock_path.read_bytes()
+    profile = validate_document(profile_raw, "profile")
+    lock = validate_document(lock_raw, "profile_artifact_lock")
+    provenance = validate_document(
+        provenance_path.read_bytes(),
+        "profile_release_provenance",
+    )
+    validate_compatibility_profile(profile)
+
+    bundle_raw = (bundle / "bundle.lock.json").read_bytes()
+    bundle_lock = json.loads(bundle_raw)
+    profile_entry = next(
+        item
+        for item in bundle_lock["entries"]
+        if item["path"] == "defaults.profile.v4.json"
+    )
+    assert profile_entry["digest"] == _sha256(profile_raw)
+    assert lock["profile_revision"] == canonical_digest(profile)
+    assert lock["bundle_digest"] == _sha256(bundle_raw)
+    assert provenance["release_digest"] == canonical_digest(
+        {key: value for key, value in provenance.items() if key != "release_digest"}
+    )
+    assert provenance["profile_revision"] == lock["profile_revision"]
+    assert provenance["catalog"]["bundle_digest"] == lock["bundle_digest"]
+    assert {item["path"]: item["digest"] for item in provenance["outputs"]} == {
+        _provenance_path(profile_path): _sha256(profile_raw),
+        _provenance_path(lock_path): _sha256(lock_raw),
+    }
+    for item in provenance["source_inputs"]:
+        source = Path(item["path"])
+        if not source.is_absolute():
+            source = ROOT / source
+        assert source.is_file()
+        assert _sha256(source.read_bytes()) == item["digest"]
 
 
 def test_core_generator_transaction_rolls_back_every_output(
@@ -62,11 +117,39 @@ def test_core_generator_transaction_rolls_back_every_output(
 def test_checked_in_bundle_matches_canonical_render() -> None:
     generator = _load_generator()
     rendered = generator._render()
+    rendered.update(
+        generator._render_profile_release(
+            generator.BUNDLE,
+            source_bundle_root=generator.BUNDLE,
+        )
+    )
     expected = {
         path.relative_to(generator.BUNDLE).as_posix(): raw for path, raw in rendered.items()
     }
+    expected["defaults.profile.intent.v1.json"] = (
+        generator.BUNDLE / "defaults.profile.intent.v1.json"
+    ).read_bytes()
 
     assert _snapshot(generator.BUNDLE) == expected
+
+
+def test_core_generator_publishes_complete_profile_release_closure(
+    tmp_path: Path,
+) -> None:
+    """Refresh Profile, lock, and release provenance together on publication."""
+
+    generator = _load_generator()
+    rendered = generator._render(SOURCE_COMMIT)
+    copied = tmp_path / "v4"
+    shutil.copytree(BUNDLE, copied)
+    staged_render = {
+        copied / path.relative_to(BUNDLE): raw for path, raw in rendered.items()
+    }
+    generator.BUNDLE = copied
+
+    generator._publish(staged_render)
+
+    _assert_complete_profile_release(copied)
 
 
 def test_core_generator_transaction_rejects_destination_symlink(

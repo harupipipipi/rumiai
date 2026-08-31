@@ -67,3 +67,14 @@ When the older defaultspack bundle generator is needed, run it before this
 Profile compiler. The final `--check` is authoritative for Profile artifacts;
 this ordering prevents the compatibility generator from becoming a source of
 truth again.
+
+## Packaged bundles
+
+`defaults.profile.intent.v1.json`, `defaults.profile.lock.v5.json`, and
+`defaults.release.provenance.json` are source-checkout artifacts. The packaged
+bundle generator removes all three from its staged output before publication:
+they describe the source release and must not claim to describe a bundle whose
+Shell and Pack artifacts were rewritten for one platform. A packaged bundle
+retains `defaults.profile.v4.json` and `bundle.lock.json`; the latter is
+rewritten after the compatibility projection so its Profile entry remains
+byte-exact. Runtime consumers must not rely on the excluded source artifacts.

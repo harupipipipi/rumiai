@@ -573,6 +573,21 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
     profile = json.loads((bundle / "defaults.profile.v4.json").read_text())
     assert profile["provenance"]["normative"] is False
     validate_compatibility_profile(profile)
+    for companion in (
+        "defaults.profile.intent.v1.json",
+        "defaults.profile.lock.v5.json",
+        "defaults.release.provenance.json",
+    ):
+        assert not (bundle / companion).exists()
+    bundle_lock = json.loads((bundle / "bundle.lock.json").read_text())
+    profile_entry = next(
+        item
+        for item in bundle_lock["entries"]
+        if item["path"] == "defaults.profile.v4.json"
+    )
+    assert profile_entry["digest"] == "sha256:" + hashlib.sha256(
+        (bundle / "defaults.profile.v4.json").read_bytes()
+    ).hexdigest()
     assert profile["provenance"]["repository_tree"] == repository_tree_digest(
         ROOT,
         [

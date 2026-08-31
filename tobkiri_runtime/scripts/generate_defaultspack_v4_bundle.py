@@ -37,6 +37,7 @@ from tobkiri_protocol.provenance import (  # noqa: E402
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
+from scripts import generate_profile_artifacts as profile_artifact_generator  # noqa: E402
 from scripts.profile_compatibility_provenance import (  # noqa: E402
     validate_compatibility_profile,
 )
@@ -118,6 +119,23 @@ PROFILE_ARTIFACT_COMPANIONS = (
     Path("defaults.profile.lock.v5.json"),
     Path("defaults.release.provenance.json"),
 )
+
+
+def _render_profile_release(
+    bundle_root: Path,
+    *,
+    source_bundle_root: Path,
+) -> dict[Path, bytes]:
+    """Render the complete Profile source-release closure for one bundle tree."""
+
+    return profile_artifact_generator.render(
+        bundle_root=bundle_root,
+        intent_path=bundle_root / "defaults.profile.intent.v1.json",
+        compatibility_path=bundle_root / "defaults.profile.v4.json",
+        lock_path=bundle_root / "defaults.profile.lock.v5.json",
+        provenance_path=bundle_root / "defaults.release.provenance.json",
+        source_bundle_root=source_bundle_root,
+    )
 
 
 def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
@@ -873,6 +891,20 @@ def _publish(
             target = stage / path.relative_to(BUNDLE)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(raw)
+        profile_release = _render_profile_release(
+            stage,
+            source_bundle_root=BUNDLE,
+        )
+        for path, raw in sorted(
+            profile_release.items(), key=lambda item: item[0].as_posix()
+        ):
+            path.write_bytes(raw)
+        profile_artifact_generator._validate_staged_release(
+            stage,
+            stage,
+            profile_release,
+            source_bundle_root=BUNDLE,
+        )
         _validate_catalog(BundledCatalog.load(stage))
         if fault is not None:
             fault("before_publish")
@@ -911,8 +943,10 @@ def main() -> int:
     parser.add_argument("--source-commit")
     args = parser.parse_args()
     rendered = _render(args.source_commit)
+    profile_release = _render_profile_release(BUNDLE, source_bundle_root=BUNDLE)
+    expected = {**rendered, **profile_release}
     stale = [
-        path for path, raw in rendered.items() if not path.exists() or path.read_bytes() != raw
+        path for path, raw in expected.items() if not path.exists() or path.read_bytes() != raw
     ]
     if args.check:
         if stale:

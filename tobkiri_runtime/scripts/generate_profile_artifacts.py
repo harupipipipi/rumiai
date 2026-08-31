@@ -114,9 +114,19 @@ def _require_output_layout(bundle_root: Path, outputs: tuple[Path, ...]) -> None
 class ProfileCatalog:
     """Digest-verified bundle inputs used by the generic Profile compiler."""
 
-    def __init__(self, bundle_root: Path, compatibility_path: Path) -> None:
+    def __init__(
+        self,
+        bundle_root: Path,
+        compatibility_path: Path,
+        *,
+        source_bundle_root: Path | None = None,
+    ) -> None:
         _reject_symlink_components(bundle_root, "bundle root")
         self.root = bundle_root.resolve(strict=True)
+        self.source_bundle_root = _absolute(source_bundle_root or bundle_root)
+        _reject_symlink_components(self.source_bundle_root, "source bundle root")
+        if not self.source_bundle_root.is_dir():
+            raise ValueError("source bundle root must be a real directory")
         _reject_symlink_components(compatibility_path, "compatibility Profile")
         self.compatibility_path = _absolute(compatibility_path)
         self.lock_path = self.root / "bundle.lock.json"
@@ -144,6 +154,16 @@ class ProfileCatalog:
         for local_input in LOCAL_INPUTS:
             self.input_digests[_relative(local_input)] = _sha256(local_input.read_bytes())
 
+    def provenance_path(self, path: Path) -> str:
+        """Return a stable source path for a staged or source bundle member."""
+
+        candidate = _absolute(path)
+        try:
+            relative = candidate.relative_to(self.root)
+        except ValueError:
+            return _relative(candidate)
+        return _relative(self.source_bundle_root / relative)
+
     def _load_entry(self, entry: object, seen: set[str]) -> None:
         if not isinstance(entry, dict) or set(entry) != {"path", "kind", "digest"}:
             raise ValueError("bundle lock entry has invalid fields")
@@ -167,7 +187,7 @@ class ProfileCatalog:
         raw = path.read_bytes()
         if _sha256(raw) != entry["digest"]:
             raise ValueError(f"bundle input digest changed: {relative}")
-        self.input_digests[_relative(path)] = _sha256(raw)
+        self.input_digests[self.provenance_path(path)] = _sha256(raw)
         if kind in {"pack", "base", "shell", "executable_catalog"}:
             document = validate_document(raw, kind)
             if kind == "pack":
@@ -376,7 +396,7 @@ def _compile_profile(
     provenance = compatibility_profile_provenance(
         root=ROOT,
         profile=profile,
-        source_path=_relative(compatibility_path),
+        source_path=catalog.provenance_path(compatibility_path),
         generator=GENERATOR_NAME,
         generator_version=GENERATOR_VERSION,
         generator_path=Path(__file__),
@@ -527,7 +547,7 @@ def _compile_release_provenance(
     projection_inputs: Mapping[str, str],
 ) -> dict[str, Any]:
     inputs = dict(catalog.input_digests)
-    inputs[_relative(intent_path)] = _sha256(intent_raw)
+    inputs[catalog.provenance_path(intent_path)] = _sha256(intent_raw)
     inputs.update(projection_inputs)
     document = {
         "schema": "io.tobkiri.profile-release-provenance.v1",
@@ -542,14 +562,20 @@ def _compile_release_provenance(
             "digest": _sha256(Path(__file__).read_bytes()),
         },
         "catalog": {
-            "bundle_lock_path": _relative(catalog.lock_path),
+            "bundle_lock_path": catalog.provenance_path(catalog.lock_path),
             "bundle_digest": lock["bundle_digest"],
             "catalog_revision": lock["catalog_revision"],
             "closure_digest": lock["closure_digest"],
         },
         "outputs": [
-            {"path": _relative(compatibility_path), "digest": _sha256(compatibility_raw)},
-            {"path": _relative(lock_path), "digest": _sha256(lock_raw)},
+            {
+                "path": catalog.provenance_path(compatibility_path),
+                "digest": _sha256(compatibility_raw),
+            },
+            {
+                "path": catalog.provenance_path(lock_path),
+                "digest": _sha256(lock_raw),
+            },
         ],
         "release_digest": _DIGEST_PREFIX + "0" * 64,
     }
@@ -566,15 +592,24 @@ def render(
     compatibility_path: Path,
     lock_path: Path,
     provenance_path: Path,
+    source_bundle_root: Path | None = None,
 ) -> dict[Path, bytes]:
-    """Render one Named Profile release without reading generated Profile bytes."""
+    """Render one Named Profile release without reading generated Profile bytes.
+
+    ``source_bundle_root`` projects paths in a temporary staged bundle back to
+    its stable source-bundle paths during atomic publication.
+    """
 
     outputs = (compatibility_path, lock_path, provenance_path, bundle_root / "bundle.lock.json")
     _require_output_layout(bundle_root, outputs)
     _reject_symlink_components(intent_path, "Profile intent")
     if not _absolute(intent_path).is_file():
         raise ValueError("Profile intent must be a regular file")
-    catalog = ProfileCatalog(bundle_root, compatibility_path)
+    catalog = ProfileCatalog(
+        bundle_root,
+        compatibility_path,
+        source_bundle_root=source_bundle_root,
+    )
     intent_raw = intent_path.read_bytes()
     intent = validate_document(intent_raw, "profile_intent")
     profile, selected, _, pins, projection_inputs = _compile_profile(
@@ -652,11 +687,23 @@ def _stage_path(source: Path, source_root: Path, stage: Path) -> Path:
     return stage / _absolute(source).relative_to(source_root)
 
 
-def _bound_input_path(value: str, source_root: Path, stage: Path) -> Path:
+def _bound_input_path(
+    value: str,
+    source_root: Path,
+    stage: Path,
+    *,
+    source_bundle_root: Path | None = None,
+) -> Path:
     candidate = Path(value)
     if not candidate.is_absolute():
         candidate = ROOT / candidate
     candidate = _absolute(candidate)
+    if source_bundle_root is not None:
+        projected_root = _absolute(source_bundle_root)
+        try:
+            return stage / candidate.relative_to(projected_root)
+        except ValueError:
+            pass
     try:
         return stage / candidate.relative_to(source_root)
     except ValueError:
@@ -667,6 +714,8 @@ def _validate_staged_release(
     stage: Path,
     source_root: Path,
     rendered: Mapping[Path, bytes],
+    *,
+    source_bundle_root: Path | None = None,
 ) -> None:
     """Revalidate a complete immutable generation immediately before exchange."""
 
@@ -704,10 +753,14 @@ def _validate_staged_release(
             )
     if set(documents) != {"profile", "lock", "provenance"}:
         raise ValueError("staged Profile release set is incomplete")
-    profile_source, profile_path, profile_raw, profile = documents["profile"]
+    _, profile_path, profile_raw, profile = documents["profile"]
     lock_source, _, lock_raw, lock = documents["lock"]
     _, _, _, provenance = documents["provenance"]
-    catalog = ProfileCatalog(stage, profile_path)
+    catalog = ProfileCatalog(
+        stage,
+        profile_path,
+        source_bundle_root=source_bundle_root,
+    )
     if catalog.bundle_lock_with(profile_raw) != catalog.lock:
         raise ValueError("staged compatibility Profile bundle digest is stale")
     if lock["profile_revision"] != canonical_digest(profile):
@@ -731,13 +784,19 @@ def _validate_staged_release(
     ):
         raise ValueError("staged Profile release digest is stale")
     for item in provenance["source_inputs"]:
-        path = _bound_input_path(item["path"], source_root, stage)
+        path = _bound_input_path(
+            item["path"],
+            source_root,
+            stage,
+            source_bundle_root=source_bundle_root,
+        )
         _reject_symlink_components(path, "staged release input")
         if not path.is_file() or _sha256(path.read_bytes()) != item["digest"]:
             raise ValueError(f"staged release input changed: {item['path']}")
+    staged_lock_path = _stage_path(lock_source, source_root, stage)
     expected_outputs = {
-        _relative(profile_source): _sha256(profile_raw),
-        _relative(lock_source): _sha256(lock_raw),
+        catalog.provenance_path(profile_path): _sha256(profile_raw),
+        catalog.provenance_path(staged_lock_path): _sha256(lock_raw),
     }
     actual_outputs = {item["path"]: item["digest"] for item in provenance["outputs"]}
     if actual_outputs != expected_outputs:
@@ -774,7 +833,12 @@ def _publish(
         if fault is not None:
             fault("before_validation", stage)
             fault("before_exchange", stage)
-        _validate_staged_release(stage, root, rendered)
+        _validate_staged_release(
+            stage,
+            root,
+            rendered,
+            source_bundle_root=root,
+        )
         for directory in sorted(
             (item for item in stage.rglob("*") if item.is_dir()),
             key=lambda item: len(item.parts),
