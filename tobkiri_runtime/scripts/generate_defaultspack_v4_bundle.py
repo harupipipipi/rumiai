@@ -37,7 +37,6 @@ from tobkiri_protocol.provenance import (  # noqa: E402
 )
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
-from scripts import generate_profile_artifacts as profile_artifact_generator  # noqa: E402
 from scripts.profile_compatibility_provenance import (  # noqa: E402
     validate_compatibility_profile,
 )
@@ -127,6 +126,8 @@ def _render_profile_release(
     source_bundle_root: Path,
 ) -> dict[Path, bytes]:
     """Render the complete Profile source-release closure for one bundle tree."""
+
+    from scripts import generate_profile_artifacts as profile_artifact_generator
 
     return profile_artifact_generator.render(
         bundle_root=bundle_root,
@@ -858,6 +859,8 @@ def _publish(
     fault: Any | None = None,
 ) -> None:
     """Validate and publish the complete bundle as one rollback-safe transaction."""
+
+    from scripts import generate_profile_artifacts as profile_artifact_generator
 
     if BUNDLE.is_symlink() or not BUNDLE.is_dir():
         raise ValueError("defaultspack v4 bundle root must be a real directory")

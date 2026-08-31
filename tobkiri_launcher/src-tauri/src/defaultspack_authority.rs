@@ -3166,19 +3166,35 @@ mod tests {
 
     #[test]
     fn canonical_bundle_executable_catalogs_pass_rust_verifier() {
-        let bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tobkiri_runtime/ecosystem/defaultspack/v4")
-            .canonicalize()
-            .unwrap();
+        let source_bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tobkiri_runtime/ecosystem/defaultspack/v4");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-canonical-packaged-bundle-{}-{unique}",
+            std::process::id()
+        ));
+        let bundle = root.join("v4");
+        copy_tree(&source_bundle, &bundle);
+        for relative in [
+            "defaults.profile.intent.v1.json",
+            "defaults.profile.lock.v5.json",
+            "defaults.release.provenance.json",
+        ] {
+            fs::remove_file(bundle.join(relative)).unwrap();
+        }
         let verified = verify_bundle_lock(&bundle).unwrap();
-        assert_eq!(verified.sidecar_digests.len(), 63);
-        assert_eq!(verified.authority_digests.len(), 72);
+        assert_eq!(verified.sidecar_digests.len(), 64);
+        assert_eq!(verified.authority_digests.len(), 73);
         assert!(verified
             .sidecar_digests
             .contains_key("packs/defaultspack.executables.v4.json"));
         assert!(!verified
             .authority_digests
             .contains_key("packs/defaultspack.executables.v4.json"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
