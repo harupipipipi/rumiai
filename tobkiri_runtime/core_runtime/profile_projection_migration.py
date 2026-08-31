@@ -212,7 +212,9 @@ def rollback_pack_control_envelope(
 
     result = copy.deepcopy(dict(envelope))
     migrations = result.get("migrations")
-    receipt = migrations.get(MIGRATION_ID) if isinstance(migrations, Mapping) else None
+    if not isinstance(migrations, Mapping):
+        raise ProfileProjectionMigrationError("migration receipt is unavailable")
+    receipt = migrations.get(MIGRATION_ID)
     if not isinstance(receipt, Mapping):
         raise ProfileProjectionMigrationError("migration receipt is unavailable")
     preimage = receipt.get("preimage")

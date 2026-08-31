@@ -1544,20 +1544,22 @@ class MacOSVZProvisioner:
             team_id = ""
             authority = ""
         elif signing_mode == "developer-id":
-            team_id = signing.get("team_id")
-            authority = signing.get("authority")
+            candidate_team_id = signing.get("team_id")
+            candidate_authority = signing.get("authority")
             if (
-                not isinstance(team_id, str)
-                or not isinstance(authority, str)
-                or len(team_id) != 10
-                or not team_id.isascii()
-                or not team_id.isalnum()
-                or team_id != team_id.upper()
-                or not authority.startswith("Developer ID Application: ")
-                or not authority.endswith(f" ({team_id})")
-                or len(authority) > 512
+                not isinstance(candidate_team_id, str)
+                or not isinstance(candidate_authority, str)
+                or len(candidate_team_id) != 10
+                or not candidate_team_id.isascii()
+                or not candidate_team_id.isalnum()
+                or candidate_team_id != candidate_team_id.upper()
+                or not candidate_authority.startswith("Developer ID Application: ")
+                or not candidate_authority.endswith(f" ({candidate_team_id})")
+                or len(candidate_authority) > 512
             ):
                 raise ValueError("packaged macOS VZ helper production identity is invalid")
+            team_id = candidate_team_id
+            authority = candidate_authority
         else:
             raise ValueError("packaged macOS VZ helper signing mode is invalid")
         binding = self._bundle_binding
