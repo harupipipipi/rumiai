@@ -19,6 +19,9 @@ VIEWER_BUILD_WORKFLOWS = (
     ROOT / ".github" / "workflows" / "desktop-installers.yml",
     ROOT / ".github" / "workflows" / "release.yml",
 )
+MACOS_UNSIGNED_DISTRIBUTION_DOC = (
+    ROOT / "tobkiri_runtime" / "docs" / "macos-unsigned-distribution.md"
+)
 PLATFORM_TARGETS = {
     "windows": ["nsis"],
     "macos": ["dmg"],
@@ -71,6 +74,25 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
         assert "cargo tauri build" in contents
         assert "Prepare bundled Rumi runtime" not in contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in contents
+
+
+def test_macos_release_is_explicitly_unsigned_and_documents_constraints():
+    for workflow in VIEWER_BUILD_WORKFLOWS:
+        contents = workflow.read_text(encoding="utf-8")
+        assert contents.count('signing_args: "--no-sign"') == 2
+        assert "${{ matrix.signing_args }}" in contents
+
+    documentation = MACOS_UNSIGNED_DISTRIBUTION_DOC.read_text(encoding="utf-8")
+    for required_term in (
+        "unsigned",
+        "ad-hoc",
+        "Developer ID",
+        "Gatekeeper",
+        "quarantine",
+        "TCC",
+        "dev.rumiai.app",
+    ):
+        assert required_term in documentation
 
 
 def test_dev_uv_version_matches_release_bundle_pin():

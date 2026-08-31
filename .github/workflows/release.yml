@@ -20,12 +20,16 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
+            signing_args: "--no-sign"
           - os: macos-15-intel
             target: x86_64-apple-darwin
+            signing_args: "--no-sign"
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            signing_args: ""
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            signing_args: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -111,7 +115,7 @@ jobs:
 
       - name: Build with cargo tauri
         working-directory: tobkiri_launcher
-        run: cargo tauri build --target ${{ matrix.target }} --ci
+        run: cargo tauri build --target ${{ matrix.target }} --ci ${{ matrix.signing_args }}
 
       - name: Upload release artifacts
         uses: softprops/action-gh-release@v2
