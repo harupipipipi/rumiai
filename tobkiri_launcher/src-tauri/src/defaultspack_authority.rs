@@ -3004,8 +3004,42 @@ mod tests {
             serde_json::to_vec(&catalog).unwrap(),
         )
         .unwrap();
+        let profile: Value =
+            serde_json::from_slice(&fs::read(bundle_root.join(PROFILE_PATH)).unwrap()).unwrap();
+        assert_eq!(
+            value_str(&profile, "/provenance/schema"),
+            Some("io.tobkiri.provenance.v1"),
+            "compatibility Profile must retain its v1 provenance schema"
+        );
+        assert_eq!(
+            value_str(&profile, "/provenance/repository_commit"),
+            Some("working-tree"),
+            "compatibility Profile must remain non-release provenance"
+        );
+        assert_eq!(
+            profile
+                .pointer("/provenance/normative")
+                .and_then(Value::as_bool),
+            Some(false),
+            "compatibility Profile provenance must remain non-authoritative"
+        );
+        let mut compatibility_payload = profile.clone();
+        assert!(
+            compatibility_payload
+                .as_object_mut()
+                .unwrap()
+                .remove("provenance")
+                .is_some(),
+            "compatibility Profile must contain provenance"
+        );
+        let expected_source_digest = canonical_value_digest(&compatibility_payload).unwrap();
+        assert_eq!(
+            value_str(&profile, "/provenance/source_digest"),
+            Some(expected_source_digest.as_str()),
+            "compatibility Profile provenance source digest must bind its payload"
+        );
+
         for relative in [
-            PROFILE_PATH,
             "shell.tauri.default.shell.v1.json",
             SHELL_PACK_PATH,
             RUNTIME_PACK_PATH,
@@ -3016,6 +3050,13 @@ mod tests {
                 value_str(&document, "/provenance/repository_commit"),
                 Some(source_revision),
                 "packaged fixture must retain its isolated release provenance"
+            );
+            assert_eq!(
+                document
+                    .pointer("/provenance/normative")
+                    .and_then(Value::as_bool),
+                Some(true),
+                "normative generated artifact must retain authoritative provenance: {relative}"
             );
         }
     }
@@ -3185,7 +3226,8 @@ mod tests {
         ] {
             fs::remove_file(bundle.join(relative)).unwrap();
         }
-        let verified = verify_bundle_lock(&bundle).unwrap();
+        let canonical_bundle = bundle.canonicalize().unwrap();
+        let verified = verify_bundle_lock(&canonical_bundle).unwrap();
         assert_eq!(verified.sidecar_digests.len(), 64);
         assert_eq!(verified.authority_digests.len(), 73);
         assert!(verified
