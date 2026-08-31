@@ -20,8 +20,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_communication_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_communication_capability/ecosystem.json",
+          "sha256": "8cd8fc0d0909cc3a573842f55ac595ece56790f704a0d3f4ad8785742af42e2d"
+        }
       ]
     },
     {
@@ -39,8 +44,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_control_panel/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_control_panel/ecosystem.json",
+          "sha256": "01f91fa276d8adb944090af7e5d6eeec813816e9fe7fe1aec0ada040c59b4a38"
+        }
       ]
     },
     {
@@ -58,8 +68,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_desktop_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_desktop_capability/ecosystem.json",
+          "sha256": "a3c2e183c356f1184f0f87ba5ef198c960efe94c38a236e262b4256ca73c25fb"
+        }
       ]
     },
     {
@@ -77,8 +92,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_docker_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_docker_capability/ecosystem.json",
+          "sha256": "c938b425874dea1c2ef771c42014a8d74965148202ffc7e2d4f9d89a63e8d19e"
+        }
       ]
     },
     {
@@ -96,8 +116,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_flow_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_flow_capability/ecosystem.json",
+          "sha256": "309ed78ebc0ee4cdbcec7ed66707caeb9a151da046b08d3031f001f6f61711af"
+        }
       ]
     },
     {
@@ -115,8 +140,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_secrets_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_secrets_capability/ecosystem.json",
+          "sha256": "2679c4e053f4b6eb6852a2b296ee6cdd25787d92b426391d197b49b549fc06ce"
+        }
       ]
     },
     {
@@ -134,8 +164,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_setup/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_setup/ecosystem.json",
+          "sha256": "44ba42cac8440710c4755701fe9d49f967e52c0940c35f5e5ebcaa4b28e3f8a6"
+        }
       ]
     },
     {
@@ -153,8 +188,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_store_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_store_capability/ecosystem.json",
+          "sha256": "d3b8adee96aae9165c56375371489f4d088810a62cf812cb973c2252e81b109a"
+        }
       ]
     },
     {
@@ -172,8 +212,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_system_api/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_system_api/ecosystem.json",
+          "sha256": "439ee31677b889d6f9267851ab5571c1cda74216d6979b9adb9a12e1c32e38e6"
+        }
       ]
     },
     {
@@ -191,8 +236,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/core_viewer_capability/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/core_viewer_capability/ecosystem.json",
+          "sha256": "4e4d6b00caa5b0fcbdf7af1fc45a6e279194d8705594c0a19c8bc272d387e803"
+        }
       ]
     },
     {
@@ -210,8 +260,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/core_runtime/core_pack/native_runtime_pack/backend/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/core_runtime/core_pack/native_runtime_pack/backend/ecosystem.json",
+          "sha256": "55ac634041f1c246d9bd22b5aafbc61125d6b809b044abb72cbe34d313b0210c"
+        }
       ]
     },
     {
@@ -229,8 +284,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/defaults/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/defaults/ecosystem.json",
+          "sha256": "884a82fd7e943679dfcf6b37255f93ff529147313d88cac5f57efa27130bb804"
+        }
       ]
     },
     {
@@ -248,8 +308,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/defaultspack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/defaultspack/ecosystem.json",
+          "sha256": "a42fcdde993f7941c18de21ef463010fd834187453fa2d29890a8bfe02cb321e"
+        }
       ]
     },
     {
@@ -267,8 +332,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_agent_continuity_pack/ecosystem.json",
+          "sha256": "b4c60a71375f836aeb70aecd10e76427d79aa3965fdfcbbf0ccbf1be20584376"
+        }
       ]
     },
     {
@@ -286,8 +356,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_agent_services_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_agent_services_pack/ecosystem.json",
+          "sha256": "0c50bdf5e1db0563de5fdc254598a05afe691523e0b8fab632b07c5d91d32c61"
+        }
       ]
     },
     {
@@ -305,8 +380,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_agent_workroom_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_agent_workroom_pack/ecosystem.json",
+          "sha256": "ab959501019f79b5c4c4233215dece1efa08171503e2a39cb36735c0399379e6"
+        }
       ]
     },
     {
@@ -324,8 +404,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_agentic_qa_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_agentic_qa_pack/ecosystem.json",
+          "sha256": "0357775878f1aa05b1598e9709f68b4e7ad5f570f8cc86c6e89ecf68a427ed7f"
+        }
       ]
     },
     {
@@ -343,8 +428,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_ambient_trigger_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_ambient_trigger_pack/ecosystem.json",
+          "sha256": "9a6c0daec597ba3d3a3195e8910748ac62fd200fda933bf89099e10d2c31ec81"
+        }
       ]
     },
     {
@@ -362,8 +452,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_api_toolsmith_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_api_toolsmith_pack/ecosystem.json",
+          "sha256": "a53417c61d2d276cac0e2ffd2a7e5782b73351e99539a8a87d51523b03fd4204"
+        }
       ]
     },
     {
@@ -381,8 +476,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_artifact_app_runtime_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_artifact_app_runtime_pack/ecosystem.json",
+          "sha256": "150ad8dbc8916d02cb4a3e0b20839cc3774603e4fd7415b763d40ba6862d8426"
+        }
       ]
     },
     {
@@ -400,8 +500,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_browser_automation_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_browser_automation_pack/ecosystem.json",
+          "sha256": "5abc45ac96c5c707ba36b2fc90df36fd93ab02cbd8340f81eb4d48a4430fe179"
+        }
       ]
     },
     {
@@ -419,8 +524,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_browser_element_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_browser_element_pack/ecosystem.json",
+          "sha256": "80afdf4545f757369caf21f48e93603a366e77059c96ff338793ce86e304c7d4"
+        }
       ]
     },
     {
@@ -438,8 +548,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_browser_form_operator_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_browser_form_operator_pack/ecosystem.json",
+          "sha256": "0b7aed77a403e73f587adca28fc4469256fadf2c3f64c04dce1ff73caeed2285"
+        }
       ]
     },
     {
@@ -457,8 +572,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_browser_session_replay_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_browser_session_replay_pack/ecosystem.json",
+          "sha256": "9d08dfaba61821b9f4e3f0a6d823f30ae233bb0827bccd36edd8c95d1bdabfa4"
+        }
       ]
     },
     {
@@ -476,8 +596,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_business_ops_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_business_ops_pack/ecosystem.json",
+          "sha256": "45d26e8f22513c59bebc76a0dfc76ac5bf0e554e56cc85bf79bf46d454babb44"
+        }
       ]
     },
     {
@@ -495,8 +620,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_code_ide_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_code_ide_pack/ecosystem.json",
+          "sha256": "c41b54786437381b99ae69c255d50ffc965e24cf6e73c91847112ac6752ff616"
+        }
       ]
     },
     {
@@ -514,8 +644,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_code_migration_pack/ecosystem.json",
+          "sha256": "5107677876657c2fb7d9f12debd1fa98006a4a0ee32beb407638279dec3efefb"
+        }
       ]
     },
     {
@@ -533,8 +668,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_computer_control_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_computer_control_pack/ecosystem.json",
+          "sha256": "55f2faee867a0d46364a48faf54672cc90c389c0d9aa9c8677fd028dd540f42d"
+        }
       ]
     },
     {
@@ -552,8 +692,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_connector_gateway_pack/ecosystem.json",
+          "sha256": "5d9e60fc232d1ca65719893fdd0e7f4dbe5ea81478fd92ce6383e0b4b96819c3"
+        }
       ]
     },
     {
@@ -571,8 +716,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_customer_research_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_customer_research_pack/ecosystem.json",
+          "sha256": "d5d64b7f6789f6a792672a4b391925e7e1ca94a9b8fa0f6d0d4bffab8f4a044d"
+        }
       ]
     },
     {
@@ -590,8 +740,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_data_analysis_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_data_analysis_pack/ecosystem.json",
+          "sha256": "e57e82216000331de0d13a4e528cdded320b6cb6eb9bbe2de01b50af9199b972"
+        }
       ]
     },
     {
@@ -609,8 +764,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_default_tools_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_default_tools_pack/ecosystem.json",
+          "sha256": "77a5d68bd579f4498aa7864392dcfca7a3c382623fec3f73cd0fb30a77bd2606"
+        }
       ]
     },
     {
@@ -628,8 +788,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_devops_release_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_devops_release_pack/ecosystem.json",
+          "sha256": "af958304fc33c7f7e06b35e378c0994165b18b7ed6b0bc8de20effb58da3afc0"
+        }
       ]
     },
     {
@@ -647,8 +812,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_document_intelligence_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_document_intelligence_pack/ecosystem.json",
+          "sha256": "56f9987f1bf3e5fe1b52290c5bb4956e93925d694465f35c4a97bd26a51c80d5"
+        }
       ]
     },
     {
@@ -666,8 +836,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_evidence_dossier_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_evidence_dossier_pack/ecosystem.json",
+          "sha256": "3541b9f4275c48c5993ce3b288ef91d14a2c51929937760fc25de8929165f0ad"
+        }
       ]
     },
     {
@@ -685,8 +860,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_experiment_design_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_experiment_design_pack/ecosystem.json",
+          "sha256": "093fed34e236a699e893c9db11007d9c3f54157e4762c63d96a37719fb947863"
+        }
       ]
     },
     {
@@ -704,8 +884,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_frontend_design_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_frontend_design_pack/ecosystem.json",
+          "sha256": "dc71ae8b5e5207dd8bdbc5d7acb8ef9d611a49f549d7251f3a04a2b0a04a2734"
+        }
       ]
     },
     {
@@ -723,8 +908,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_host_capabilities_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_host_capabilities_pack/ecosystem.json",
+          "sha256": "dbe0368ed3b25e66614b68f31e001ff80ffdd6265f1c3f83a8e8aeb7d5f4175b"
+        }
       ]
     },
     {
@@ -742,8 +932,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_knowledge_marketplace_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_knowledge_marketplace_pack/ecosystem.json",
+          "sha256": "881219efe64272f608f6c59e91bd0263e5707354ff6d65d3bc17ae23bb0650f8"
+        }
       ]
     },
     {
@@ -761,8 +956,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_local_agent_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_local_agent_pack/ecosystem.json",
+          "sha256": "197b7947ea61314c5b7c562419244401ba3e9abc56d0572303387ea360c8c1e7"
+        }
       ]
     },
     {
@@ -780,8 +980,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_localization_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_localization_pack/ecosystem.json",
+          "sha256": "c9da909bd5c3b2c8d4eadcdc6e410544bbe92123d5adc3fd2343c96d728e6c5b"
+        }
       ]
     },
     {
@@ -799,8 +1004,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_mcp_gateway_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_mcp_gateway_pack/ecosystem.json",
+          "sha256": "80c218c010e8198c4c48fdc5d039bdaf4eb95eda38040549adfba806732b5c09"
+        }
       ]
     },
     {
@@ -818,8 +1028,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_meeting_intelligence_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_meeting_intelligence_pack/ecosystem.json",
+          "sha256": "ae8f8c4e4ad8001597373ce07030d7c51fd2324a3e46fba22eca6b415a0d3902"
+        }
       ]
     },
     {
@@ -837,8 +1052,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_memory_knowledge_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_memory_knowledge_pack/ecosystem.json",
+          "sha256": "1fece6fccca23b7f9110a58d7cfebe6edf7c8ebf35aa7ad5ceee92f4d3d3dab6"
+        }
       ]
     },
     {
@@ -856,8 +1076,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_model_catalog_pack/ecosystem.json",
+          "sha256": "3dff1e72cf15d17bbcfcb23b99a09d3d5d1cec67d717062e9b7cc1cb6cadc9cf"
+        }
       ]
     },
     {
@@ -875,8 +1100,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_model_evals_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_model_evals_pack/ecosystem.json",
+          "sha256": "b0a5c1b244f4c8cb797b76f7c3487d0a88f6a200de3aebe831ee7d4c1b6cd82f"
+        }
       ]
     },
     {
@@ -894,8 +1124,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_multimodal_media_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_multimodal_media_pack/ecosystem.json",
+          "sha256": "d095538cadc7191c6b08a30311e29e9642d3249529e217f13a3ad4370dca0d0c"
+        }
       ]
     },
     {
@@ -913,8 +1148,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_observability_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_observability_pack/ecosystem.json",
+          "sha256": "5fd55656898ab0714643392a519e2a870f64e974f0144053c240ceb6c7842945"
+        }
       ]
     },
     {
@@ -932,8 +1172,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_office_authoring_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_office_authoring_pack/ecosystem.json",
+          "sha256": "d5b59f0dd0dbaefcbe3d1da208b34a4b664b7f9ebe0d04a7d1046bb2f933455a"
+        }
       ]
     },
     {
@@ -951,8 +1196,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_omnichannel_agent_inbox_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_omnichannel_agent_inbox_pack/ecosystem.json",
+          "sha256": "d1bb554e98c3553f3bf3a76d534dc2d81598737dd2b6c181c2b7f6df85acc182"
+        }
       ]
     },
     {
@@ -970,8 +1220,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_operations_company_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_operations_company_pack/ecosystem.json",
+          "sha256": "96c63a562dbb0932a3834709bb38fece0eca6a1da8245e505c67a73607ccfa6c"
+        }
       ]
     },
     {
@@ -989,8 +1244,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_pack_suite_pack/ecosystem.json",
+          "sha256": "3a3ca90c20e4779272f503463d03a51cb7e13e214d9ee27b97366045b76f7846"
+        }
       ]
     },
     {
@@ -1008,8 +1268,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_prompt_studio_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_prompt_studio_pack/ecosystem.json",
+          "sha256": "0bb8fc9b962bccc8fdaae14773b75ba70c29894fbe8355561625bd28e2c1d973"
+        }
       ]
     },
     {
@@ -1027,8 +1292,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_reference_ui_pack/ecosystem.json",
+          "sha256": "5ca697bbbce2b1ab4a8651653172808189c55c3f0d53c796e40eb016b65f69ce"
+        }
       ]
     },
     {
@@ -1046,8 +1316,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_research_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_research_pack/ecosystem.json",
+          "sha256": "5c419409f3575c60151997673ffca155472a3dfdc8094c3128c44ecf61bb988b"
+        }
       ]
     },
     {
@@ -1065,8 +1340,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_runtime_benchmark_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_runtime_benchmark_pack/ecosystem.json",
+          "sha256": "e01d14d8dbec4ad7b44cfb64011d50edd531484fe9e0c4f547773302f6737f95"
+        }
       ]
     },
     {
@@ -1084,8 +1364,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_sandbox_runtime_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_sandbox_runtime_pack/ecosystem.json",
+          "sha256": "d3b4f9955f95b1f54445a4ee349c809e10581ac207fae4338d116f6d9318f0e5"
+        }
       ]
     },
     {
@@ -1103,8 +1388,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_security_review_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_security_review_pack/ecosystem.json",
+          "sha256": "7bce52df2a4c64848dc4f0872d8e428eea8e499ce9ba925b7dc2822f9b7c0bb8"
+        }
       ]
     },
     {
@@ -1122,8 +1412,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_sop_mining_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_sop_mining_pack/ecosystem.json",
+          "sha256": "349e0111447ba367f6e51b5e6425295c86668ee6fddc4e0fab09d86a8227875a"
+        }
       ]
     },
     {
@@ -1141,8 +1436,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_study_coach_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_study_coach_pack/ecosystem.json",
+          "sha256": "d8d16995751ea7c7f8e570f1d126c8d26510aa178141a6f0b3dccc22313a52ec"
+        }
       ]
     },
     {
@@ -1160,8 +1460,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_subagent_pr_manager_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_subagent_pr_manager_pack/ecosystem.json",
+          "sha256": "24044c17f4a9e52ef5f307adb6ddc38edccd2972b0cb3b88d0df5cd791ef5248"
+        }
       ]
     },
     {
@@ -1179,8 +1484,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_telephony_delegate_pack/ecosystem.json",
+          "sha256": "ac107029729c734e8434c49dcbe7119eff29bf931354e19320f4db124835a2bf"
+        }
       ]
     },
     {
@@ -1198,8 +1508,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_voice_mobile_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_voice_mobile_pack/ecosystem.json",
+          "sha256": "d6ea5409f79ec15b8ceace0bd77fdd3849b548cc550873f954b639c76b711a7f"
+        }
       ]
     },
     {
@@ -1217,8 +1532,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_workflow_scheduler_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_workflow_scheduler_pack/ecosystem.json",
+          "sha256": "c8c86836fcf5fd59b3d11e53d64b528b9a9af118d16f5ca0847d5db1789f1d75"
+        }
       ]
     },
     {
@@ -1236,8 +1556,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/rumi_workspace_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/rumi_workspace_pack/ecosystem.json",
+          "sha256": "80849113b034306ae163dd1e277359ce1f7dade71e238e22d7115f4b83bda8b5"
+        }
       ]
     },
     {
@@ -1255,8 +1580,13 @@
       "disposition": "undecided",
       "deprecated_ids": [],
       "removal_phase": null,
+      "boundary_criteria": [],
+      "assessment_justification": "",
       "evidence": [
-        "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json"
+        {
+          "path": "tobkiri_runtime/ecosystem/search_home_pack/ecosystem.json",
+          "sha256": "a22659a461eced5c53452097526425fc69ac289b78d93258a915246a511aff59"
+        }
       ]
     }
   ]

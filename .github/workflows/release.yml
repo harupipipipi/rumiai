@@ -947,3 +947,9 @@ jobs:
           # after checking the attested inventory and release notes.
           draft: true
           generate_release_notes: true
+          body: |
+            ## Distribution notice
+
+            macOS artifacts are unsigned/ad-hoc. They are not Developer ID-signed
+            or notarized. See `tobkiri_runtime/docs/macos-unsigned-distribution.md`
+            before publishing this draft.
