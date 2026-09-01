@@ -34,6 +34,14 @@ def test_current_core_has_no_application_domain_ownership() -> None:
     assert _scanner().scan_core(REPO_ROOT) == []
 
 
+def test_missing_core_root_fails_closed(tmp_path: Path) -> None:
+    violations = _scanner().scan_core(tmp_path)
+
+    assert [(item.path, item.rule) for item in violations] == [
+        ("tobkiri_runtime/core_runtime", "core_root_missing")
+    ]
+
+
 def test_generic_contract_dispatch_is_allowed(tmp_path: Path) -> None:
     violations = _scan_fixture(
         tmp_path,

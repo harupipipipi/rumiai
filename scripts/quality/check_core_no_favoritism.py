@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Reject application-domain ownership in ``core_runtime``.
+"""Reject selected Python-layer application ownership in ``core_runtime``.
 
-This is a zero-tolerance gate.  Unlike the repository debt scanners it has no
-baseline or exception file: application behavior belongs to a selected Pack,
-while core may expose only provider-neutral execution and security protocols.
+This structural gate has no baseline or exception file for the Python patterns
+it recognizes.  It is intentionally not presented as repository-wide proof:
+non-Python assets, ordinary adapter strings, and non-API route ownership remain
+covered by the broader Pack architecture debt scan until migrated.
 """
 
 from __future__ import annotations
@@ -163,9 +164,18 @@ def _literal_violation(value: str) -> str | None:
 
 
 def scan_core(repo_root: Path) -> list[Violation]:
-    """Return every application-specific construct below core_runtime."""
+    """Return recognized Python structural violations below core_runtime."""
 
     core_root = repo_root / "tobkiri_runtime" / "core_runtime"
+    if not core_root.is_dir():
+        return [
+            Violation(
+                "tobkiri_runtime/core_runtime",
+                1,
+                "core_root_missing",
+                "required core_runtime directory is unavailable",
+            )
+        ]
     violations: set[Violation] = set()
     for path in sorted(core_root.rglob("*.py")):
         relative = path.relative_to(repo_root).as_posix()
@@ -238,9 +248,12 @@ def main() -> int:
     if violations:
         for item in violations:
             print(f"{item.path}:{item.line}: {item.rule}: {item.detail}")
-        print(f"core No Favoritism check failed: {len(violations)} violation(s)")
+        print(
+            "core No Favoritism Python structural check failed: "
+            f"{len(violations)} violation(s)"
+        )
         return 1
-    print("core No Favoritism check passed")
+    print("core No Favoritism Python structural check passed")
     return 0
 
 
