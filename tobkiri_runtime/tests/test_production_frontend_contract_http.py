@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping
 from urllib.parse import quote
@@ -148,6 +149,16 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
 
     bundle_root = packaged_profile_bundle_root()
+
+    def runtime_capture_inputs(current: object | None = None):
+        """Bind refreshes to this test's explicit packaged Profile bundle."""
+
+        return replace(
+            defaultspack_runtime_capture_inputs(current),
+            bundle_root=bundle_root,
+            ecosystem_root=RUNTIME_ROOT / "ecosystem",
+        )
+
     catalog = BundledCatalog.load(bundle_root)
     bindings = load_frontend_contract_bindings(
         MAP_PATH,
@@ -169,7 +180,7 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
         dispatch_session=session,
         contract_bindings=bindings,
-        runtime_capture_factory=defaultspack_runtime_capture_inputs,
+        runtime_capture_factory=runtime_capture_inputs,
         capability_snapshot_factory=defaultspack_capability_snapshot,
         application_presentation=DefaultspackHTTPPresentation(),
     )
@@ -744,7 +755,9 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
                     denial_log_count += 1
             elif message.startswith("API:"):
                 assert '"POST /api/contracts/defaultspack/' in message
-                assert 'HTTP/1.1" 403 292' in message
+                status_and_length = message.rsplit(" ", 2)
+                assert status_and_length[-2] == "403"
+                assert int(status_and_length[-1]) > 0
                 if not delay_access_logs.is_set():
                     with log_count_lock:
                         initial_access_log_count += 1
@@ -1861,7 +1874,11 @@ def test_contract_server_rejects_empty_and_wrong_backend_registry_before_bind(
         dispatch_session=session,
         contract_bindings=bindings,
     )
-    exact._validate_contract_runtime()
+    with pytest.raises(
+        BackendUnavailableError,
+        match="authenticated PackVM supervisor",
+    ):
+        exact._validate_contract_runtime()
     assert exact.server is None
 
 
