@@ -118,6 +118,13 @@ class ProfileRuntimePort(Protocol):
     def catalog_with_packs(self, catalog: Any, packs: Mapping[str, Any]) -> Any:
         """Return a catalog retaining its concrete immutable record type."""
 
+    def catalog_with_profiles(
+        self,
+        catalog: Any,
+        profiles: Mapping[str, Any],
+    ) -> Any:
+        """Return a catalog with Host-selected Profile definitions only."""
+
     def resolve_profile(self, catalog: Any, profile_id: str, **kwargs: Any) -> Any:
         """Resolve an application Profile after Host authority preparation."""
 

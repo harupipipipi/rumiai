@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import pytest
 
@@ -56,3 +57,32 @@ def test_profile_port_rejects_replacement_after_composition(
     with pytest.raises(profile_port.ProfileRuntimeAlreadyConfigured):
         profile_port.register_profile_runtime(object())
     assert profile_port.require_profile_runtime() is first
+
+
+def test_defaultspack_catalog_profile_projection_preserves_pack_inventory() -> None:
+    """Host Profile definitions must never replace the sealed Pack map."""
+
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        DefaultspackProfileRuntime,
+    )
+    from ecosystem.defaultspack.domain.runtime_v4.service import BundledCatalog
+
+    catalog = BundledCatalog(
+        root=Path("bundle"),
+        packs={"pack-a": {"pack": {"id": "pack-a"}}},
+        bases={"base-a": {}},
+        shells={"shell-a": {}},
+        profiles={"old": {"profile_id": "old"}},
+        artifact_root=Path("artifacts"),
+        executable_catalogs={"pack-a": {"pack_id": "pack-a"}},
+    )
+
+    projected = DefaultspackProfileRuntime().catalog_with_profiles(
+        catalog,
+        {"selected": {"profile_id": "selected"}},
+    )
+
+    assert projected.packs is catalog.packs
+    assert projected.profiles == {"selected": {"profile_id": "selected"}}
+    assert projected.artifact_root == catalog.artifact_root
+    assert projected.executable_catalogs is catalog.executable_catalogs

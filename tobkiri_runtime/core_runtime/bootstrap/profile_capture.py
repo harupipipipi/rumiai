@@ -199,7 +199,7 @@ def host_profile_catalog(
         for item in definitions.list_profiles()
         if _is_resolvable_profile_definition(item.profile)
     }
-    return runtime.catalog_with_packs(bundled, profiles)
+    return runtime.catalog_with_profiles(bundled, profiles)
 
 
 def _is_resolvable_profile_definition(profile: Mapping[str, Any]) -> bool:

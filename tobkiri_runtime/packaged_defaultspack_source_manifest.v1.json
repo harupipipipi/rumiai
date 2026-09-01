@@ -89,8 +89,8 @@
     {
       "path": "ecosystem/defaultspack/defaultspack/profile_runtime_composition.py",
       "type": "regular-file",
-      "size": 17090,
-      "sha256": "e7e70e77dbf87755fc00c3b0933353839aafa4aa70a405ff730af25ae36466ca",
+      "size": 17723,
+      "sha256": "f80a95a6f3267ce306117475c1a7ee98303a77d295a3e9d42e1eb98feef2c30b",
       "executable": false
     },
     {

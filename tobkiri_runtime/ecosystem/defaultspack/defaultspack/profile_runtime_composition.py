@@ -366,6 +366,25 @@ class DefaultspackProfileRuntime:
             executable_catalogs=catalog.executable_catalogs,
         )
 
+    def catalog_with_profiles(
+        self,
+        catalog: BundledCatalog,
+        profiles: Mapping[str, Any],
+    ) -> BundledCatalog:
+        """Preserve the sealed Pack inventory while replacing Profile definitions."""
+
+        from ecosystem.defaultspack.domain.runtime_v4.service import BundledCatalog
+
+        return BundledCatalog(
+            root=catalog.root,
+            packs=catalog.packs,
+            bases=catalog.bases,
+            shells=catalog.shells,
+            profiles=dict(profiles),
+            artifact_root=catalog.artifact_root,
+            executable_catalogs=catalog.executable_catalogs,
+        )
+
     def resolve_profile(
         self,
         catalog: BundledCatalog,
