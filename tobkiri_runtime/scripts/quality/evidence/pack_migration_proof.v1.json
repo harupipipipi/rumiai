@@ -11924,7 +11924,7 @@
   "source": {
     "attestation": "none",
     "authority": "evidence-only",
-    "content_digest": "sha256:9128ad8fb1f7b9a5da7c020cd464fffeacfe99e59a718f3a68b3ff4307d1e32d",
+    "content_digest": "sha256:4bea760ef6a06a19c35f72fdb122d708aac4585a12ea850eed09a9a62f6c33d4",
     "feasibility_audit": {
       "semantically_reviewed": {
         "count": 45,
@@ -12142,7 +12142,7 @@
     "freshness_basis": "exact-input-digests-and-deterministic-recomputation",
     "generator_id": "tobkiri.quality.migration-proof-generator",
     "generator_version": "2.1.0",
-    "input_digest": "sha256:184533f4120ab36e66747c50706f798d6b27d9e44f8335b8c28a66bb415bbcfd",
+    "input_digest": "sha256:34025604f9dab788ca51955522cd230a6789de5de27caff69f321b77a9646b23",
     "input_paths": [
       "tobkiri_runtime/core_runtime/profile_definition_store_v4.py",
       "tobkiri_runtime/ecosystem/defaults/artifact-index.v4.json",
@@ -17588,7 +17588,7 @@
         "path": "tobkiri_runtime/ecosystem/tobkiri_workflow_pack/schemas/workflow-result.v4.schema.json"
       },
       {
-        "digest": "sha256:9e2fe4e9eb7ea0a1390f9c1648384acea550540ff3e5bb548f619eb9015e540a",
+        "digest": "sha256:0b8d66e375dbafb936a538a64e4a98e1fc0f2c6b10c1891d8eb37bcf1dc0b071",
         "kind": "hardened-executable-source-registry",
         "path": "tobkiri_runtime/schemas/executable_sources.v1.json"
       },
@@ -17649,7 +17649,7 @@
       "release-verified": 0,
       "semantically-reviewed": 45
     },
-    "observed_head_sha": "82190ea50e9bd5a884b20060c58b7ed794ab8ff1",
+    "observed_head_sha": "625ce17043fa84a06cf84635985e71dd8f611ebb",
     "pack_count": 139,
     "profile_collection_proof": {
       "identity_proof": {

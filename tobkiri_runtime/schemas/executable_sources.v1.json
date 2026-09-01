@@ -10221,7 +10221,7 @@
     "generator": "tobkiri.scripts.generate_executable_source_registry_v1",
     "generator_version": "1.0.0",
     "input_count": 191,
-    "input_digest": "sha256:f64cb3967a6b0f1c5870f3244583a2a45d73c98efe04b84a2fef451c43e9d94b",
+    "input_digest": "sha256:00351d61aa646260b085903f118682fa706ea7173a338d4d4edcf26f08e9554a",
     "input_paths": [
       "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/artifact-manifest.json",
       "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/artifact-manifest.json",
@@ -11087,17 +11087,17 @@
         "path": "tobkiri_runtime/ecosystem/rumi_generic_webhook_connector_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:2141c3f101d7dff7cd9c7c7e55fe8193e2219bd89193e89c7b5ffe3042ae72e7",
+        "digest": "sha256:820e39dea16451a3755522e8ef772b585a685c7da773a42191da2650688aa0f4",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_git_publish_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:f84d0568443f1084c175f54c1e8eef90e7f626cc35deb52a47e047eb84ecf113",
+        "digest": "sha256:7e25d97123fdcf52981bcf2dbf57257e03d5b1b00103854dddaec3d5870ea6af",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:3fd2ae66442d76fdf40b5b2e5e3abd720b167b98a1f6b17fc654f9ed602fba0e",
+        "digest": "sha256:2eedf18c9811f1f89b7d0e8f5a6a8ce485370169ce667d71e562e1d7bc44768a",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/rumi.pack.v3.json"
       },
