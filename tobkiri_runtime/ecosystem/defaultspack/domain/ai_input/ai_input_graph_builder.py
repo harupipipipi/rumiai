@@ -20,7 +20,7 @@ from .ai_input_segments import (
     collect_prompt_segments,
     collect_tool_schema_segments,
 )
-from .profile_workspace import ProfileWorkspaceManager
+from core_runtime.profile_workspace import ProfileWorkspaceManager
 
 
 def build_ai_input_graph_response(

@@ -2031,7 +2031,7 @@ def test_authority_pack_request_display_metadata(tmp_path, monkeypatch):
         principal_id="profile:default__surface:defaultspack__node:pack-review",
         permission_id="pack.approve",
         resource={
-            "kind": "defaultspack.pack_request",
+            "kind": "pack.approval_request",
             "pack_id": "defaultspack",
             "target_pack_id": "samplepack",
             "pack_request_id": "pack_req_1",

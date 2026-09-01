@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import pytest
 
-from core_runtime import defaultspack_host_contract_adapter as adapter
+from ecosystem.rumi_default_tools_pack.domain.tool import host_contract_adapter as adapter
 from core_runtime.bootstrap import default_builtin_grants
 from core_runtime.bounded_process_runner import (
     BoundedProcessResult,

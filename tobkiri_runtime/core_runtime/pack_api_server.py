@@ -12,9 +12,9 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from pathlib import PurePosixPath
 from typing import Any, Callable, Mapping, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -25,10 +25,6 @@ from .api.request_body import RequestBodyMixin
 from .api.setup_handlers import SetupHandlersMixin
 from .api.web_mounts import WebMountMixin
 from .api.web_mounts import WebMountEntry
-from .capability_bindings_v4 import (
-    CapabilityBindingSnapshot,
-    capture_capability_binding_snapshot,
-)
 from .control_reconciliation_v4 import (
     ControlReconciliationCapacityError,
     ControlReconciliationConflictError,
@@ -36,15 +32,17 @@ from .control_reconciliation_v4 import (
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
 )
-from .frontend_contract_routes import (
-    ContractRouteError,
-    FrontendContractBinding,
-    FrontendContractTarget,
+from .global_contracts.http_contract_dispatch import (
+    HTTPCapabilitySnapshot,
+    HTTPContractBinding,
+    HTTPContractRouteError,
+    HTTPContractTarget,
     contract_binding_map,
     is_contract_route_path,
     resolve_contract_route,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tobkiri_host.backends import ExecutionBackend
 from .host_contract import (
     HostContractError,
     capture_host_contract,
@@ -53,8 +51,9 @@ from .host_contract import (
     validate_host_contract,
 )
 from .panel_auth import PanelAuthBinding, PanelAuthManager, get_panel_auth_manager
-from .runtime_surface_v4 import RuntimeSurfaceError, RuntimeSurfaceErrorCode
+from .pack_control_v4 import RuntimeSurfaceFactory
 from .authority.v4_models import AuthorityDenied
+from .authority.v4 import AuthorityStore
 from tobkiri_host.errors import HostCoreError
 
 logger = logging.getLogger(__name__)
@@ -63,58 +62,70 @@ THREAD_JOIN_TIMEOUT_SECONDS = 5
 MAX_CONCURRENT_REQUESTS = 32
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
+
+class HTTPRuntimeErrorCode(str, Enum):
+    """Stable Host error vocabulary for a captured HTTP operation."""
+
+    PROFILE_NOT_ACTIVE = "PROFILE_NOT_ACTIVE"
+    STALE_REVISION = "STALE_REVISION"
+    DIGEST_MISMATCH = "DIGEST_MISMATCH"
+    UNAPPROVED = "UNAPPROVED"
+    TIMEOUT = "TIMEOUT"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    API_FAILURE = "API_FAILURE"
+
 _PUBLIC_ERROR_MESSAGES: Mapping[str, str] = {
-    RuntimeSurfaceErrorCode.INVALID_REQUEST.value: "The request is invalid",
-    RuntimeSurfaceErrorCode.PROFILE_NOT_ACTIVE.value: "The active Profile is unavailable",
-    RuntimeSurfaceErrorCode.STALE_REVISION.value: "The Profile revision is stale",
-    RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value: "The request binding does not match",
-    RuntimeSurfaceErrorCode.UNAPPROVED.value: "Host approval is required",
-    RuntimeSurfaceErrorCode.TIMEOUT.value: "The runtime operation timed out",
-    RuntimeSurfaceErrorCode.API_FAILURE.value: "The runtime operation is unavailable",
+    HTTPRuntimeErrorCode.INVALID_REQUEST.value: "The request is invalid",
+    HTTPRuntimeErrorCode.PROFILE_NOT_ACTIVE.value: "The active Profile is unavailable",
+    HTTPRuntimeErrorCode.STALE_REVISION.value: "The Profile revision is stale",
+    HTTPRuntimeErrorCode.DIGEST_MISMATCH.value: "The request binding does not match",
+    HTTPRuntimeErrorCode.UNAPPROVED.value: "Host approval is required",
+    HTTPRuntimeErrorCode.TIMEOUT.value: "The runtime operation timed out",
+    HTTPRuntimeErrorCode.API_FAILURE.value: "The runtime operation is unavailable",
 }
 
 _PUBLIC_ERROR_STATUS: Mapping[str, int] = {
-    RuntimeSurfaceErrorCode.INVALID_REQUEST.value: 400,
-    RuntimeSurfaceErrorCode.PROFILE_NOT_ACTIVE.value: 409,
-    RuntimeSurfaceErrorCode.STALE_REVISION.value: 409,
-    RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value: 409,
-    RuntimeSurfaceErrorCode.UNAPPROVED.value: 403,
-    RuntimeSurfaceErrorCode.TIMEOUT.value: 504,
-    RuntimeSurfaceErrorCode.API_FAILURE.value: 503,
+    HTTPRuntimeErrorCode.INVALID_REQUEST.value: 400,
+    HTTPRuntimeErrorCode.PROFILE_NOT_ACTIVE.value: 409,
+    HTTPRuntimeErrorCode.STALE_REVISION.value: 409,
+    HTTPRuntimeErrorCode.DIGEST_MISMATCH.value: 409,
+    HTTPRuntimeErrorCode.UNAPPROVED.value: 403,
+    HTTPRuntimeErrorCode.TIMEOUT.value: 504,
+    HTTPRuntimeErrorCode.API_FAILURE.value: 503,
 }
 
 _HOST_CONTRACT_UNSET = object()
 
 _ERROR_CODE_ALIASES: Mapping[str, str] = {
-    "denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
-    "pack_control_denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
-    "pack_control_invalid_request": RuntimeSurfaceErrorCode.INVALID_REQUEST.value,
-    "pack_control_conflict": RuntimeSurfaceErrorCode.STALE_REVISION.value,
-    "pack_control_stale_revision": RuntimeSurfaceErrorCode.STALE_REVISION.value,
-    "pack_control_digest_mismatch": RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value,
-    "pack_control_unapproved": RuntimeSurfaceErrorCode.UNAPPROVED.value,
-    "pack_control_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "pack_control_timeout": RuntimeSurfaceErrorCode.TIMEOUT.value,
-    "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
-    "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "provider_failed": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "audit_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "busy": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "resource_exhausted": RuntimeSurfaceErrorCode.API_FAILURE.value,
-    "host_core_error": RuntimeSurfaceErrorCode.API_FAILURE.value,
+    "denied": HTTPRuntimeErrorCode.UNAPPROVED.value,
+    "pack_control_denied": HTTPRuntimeErrorCode.UNAPPROVED.value,
+    "pack_control_invalid_request": HTTPRuntimeErrorCode.INVALID_REQUEST.value,
+    "pack_control_conflict": HTTPRuntimeErrorCode.STALE_REVISION.value,
+    "pack_control_stale_revision": HTTPRuntimeErrorCode.STALE_REVISION.value,
+    "pack_control_digest_mismatch": HTTPRuntimeErrorCode.DIGEST_MISMATCH.value,
+    "pack_control_unapproved": HTTPRuntimeErrorCode.UNAPPROVED.value,
+    "pack_control_unavailable": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "pack_control_timeout": HTTPRuntimeErrorCode.TIMEOUT.value,
+    "timed_out": HTTPRuntimeErrorCode.TIMEOUT.value,
+    "backend_unavailable": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "provider_failed": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "audit_unavailable": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "busy": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "resource_exhausted": HTTPRuntimeErrorCode.API_FAILURE.value,
+    "host_core_error": HTTPRuntimeErrorCode.API_FAILURE.value,
 }
 
 
 def _public_error_code(value: object) -> str:
     """Return one stable public code without reflecting provider-controlled text."""
 
-    if isinstance(value, RuntimeSurfaceErrorCode):
+    if isinstance(value, HTTPRuntimeErrorCode):
         return value.value
     candidate = str(value or "").strip()
     if candidate in _PUBLIC_ERROR_STATUS:
         return candidate
     return _ERROR_CODE_ALIASES.get(
-        candidate.lower(), RuntimeSurfaceErrorCode.API_FAILURE.value
+        candidate.lower(), HTTPRuntimeErrorCode.API_FAILURE.value
     )
 
 
@@ -123,14 +134,14 @@ def _public_error_result(code: object) -> dict[str, object]:
 
     public_code = _public_error_code(code)
     return {
-        "runtime_surface_api_version": "io.tobkiri.launcher.runtime-surface.v4",
+        "host_operation_api_version": "io.tobkiri.host.operation.v1",
         "state": "error",
         "code": public_code,
         "message": _PUBLIC_ERROR_MESSAGES[public_code],
         "retryable": public_code
         in {
-            RuntimeSurfaceErrorCode.TIMEOUT.value,
-            RuntimeSurfaceErrorCode.API_FAILURE.value,
+            HTTPRuntimeErrorCode.TIMEOUT.value,
+            HTTPRuntimeErrorCode.API_FAILURE.value,
         },
         "write_set": [],
     }
@@ -144,24 +155,27 @@ def _exception_error_code(error: BaseException) -> str:
     host_code: str | None = None
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, RuntimeSurfaceError):
-            return _public_error_code(current.code)
+        captured_code = getattr(current, "code", None)
+        if captured_code is not None:
+            normalized = _public_error_code(captured_code)
+            if normalized != HTTPRuntimeErrorCode.API_FAILURE.value:
+                return normalized
         if isinstance(current, ControlReconciliationConflictError):
-            return RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value
+            return HTTPRuntimeErrorCode.DIGEST_MISMATCH.value
         if isinstance(current, ControlReconciliationUnavailableError):
-            return RuntimeSurfaceErrorCode.API_FAILURE.value
+            return HTTPRuntimeErrorCode.API_FAILURE.value
         if isinstance(current, AuthorityDenied):
             authority_codes = {
-                "authority_denied": RuntimeSurfaceErrorCode.UNAPPROVED.value,
-                "revoked": RuntimeSurfaceErrorCode.UNAPPROVED.value,
-                "stale_epoch": RuntimeSurfaceErrorCode.STALE_REVISION.value,
-                "stale_revision": RuntimeSurfaceErrorCode.STALE_REVISION.value,
-                "digest_mismatch": RuntimeSurfaceErrorCode.DIGEST_MISMATCH.value,
-                "backend_unavailable": RuntimeSurfaceErrorCode.API_FAILURE.value,
-                "timed_out": RuntimeSurfaceErrorCode.TIMEOUT.value,
+                "authority_denied": HTTPRuntimeErrorCode.UNAPPROVED.value,
+                "revoked": HTTPRuntimeErrorCode.UNAPPROVED.value,
+                "stale_epoch": HTTPRuntimeErrorCode.STALE_REVISION.value,
+                "stale_revision": HTTPRuntimeErrorCode.STALE_REVISION.value,
+                "digest_mismatch": HTTPRuntimeErrorCode.DIGEST_MISMATCH.value,
+                "backend_unavailable": HTTPRuntimeErrorCode.API_FAILURE.value,
+                "timed_out": HTTPRuntimeErrorCode.TIMEOUT.value,
             }
             return authority_codes.get(
-                str(current.code), RuntimeSurfaceErrorCode.UNAPPROVED.value
+                str(current.code), HTTPRuntimeErrorCode.UNAPPROVED.value
             )
         if isinstance(current, HostCoreError):
             candidate = str(current.code)
@@ -169,15 +183,15 @@ def _exception_error_code(error: BaseException) -> str:
                 mapped = _ERROR_CODE_ALIASES[candidate]
                 if candidate.startswith("pack_control_"):
                     return mapped
-                if mapped != RuntimeSurfaceErrorCode.API_FAILURE.value:
+                if mapped != HTTPRuntimeErrorCode.API_FAILURE.value:
                     return mapped
                 host_code = mapped
         if isinstance(current, (KeyError, ValueError)):
-            return RuntimeSurfaceErrorCode.INVALID_REQUEST.value
+            return HTTPRuntimeErrorCode.INVALID_REQUEST.value
         current = current.__cause__ or current.__context__
     if host_code is not None:
         return host_code
-    return RuntimeSurfaceErrorCode.API_FAILURE.value
+    return HTTPRuntimeErrorCode.API_FAILURE.value
 
 
 def _result_record_refs(result: Mapping[str, Any]) -> list[Mapping[str, str]]:
@@ -227,27 +241,6 @@ _RETIRED_API_ROOTS = frozenset(
     }
 )
 
-_CONVERSATION_CAPABILITY_TARGET = (
-    "defaults.conversation.complete",
-    "conversation.turn.v1",
-    "complete",
-    "defaultspack.conversation",
-    "defaultspack.conversation",
-)
-
-
-def _is_conversation_capability_target(target: FrontendContractTarget) -> bool:
-    """Return whether a target is the exact host-rendered Conversation binding."""
-
-    return (
-        target.contribution_id,
-        target.contract_id,
-        target.operation_id,
-        target.provider_id,
-        target.function_id,
-    ) == _CONVERSATION_CAPABILITY_TARGET
-
-
 class DispatchSession(Protocol):
     """Captured Broker session exposed to the HTTP adapter."""
 
@@ -291,81 +284,132 @@ class DispatchSession(Protocol):
         """Return the exact captured Authority security epoch."""
 
 
-def _load_production_capture_inputs(
-    active: Any | None = None,
-) -> tuple[Path, Path, Any, tuple[FrontendContractBinding, ...]]:
-    """Load canonical inputs for one production runtime capture."""
+@dataclass(frozen=True)
+class RuntimeCaptureInputs:
+    """App-supplied immutable inputs needed to recapture a HTTP runtime."""
 
-    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+    bundle_root: Path
+    ecosystem_root: Path
+    contract_bindings: tuple[HTTPContractBinding, ...]
+    activation_snapshot_loader: ActivationSnapshotLoader | None = None
+    runtime_surface_factory: RuntimeSurfaceFactory | None = None
+    capability_binding_snapshot_factory: CapabilityBindingSnapshotFactory | None = None
+    capability_binding_selector: CapabilityBindingSelector | None = None
+    packvm_backend_factory: Callable[[], ExecutionBackend | None] | None = None
 
-    from .bootstrap.profile_capture import _bundle_root
-    from .frontend_contract_routes import load_frontend_contract_bindings
 
-    runtime_root = Path(__file__).resolve().parents[1]
-    bundle_root = _bundle_root()
-    catalog = BundledCatalog.load(bundle_root)
-    application_id = ""
-    if active is not None:
-        resolved_plan = getattr(getattr(active, "resolved", None), "plan", None)
-        application = (
-            resolved_plan.get("application")
-            if isinstance(resolved_plan, Mapping)
-            else None
-        )
-        if isinstance(application, Mapping):
-            application_id = str(application.get("pack_id") or "")
-        if not application_id:
-            resolved_profile = getattr(
-                getattr(active, "resolved", None),
-                "profile",
-                None,
-            )
-            if isinstance(resolved_profile, Mapping):
-                application_id = next(
-                    (
-                        str(item["pack_id"])
-                        for item in resolved_profile.get("packs", [])
-                        if isinstance(item, Mapping)
-                        and item.get("role") == "application"
-                    ),
-                    "",
-                )
-    if not application_id:
-        application_ids = sorted(
-            pack_id
-            for pack_id, manifest in catalog.packs.items()
-            if manifest["pack"]["kind"] == "application"
-        )
-        if len(application_ids) != 1:
-            raise RuntimeError(
-                "active Profile Application Pack is unavailable or ambiguous"
-            )
-        application_id = application_ids[0]
-    application = catalog.packs.get(application_id)
-    if application is None:
-        raise RuntimeError("active Profile Application Pack is not in the bundle")
-    map_artifacts = [
-        artifact
-        for artifact in application.get("artifacts", [])
-        if isinstance(artifact, Mapping)
-        and artifact.get("kind") == "asset"
-        and PurePosixPath(str(artifact.get("path") or "")).name
-        == "frontend_contract_map.v4.json"
-    ]
-    if len(map_artifacts) != 1:
-        raise RuntimeError("active Profile Frontend Contract Map is unavailable")
-    map_path = PurePosixPath(str(map_artifacts[0]["path"]))
-    if (
-        map_path.is_absolute()
-        or not map_path.parts
-        or any(part in {"", ".", ".."} for part in map_path.parts)
-    ):
-        raise RuntimeError("active Profile Frontend Contract Map path is unsafe")
-    bindings = load_frontend_contract_bindings(
-        runtime_root / "ecosystem" / "defaultspack" / Path(*map_path.parts),
-        application,
-    )
-    return runtime_root, bundle_root, catalog, bindings
+class ActivationSnapshotLoader(Protocol):
+    """Application verification of an already-selected activation envelope."""
+
+    def __call__(
+        self,
+        *,
+        active: object,
+        workspace: Path,
+        profile_id: str,
+        authority_store: AuthorityStore,
+        catalog: object,
+    ) -> object:
+        """Return the persisted active snapshot for this Profile."""
+
+
+class CapabilityBindingSnapshotFactory(Protocol):
+    """Application serialization of capability capture facts."""
+
+    def __call__(
+        self,
+        binding: object,
+        *,
+        session: object,
+        catalog: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        """Return capability facts for the app surface."""
+
+
+class CapabilityBindingSelector(Protocol):
+    """Application selection of one capability binding from its route map."""
+
+    def __call__(self, bindings: tuple[object, ...]) -> object | None:
+        """Return the capability binding or ``None`` when unavailable."""
+
+
+class RuntimeCaptureFactory(Protocol):
+    """Composition root for application-owned map and artifact selection."""
+
+    def __call__(self, active: object | None = None) -> RuntimeCaptureInputs:
+        """Return the exact app-selected inputs for one capture boundary."""
+
+
+class CapabilitySnapshotFactory(Protocol):
+    """App-owned contribution capture injected into the generic HTTP Host."""
+
+    def __call__(
+        self,
+        binding: HTTPContractBinding,
+        *,
+        session: DispatchSession,
+        catalog: Mapping[str, object],
+    ) -> HTTPCapabilitySnapshot:
+        """Return targets admitted for this exact application capture."""
+
+
+class CapabilitySnapshotReader(Protocol):
+    """Read one captured capability snapshot for a selected HTTP map entry."""
+
+    def __call__(
+        self,
+        binding: HTTPContractBinding,
+        *,
+        catalog: Mapping[str, object] | None = None,
+    ) -> HTTPCapabilitySnapshot:
+        """Return capture-verified static and dynamic targets."""
+
+
+@dataclass(frozen=True)
+class ApplicationHTTPContractRequest:
+    """An application-decoded dynamic request, still subject to Host checks."""
+
+    target: HTTPContractTarget
+    payload: Mapping[str, object]
+
+
+class HTTPApplicationPresentation(Protocol):
+    """Application-owned HTTP payload and result presentation rules."""
+
+    def decode_request(
+        self,
+        binding: HTTPContractBinding,
+        *,
+        body: Mapping[str, object],
+        query: Mapping[str, object],
+        session: DispatchSession,
+        snapshot: HTTPCapabilitySnapshot,
+    ) -> ApplicationHTTPContractRequest | None:
+        """Decode an application-specific multi-target request."""
+
+    def normalize_payload(
+        self,
+        target: HTTPContractTarget,
+        payload: Mapping[str, object],
+        *,
+        session: DispatchSession,
+        workspace_binding_resolver: WorkspaceBindingResolver | None,
+    ) -> Mapping[str, object]:
+        """Apply application-specific payload semantics after Host selection."""
+
+    def requires_operation_ready(self, target: HTTPContractTarget) -> bool:
+        """Return whether this UI target must be backend-ready at bind time."""
+
+    def present_result(
+        self,
+        binding: HTTPContractBinding,
+        result: Mapping[str, object],
+        *,
+        session: DispatchSession | None,
+        routes: Mapping[tuple[str, str], HTTPContractBinding],
+        capability_snapshot: CapabilitySnapshotReader,
+    ) -> Mapping[str, object]:
+        """Apply app UI projection to a Host-sanitized terminal result."""
 
 
 class WorkspaceBindingResolver(Protocol):
@@ -668,7 +712,9 @@ class PackAPIHandler(
     )
     _panel_auth_manager: PanelAuthManager | None = None
     _dispatch_session: DispatchSession | None = None
-    _contract_routes: Mapping[tuple[str, str], FrontendContractBinding] = {}
+    _contract_routes: Mapping[tuple[str, str], HTTPContractBinding] = {}
+    _capability_snapshot_factory: CapabilitySnapshotFactory | None = None
+    _application_presentation: HTTPApplicationPresentation | None = None
     _contract_replay_guard: _RequestReplayGuard | None = None
     _operation_journal: ControlReconciliationStore | None = None
     _runtime_refresh: Callable[[DispatchSession | None], None] | None = None
@@ -690,8 +736,10 @@ class PackAPIHandler(
         dispatch_session: DispatchSession | None,
         app_lifecycle_manager: LifecyclePort | None,
         contract_routes: (
-            Mapping[tuple[str, str], FrontendContractBinding] | None
+            Mapping[tuple[str, str], HTTPContractBinding] | None
         ) = None,
+        capability_snapshot_factory: CapabilitySnapshotFactory | None = None,
+        application_presentation: HTTPApplicationPresentation | None = None,
         replay_guard: _RequestReplayGuard | None = None,
         operation_journal: ControlReconciliationStore | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
@@ -706,6 +754,8 @@ class PackAPIHandler(
         bound_dispatch = dispatch_session
         bound_lifecycle = app_lifecycle_manager
         bound_contract_routes = dict(contract_routes or {})
+        bound_capability_snapshot_factory = capability_snapshot_factory
+        bound_application_presentation = application_presentation
         bound_replay_guard = replay_guard
         bound_operation_journal = operation_journal
         bound_web_mounts = web_mounts
@@ -732,6 +782,12 @@ class PackAPIHandler(
             _dispatch_session = bound_dispatch
             app_lifecycle_manager = bound_lifecycle
             _contract_routes = bound_contract_routes
+            _capability_snapshot_factory = (
+                staticmethod(bound_capability_snapshot_factory)
+                if bound_capability_snapshot_factory is not None
+                else None
+            )
+            _application_presentation = bound_application_presentation
             _contract_replay_guard = bound_replay_guard
             _operation_journal = bound_operation_journal
             _packvm_lifecycle = bound_packvm_lifecycle
@@ -880,7 +936,7 @@ class PackAPIHandler(
 
         del result
 
-    def _send_contract_error(self, error: ContractRouteError) -> None:
+    def _send_contract_error(self, error: HTTPContractRouteError) -> None:
         self._send_response(
             APIResponse(
                 False,
@@ -905,7 +961,7 @@ class PackAPIHandler(
             return False
         try:
             resolved = resolve_contract_route(self, method, self.path)
-        except ContractRouteError as error:
+        except HTTPContractRouteError as error:
             self._discard_request_body()
             self._send_contract_error(error)
             return True
@@ -915,7 +971,7 @@ class PackAPIHandler(
         if route_binding is None:
             self._discard_request_body()
             self._send_contract_error(
-                ContractRouteError(
+                HTTPContractRouteError(
                     "CONTRACT_OPERATION_UNKNOWN",
                     "Unknown frontend contract operation",
                     404,
@@ -952,32 +1008,44 @@ class PackAPIHandler(
                 409,
             )
             return True
-        outer_body: dict[str, object] = {}
+        session = self._dispatch_session
+        if session is None:
+            self._discard_request_body()
+            self._send_response(
+                APIResponse(False, error="Captured v4 dispatch session is unavailable"),
+                503,
+            )
+            return True
         if method.upper() == "GET":
             self._discard_request_body()
             payload: dict[str, object] = dict(resolved.query)
+            target = route_binding.targets[0] if len(route_binding.targets) == 1 else None
         else:
             body = self._parse_object_body()
             if body is None:
                 return True
-            if (
-                len(route_binding.targets) == 1
-                and route_binding.path != "/api/ui/capability/invoke"
-            ):
+            if len(route_binding.targets) == 1:
                 payload = {**resolved.query, **body}
+                target = route_binding.targets[0]
             else:
-                outer_body = body
-                nested = body.get("payload")
-                if not isinstance(nested, dict) or any(
-                    not isinstance(key, str) for key in nested
-                ):
-                    self._send_response(
-                        APIResponse(False, error="Contract payload must be an object"),
-                        400,
+                presentation = self._application_presentation
+                decoded = (
+                    presentation.decode_request(
+                        route_binding,
+                        body=body,
+                        query=resolved.query,
+                        session=session,
+                        snapshot=self._capability_snapshot(route_binding),
                     )
-                    return True
-                payload = {**resolved.query, **nested}
-        target = self._select_contract_target(route_binding, outer_body)
+                    if presentation is not None
+                    else None
+                )
+                if decoded is None:
+                    target = None
+                    payload = {}
+                else:
+                    target = decoded.target
+                    payload = dict(decoded.payload)
         if target is None:
             self._send_response(
                 APIResponse(
@@ -1004,15 +1072,17 @@ class PackAPIHandler(
                 400,
             )
             return True
-        session = self._dispatch_session
-        if session is None:
-            self._send_response(
-                APIResponse(False, error="Captured v4 dispatch session is unavailable"),
-                503,
-            )
-            return True
         try:
-            payload = self._normalize_dynamic_payload(target, payload, session)
+            presentation = self._application_presentation
+            if presentation is not None:
+                payload = dict(
+                    presentation.normalize_payload(
+                        target,
+                        payload,
+                        session=session,
+                        workspace_binding_resolver=self._workspace_binding_resolver,
+                    )
+                )
         except (OSError, ValueError) as error:
             logger.warning("Contract payload normalization failed", exc_info=error)
             self._send_response(
@@ -1130,7 +1200,7 @@ class PackAPIHandler(
             ) as error:
                 public_result = _public_error_result(_exception_error_code(error))
                 self._send_contract_outcome(route_binding, public_result)
-                if public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
+                if public_result["code"] == HTTPRuntimeErrorCode.UNAPPROVED.value:
                     self._defer_response_log(
                         logger,
                         logging.INFO,
@@ -1280,7 +1350,7 @@ class PackAPIHandler(
                 except ControlReconciliationError as reconciliation_error:
                     journal_error = reconciliation_error
                     public_result = _public_error_result(
-                        RuntimeSurfaceErrorCode.API_FAILURE
+                        HTTPRuntimeErrorCode.API_FAILURE
                     )
             self._send_contract_outcome(route_binding, public_result)
             # Write the bounded, sanitized response before diagnostic logging.
@@ -1295,7 +1365,7 @@ class PackAPIHandler(
                     target.operation_id,
                     exc_info=journal_error,
                 )
-            elif public_result["code"] == RuntimeSurfaceErrorCode.UNAPPROVED.value:
+            elif public_result["code"] == HTTPRuntimeErrorCode.UNAPPROVED.value:
                 self._defer_response_log(
                     logger,
                     logging.INFO,
@@ -1372,7 +1442,7 @@ class PackAPIHandler(
 
     def _send_contract_outcome(
         self,
-        binding: FrontendContractBinding,
+        binding: HTTPContractBinding,
         result: Mapping[str, object],
     ) -> None:
         """Send initial and replayed terminal outcomes through one mapping."""
@@ -1545,101 +1615,16 @@ class PackAPIHandler(
         }:
             refresh(None)
 
-    def _select_contract_target(
-        self,
-        binding: FrontendContractBinding,
-        body: Mapping[str, object],
-    ) -> FrontendContractTarget | None:
-        """Select only a contribution committed in the captured application map."""
-
-        if (
-            len(binding.targets) == 1
-            and not body
-            and binding.path != "/api/ui/capability/invoke"
-        ):
-            return binding.targets[0]
-        expected_fields = {
-            "request_id",
-            "expires_at",
-            "profile_id",
-            "profile_revision",
-            "activation_id",
-            "plan_hash",
-            "catalog_hash",
-            "contribution_id",
-            "owner_pack_id",
-            "contract_id",
-            "payload",
-        }
-        if set(body) != expected_fields:
-            return None
-        capability_request_id = body.get("request_id")
-        expires_at = body.get("expires_at")
-        try:
-            valid_request_id = (
-                isinstance(capability_request_id, str)
-                and str(uuid.UUID(capability_request_id)) == capability_request_id
-            )
-        except ValueError:
-            valid_request_id = False
-        now = time.time()
-        valid_expiry = (
-            isinstance(expires_at, (int, float))
-            and not isinstance(expires_at, bool)
-            and now < float(expires_at) <= now + 60
-        )
-        if not valid_request_id or not valid_expiry:
-            return None
-        session = self._dispatch_session
-        if session is None:
-            return None
-        try:
-            session.assert_current()
-        except Exception:
-            return None
-        if (
-            body.get("profile_id") != session.profile_id
-            or body.get("profile_revision") != session.profile_revision
-            or body.get("activation_id") != session.activation_id
-            or body.get("plan_hash") != session.plan_digest
-            or body.get("catalog_hash") != self._frontend_catalog_hash(binding)
-        ):
-            return None
-        contribution_id = body.get("contribution_id")
-        contract_id = body.get("contract_id")
-        return next(
-            (
-                target
-                for target in self._capability_targets(binding)
-                if target.contribution_id == contribution_id
-                and target.contract_id == contract_id
-                and target.owner_pack_id == body.get("owner_pack_id")
-            ),
-            None,
-        )
-
-    def _frontend_catalog_hash(self, binding: FrontendContractBinding) -> str:
-        return self._capability_snapshot(binding).catalog_hash
-
-    def _capability_targets(
-        self,
-        binding: FrontendContractBinding,
-        catalog: Mapping[str, object] | None = None,
-    ) -> tuple[FrontendContractTarget, ...]:
-        """Return static map targets plus exact enabled Pack contributions."""
-
-        return self._capability_snapshot(binding, catalog).targets
-
     def _capability_snapshot(
         self,
-        binding: FrontendContractBinding,
+        binding: HTTPContractBinding,
         catalog: Mapping[str, object] | None = None,
-    ) -> CapabilityBindingSnapshot:
+    ) -> HTTPCapabilitySnapshot:
         """Capture the exact targets and hash used by selection and presentation."""
 
         session = self._dispatch_session
         if session is None:
-            return CapabilityBindingSnapshot(
+            return HTTPCapabilitySnapshot(
                 catalog_hash=canonical_digest(
                     {
                         "profile_id": "",
@@ -1649,7 +1634,7 @@ class PackAPIHandler(
                         "contributions": [],
                     }
                 ),
-                targets=binding.targets,
+                targets=(),
             )
         if catalog is None:
             catalog = getattr(self, "_capability_catalog_cache", None)
@@ -1666,198 +1651,41 @@ class PackAPIHandler(
                     catalog = {"packs": []}
         if not isinstance(catalog, Mapping):
             catalog = {"packs": []}
-        return capture_capability_binding_snapshot(
-            binding,
-            session=session,
-            catalog=catalog,
-        )
-
-    def _capability_diagnostics(
-        self,
-        catalog: Mapping[str, object],
-    ) -> list[dict[str, str]]:
-        """Expose stable fail-closed reasons for selected unavailable operations."""
-
-        session = self._dispatch_session
-        packs = catalog.get("packs")
-        if session is None or not isinstance(packs, list):
-            return []
-        diagnostics: list[dict[str, str]] = []
-        for pack in packs:
-            if not isinstance(pack, Mapping) or pack.get("enabled") is not True:
-                continue
-            pack_id = str(pack.get("pack_id") or "")
-            operations = pack.get("operations")
-            if not isinstance(operations, list):
-                continue
-            for operation in operations:
-                if not isinstance(operation, Mapping):
-                    continue
-                if operation.get("invokable") is not True:
-                    continue
-                contract_id = str(operation.get("contract_id") or "")
-                operation_id = str(operation.get("operation_id") or "")
-                provider_id = str(operation.get("provider_id") or "")
-                for provider in session.provider_metadata(contract_id):
-                    if (
-                        provider.get("provider_id") == provider_id
-                        and provider.get("operation_id") == operation_id
-                        and provider.get("profile_id") == session.profile_id
-                        and provider.get("profile_revision") == session.profile_revision
-                        and provider.get("activation_id") == session.activation_id
-                        and provider.get("plan_digest") == session.plan_digest
-                        and provider.get("backend_unavailable_reason")
-                    ):
-                        diagnostics.append(
-                            {
-                                "code": "production_backend_unavailable",
-                                "severity": "error",
-                                "owner_pack_id": pack_id,
-                                "contribution_id": f"pack.{pack_id}.{operation_id}",
-                                "message": str(provider["backend_unavailable_reason"]),
-                            }
-                        )
-        return diagnostics
+        factory = self._capability_snapshot_factory
+        if factory is None:
+            return HTTPCapabilitySnapshot(
+                catalog_hash=canonical_digest(
+                    {
+                        "profile_id": session.profile_id,
+                        "profile_revision": session.profile_revision,
+                        "activation_id": session.activation_id,
+                        "plan_digest": session.plan_digest,
+                        "contributions": [],
+                    }
+                ),
+                targets=(),
+            )
+        return factory(binding, session=session, catalog=catalog)
 
     def _present_contract_result(
         self,
-        binding: FrontendContractBinding,
+        binding: HTTPContractBinding,
         result: Mapping[str, object],
     ) -> dict[str, object]:
-        """Apply the presentation named by the committed application artifact."""
+        """Apply an injected application projection to a sanitized result."""
 
-        if binding.presentation != "dynamic_pack_catalog":
+        presentation = self._application_presentation
+        if presentation is None:
             return dict(result)
-        capability_binding = self._contract_routes.get(
-            ("POST", "/api/ui/capability/invoke")
+        return dict(
+            presentation.present_result(
+                binding,
+                result,
+                session=self._dispatch_session,
+                routes=self._contract_routes,
+                capability_snapshot=self._capability_snapshot,
+            )
         )
-        contributions = (
-            self._capability_targets(capability_binding, result)
-            if capability_binding
-            else ()
-        )
-        diagnostics = self._capability_diagnostics(result)
-        session = self._dispatch_session
-        catalog_hash = (
-            self._frontend_catalog_hash(capability_binding)
-            if capability_binding is not None
-            else canonical_digest({"contributions": []})
-        )
-        return {
-            **dict(result),
-            "dynamic_host": {
-                "version": "rumi.ui.contribution.v1",
-                "profile_id": session.profile_id if session is not None else "",
-                "profile_revision": (
-                    session.profile_revision if session is not None else ""
-                ),
-                "activation_id": session.activation_id if session is not None else "",
-                "plan_hash": session.plan_digest if session is not None else "",
-                "contributions": [
-                    self._capability_contribution(target, index, session)
-                    for index, target in enumerate(contributions)
-                ],
-                "diagnostics": diagnostics,
-                "quarantined_pack_ids": [],
-                "catalog_hash": catalog_hash,
-            },
-        }
-
-    @staticmethod
-    def _capability_contribution(
-        target: FrontendContractTarget,
-        priority: int,
-        session: DispatchSession | None,
-    ) -> dict[str, object]:
-        """Project one capture-verified capability as a frontend contribution."""
-
-        is_conversation = _is_conversation_capability_target(target)
-        contribution: dict[str, object] = {
-            "contribution_id": target.contribution_id,
-            "kind": "route" if is_conversation else "action",
-            "mode": "declarative" if is_conversation else "same_origin_builtin",
-            "label": (
-                "Tobkiri Conversation" if is_conversation else target.operation_id
-            ),
-            "priority": priority,
-            "owner_pack_id": target.owner_pack_id,
-            "owner_pack_hash": target.artifact_digest
-            or (session.plan_digest if session is not None else ""),
-            "build_identity": target.function_id,
-            "resolved_profile_id": session.profile_id if session is not None else "",
-            "resolved_profile_revision": (
-                session.profile_revision if session is not None else ""
-            ),
-            "resolved_activation_id": (
-                session.activation_id if session is not None else ""
-            ),
-            "resolved_plan_hash": session.plan_digest if session is not None else "",
-            "descriptor_hash": canonical_digest(
-                {
-                    "contribution_id": target.contribution_id,
-                    "operation_id": target.operation_id,
-                }
-            ),
-            "route": "/chat" if is_conversation else "/packs",
-            "action_contract": target.contract_id,
-            "operation_id": target.operation_id,
-            "provider_id": target.provider_id,
-            "function_id": target.function_id,
-            "localization": {},
-            "accessibility": {
-                "name": (
-                    "Tobkiri Conversation" if is_conversation else target.operation_id
-                ),
-                "keyboard": True,
-            },
-        }
-        if is_conversation:
-            contribution["view"] = {
-                "type": "conversation_v4",
-                "title": "Tobkiri Conversation",
-                "body": "Start a conversation with your active Tobkiri Profile.",
-            }
-        return contribution
-
-    @classmethod
-    def _normalize_dynamic_payload(
-        cls,
-        target: FrontendContractTarget,
-        payload: Mapping[str, object],
-        session: DispatchSession,
-    ) -> dict[str, object]:
-        """Bind dynamic Pack requests to Host identity and safe path semantics."""
-
-        if not target.contribution_id.startswith("pack."):
-            return dict(payload)
-        if target.contract_id != "tobkiri.service.media.inspect.v1":
-            raise ValueError("dynamic Pack operation is not an approved media contract")
-        if payload.get("name") not in {
-            "document.parse",
-            "image.inspect",
-            "audio.inspect",
-            "recording.inspect",
-        }:
-            raise ValueError("media inspection operation is not selected")
-        path = payload.get("path")
-        if not isinstance(path, str) or not path.strip() or "\x00" in path:
-            raise ValueError("a workspace-relative path is required")
-        if "\\" in path:
-            raise PermissionError("backslash paths are not accepted")
-        relative = PurePosixPath(path.strip())
-        if relative.is_absolute() or ".." in relative.parts or "." in relative.parts:
-            raise PermissionError("a workspace-relative path is required")
-        resolver = cls._workspace_binding_resolver
-        if resolver is None:
-            raise RuntimeError("Host workspace binding resolver is unavailable")
-        binding = dict(resolver(session.profile_id))
-        normalized = dict(payload)
-        normalized["path"] = relative.as_posix()
-        normalized["profile_id"] = session.profile_id
-        normalized["workspace_id"] = binding["workspace_id"]
-        normalized["require_selected"] = True
-        normalized["_workspace_binding"] = binding
-        return normalized
 
     def _parse_object_body(self) -> dict[str, object] | None:
         """Parse one JSON object and reject every other JSON root type."""
@@ -2493,7 +2321,10 @@ class PackAPIServer:
         panel_auth_manager: PanelAuthManager | None = None,
         dispatch_session: DispatchSession | None = None,
         app_lifecycle_manager: LifecyclePort | None = None,
-        contract_bindings: tuple[FrontendContractBinding, ...] = (),
+        contract_bindings: tuple[HTTPContractBinding, ...] = (),
+        runtime_capture_factory: RuntimeCaptureFactory | None = None,
+        capability_snapshot_factory: CapabilitySnapshotFactory | None = None,
+        application_presentation: HTTPApplicationPresentation | None = None,
         web_mounts: tuple[WebMountEntry, ...] | None = None,
         workspace_binding_resolver: WorkspaceBindingResolver | None = None,
         packvm_lifecycle: PackVMLifecyclePort | None = None,
@@ -2510,6 +2341,9 @@ class PackAPIServer:
         self._dispatch_session_owned_by_server = False
         self.app_lifecycle_manager = app_lifecycle_manager
         self._contract_routes = contract_binding_map(contract_bindings)
+        self._runtime_capture_factory = runtime_capture_factory
+        self._capability_snapshot_factory = capability_snapshot_factory
+        self._application_presentation = application_presentation
         self._web_mounts = web_mounts
         self._workspace_binding_resolver = workspace_binding_resolver
         self._host_contract_snapshot = (
@@ -2517,10 +2351,6 @@ class PackAPIServer:
             if host_contract is not None
             else None
         )
-        if packvm_lifecycle is None:
-            from .packvm_lifecycle_v4 import PackVMLifecycleV4
-
-            packvm_lifecycle = PackVMLifecycleV4()
         self._packvm_lifecycle = packvm_lifecycle
         self._replay_guard = _RequestReplayGuard()
         from .bootstrap.profile_capture import runtime_user_data_root
@@ -2562,6 +2392,8 @@ class PackAPIServer:
                     dispatch_session=self._dispatch_session,
                     app_lifecycle_manager=self.app_lifecycle_manager,
                     contract_routes=self._contract_routes,
+                    capability_snapshot_factory=self._capability_snapshot_factory,
+                    application_presentation=self._application_presentation,
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
@@ -2642,7 +2474,7 @@ class PackAPIServer:
     def _validate_contract_capture(
         self,
         session: DispatchSession | None,
-        routes: Mapping[tuple[str, str], FrontendContractBinding],
+        routes: Mapping[tuple[str, str], HTTPContractBinding],
         *,
         host_contract: object = _HOST_CONTRACT_UNSET,
     ) -> Mapping[str, Any] | None:
@@ -2735,7 +2567,8 @@ class PackAPIServer:
                     raise RuntimeError(
                         "frontend contract Provider identity is unavailable"
                     )
-                if not _is_conversation_capability_target(target):
+                presentation = self._application_presentation
+                if presentation is None or presentation.requires_operation_ready(target):
                     session.assert_operation_ready(
                         target.contract_id,
                         target.operation_id,
@@ -2779,34 +2612,43 @@ class PackAPIServer:
         server_captured_session = session is None
         host_contract = getattr(self, "_host_contract_snapshot", None)
         try:
+            factory = self._runtime_capture_factory
+            if factory is None:
+                raise RuntimeError(
+                    "application runtime capture composition is unavailable"
+                )
             if session is None:
                 active = capture_active_profile()
-                runtime_root, bundle_root, _catalog, bindings = (
-                    _load_production_capture_inputs(active)
-                )
+                inputs = factory(active)
                 authority = AuthorityStore(
                     runtime_user_data_root() / "authority" / "v4.sqlite3"
                 )
                 try:
                     session = capture_production_dispatch(
                         active,
-                        bundle_root=bundle_root,
-                        ecosystem_root=runtime_root / "ecosystem",
+                        bundle_root=inputs.bundle_root,
+                        ecosystem_root=inputs.ecosystem_root,
                         authority_store=authority,
-                        packvm_provisioner=self._packvm_lifecycle,
+                        packvm_provisioner=inputs.packvm_backend_factory,
                         packvm_readiness_reader=(
                             self._packvm_lifecycle.readiness_snapshot
+                            if self._packvm_lifecycle is not None
+                            else None
                         ),
-                        frontend_contract_bindings=bindings,
+                        http_contract_bindings=inputs.contract_bindings,
+                        activation_snapshot_loader=inputs.activation_snapshot_loader,
+                        runtime_surface_factory=inputs.runtime_surface_factory,
+                        capability_binding_snapshot_factory=(
+                            inputs.capability_binding_snapshot_factory
+                        ),
+                        capability_binding_selector=inputs.capability_binding_selector,
                     )
                 except Exception:
                     authority.close()
                     raise
             else:
-                runtime_root, bundle_root, _catalog, bindings = (
-                    _load_production_capture_inputs()
-                )
-            routes = contract_binding_map(bindings)
+                inputs = factory()
+            routes = contract_binding_map(inputs.contract_bindings)
             if routes:
                 host_profile_control = (
                     getattr(session, "session_kind", None)
@@ -2859,6 +2701,8 @@ class PackAPIServer:
                     dispatch_session=session,
                     app_lifecycle_manager=self.app_lifecycle_manager,
                     contract_routes=routes,
+                    capability_snapshot_factory=self._capability_snapshot_factory,
+                    application_presentation=self._application_presentation,
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
@@ -3020,7 +2864,10 @@ def initialize_pack_api_server(
     panel_auth_manager: PanelAuthManager | None = None,
     dispatch_session: DispatchSession | None = None,
     app_lifecycle_manager: LifecyclePort | None = None,
-    contract_bindings: tuple[FrontendContractBinding, ...] = (),
+    contract_bindings: tuple[HTTPContractBinding, ...] = (),
+    runtime_capture_factory: RuntimeCaptureFactory | None = None,
+    capability_snapshot_factory: CapabilitySnapshotFactory | None = None,
+    application_presentation: HTTPApplicationPresentation | None = None,
     web_mounts: tuple[WebMountEntry, ...] | None = None,
     workspace_binding_resolver: WorkspaceBindingResolver | None = None,
     packvm_lifecycle: PackVMLifecyclePort | None = None,
@@ -3038,6 +2885,9 @@ def initialize_pack_api_server(
         dispatch_session=dispatch_session,
         app_lifecycle_manager=app_lifecycle_manager,
         contract_bindings=contract_bindings,
+        runtime_capture_factory=runtime_capture_factory,
+        capability_snapshot_factory=capability_snapshot_factory,
+        application_presentation=application_presentation,
         web_mounts=web_mounts,
         workspace_binding_resolver=workspace_binding_resolver,
         packvm_lifecycle=packvm_lifecycle,

@@ -618,8 +618,10 @@ def test_production_bundle_root_ignores_environment_attack(
     from core_runtime import pack_control_v4
     from core_runtime.app_lifecycle_manager import AppLifecycleManager
     from core_runtime.bootstrap import profile_capture
-    from core_runtime.pack_api_server import _load_production_capture_inputs
-    from core_runtime.runtime_surface_v4 import RuntimeSurfaceService
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_runtime_capture_inputs,
+    )
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import RuntimeSurfaceService
 
     attacker = tmp_path / "attacker-bundle"
     attacker.mkdir()
@@ -639,12 +641,15 @@ def test_production_bundle_root_ignores_environment_attack(
         raise CatalogProbe
 
     monkeypatch.setattr(BundledCatalog, "load", classmethod(probe))
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda **_kwargs: object())
+    monkeypatch.setattr(profile_capture, "capture_bootstrap_profile", lambda **_kwargs: object())
     entrypoints = (
         lambda: RuntimeSurfaceService._load_catalog(),
         lambda: pack_control_v4._required_profile_pack_ids("defaults"),
-        _load_production_capture_inputs,
-        lambda: AppLifecycleManager(base_dir=tmp_path).activate_default_profile({}),
+        defaultspack_runtime_capture_inputs,
+        lambda: AppLifecycleManager(
+            base_dir=tmp_path,
+            runtime_capture_factory=defaultspack_runtime_capture_inputs,
+        ).activate_bootstrap_profile({}),
     )
     for entrypoint in entrypoints:
         with pytest.raises(CatalogProbe):

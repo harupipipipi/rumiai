@@ -9,13 +9,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping
-
-from ecosystem.defaultspack.domain.runtime_v4 import (
-    ActivationStore,
-    ActiveDefaultProfile,
-    BundledCatalog,
-)
+from typing import Any, Callable, Mapping, Protocol
 from tobkiri_host.admission import (
     AdmissionEstimate,
     DurableResourceLedger,
@@ -67,6 +61,7 @@ from ..pack_catalog_backend_v4 import (
 from ..pack_control_v4 import (
     CONTROL_PRESENTATION_CONTRACT,
     PACK_CONTROL_CONTRACT,
+    RuntimeSurfaceFactory,
     capture_pack_control_session,
     capture_valid_pack_approval,
 )
@@ -94,6 +89,41 @@ _PACKVM_BRIDGE_MAX_RESULT_BYTES = 512 * 1024
 # would reject valid nested work before the queue bounds are reached.
 _DEFAULT_RUNTIME_RESOURCE_SLOTS = 256
 _DEFAULT_PROFILE_RESOURCE_SLOTS = 64
+
+
+class ActivationSnapshotLoader(Protocol):
+    """Application-provided verification of the persisted activation snapshot."""
+
+    def __call__(
+        self,
+        *,
+        active: object,
+        workspace: Path,
+        profile_id: str,
+        authority_store: AuthorityStore,
+        catalog: object,
+    ) -> object:
+        """Load the active snapshot using the app's verified Profile store."""
+
+
+class CapabilityBindingSnapshotFactory(Protocol):
+    """Application-owned capability snapshot projection for control reads."""
+
+    def __call__(
+        self,
+        binding: object,
+        *,
+        session: object,
+        catalog: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        """Return a serializable capability snapshot bound to this dispatch."""
+
+
+class CapabilityBindingSelector(Protocol):
+    """Application-owned selection of its capability HTTP binding."""
+
+    def __call__(self, bindings: tuple[object, ...]) -> object | None:
+        """Return one immutable application capability binding or ``None``."""
 
 
 @dataclass(frozen=True)
@@ -146,52 +176,27 @@ class _UnavailablePackVmBackend:
         del domain_id
 
 
-def _authenticated_packvm_backend(provisioner: Any | None = None) -> ExecutionBackend | None:
-    """Build the PackVM backend only from verified direct-VZ facts.
+def _authenticated_packvm_backend(
+    backend_factory: Callable[[], ExecutionBackend | None] | None = None,
+) -> ExecutionBackend | None:
+    """Admit only a composition-verified production PackVM backend."""
 
-    The production composition root intentionally accepts neither a generic
-    VM driver nor Lima's development provisioning surface.  A lifecycle may
-    supply its already-authenticated direct-VZ registration; otherwise the
-    direct provisioner itself may do so.  In both cases the result must be the
-    immutable fact type produced by the direct VZ provisioner, and it must
-    yield an allocation-scoped authenticated transport factory before a driver
-    is constructed.
-    """
-
-    if provisioner is None:
+    if backend_factory is None:
         return None
 
     try:
-        from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
-            MacOSVZProvisionedFacts,
-        )
-        from tobkiri_host.macos_vz_supervisor import MacOSVZSupervisorDriver
-        from tobkiri_host.platform_backends import MacOSVZBackend
-
-        registration = getattr(provisioner, "production_backend_registration", None)
-        if callable(registration):
-            facts = registration()
-        else:
-            prepare_direct_vz = getattr(provisioner, "prepare_direct_vz", None)
-            if not callable(prepare_direct_vz):
-                return None
-            facts = prepare_direct_vz()
-        if not isinstance(facts, MacOSVZProvisionedFacts):
+        backend = backend_factory()
+        status = getattr(backend, "status", None)
+        if (
+            backend is None
+            or status is None
+            or getattr(status, "execution_kind", None) is not ExecutionKind.PACK_VM
+            or getattr(status, "production_enabled", None) is not True
+            or getattr(status, "conformance_only", None) is not False
+            or not str(getattr(status, "backend_digest", "")).startswith("sha256:")
+        ):
             return None
-
-        transport_factory = facts.transport_or_factory()
-        if transport_factory is None:
-            return None
-
-        driver = MacOSVZSupervisorDriver(
-            transport_factory=transport_factory,
-            helper_path=facts.helper_path,
-            helper_identity=facts.helper_identity,
-            launch_assets=facts.launch_assets,
-            agent_identity=facts.agent_identity,
-            domain_allocator=facts.domain_allocator,
-        )
-        return MacOSVZBackend(driver)
+        return backend
     except Exception:
         # This is a capability promotion boundary.  The Host must remain
         # unavailable when any direct-VZ evidence, identity, or constructor
@@ -424,7 +429,7 @@ def _host_profile_catalog(
     bundle_root: Path,
     *,
     authority_user_data: Path,
-) -> BundledCatalog:
+) -> object:
     """Capture the Host catalog without dropping registry-owned Profiles.
 
     ``BundledCatalog.load`` verifies the Host-global artifact inventory, but it
@@ -445,7 +450,7 @@ def _host_profile_catalog(
 
 
 def _shell_artifact(
-    catalog: BundledCatalog,
+    catalog: Any,
     shell_id: str,
     selected_shell: Mapping[str, Any],
 ) -> PackArtifact:
@@ -596,7 +601,7 @@ def _execution_domain(
     *,
     domain_id: str,
     principal: FunctionPrincipal,
-    active: ActiveDefaultProfile,
+    active: Any,
     boundary: DomainBoundary,
     channel_seed: str,
 ) -> ExecutionDomain:
@@ -722,7 +727,7 @@ def _load_verified_host_provider_factory(
 
 def _host_extension_trust_record(
     *,
-    active: ActiveDefaultProfile,
+    active: Any,
     binding: ResolvedOperationBinding,
     valid_from: float,
 ) -> HostExtensionTrustRecord:
@@ -756,7 +761,7 @@ def _commit_plan_authority(
     store: AuthorityStore,
     control: Any,
     *,
-    active: ActiveDefaultProfile,
+    active: Any,
     caller: FunctionPrincipal,
     target: FunctionPrincipal,
     contract_id: str,
@@ -935,7 +940,7 @@ def _packvm_approval_provenance(
 
 
 def _static_profile_pack_ids(
-    catalog: BundledCatalog,
+    catalog: Any,
     profile_id: str,
 ) -> frozenset[str]:
     """Return the canonical Profile closure before optional Pack additions."""
@@ -1003,7 +1008,7 @@ def _provider_unavailable_bridge_result() -> dict[str, Any]:
 
 
 def capture_production_dispatch(
-    active: ActiveDefaultProfile,
+    active: Any,
     *,
     bundle_root: Path,
     ecosystem_root: Path,
@@ -1012,7 +1017,11 @@ def capture_production_dispatch(
     target_backend_digests: Mapping[str, str] | None = None,
     packvm_provisioner: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
-    frontend_contract_bindings: tuple[Any, ...] = (),
+    http_contract_bindings: tuple[Any, ...] = (),
+    activation_snapshot_loader: ActivationSnapshotLoader | None = None,
+    runtime_surface_factory: RuntimeSurfaceFactory | None = None,
+    capability_binding_snapshot_factory: CapabilityBindingSnapshotFactory | None = None,
+    capability_binding_selector: CapabilityBindingSelector | None = None,
     credential_store_factory: CredentialMaterialStoreFactory | None = None,
 ) -> V4DispatchSession:
     """Capture ProductionRuntimeV4 and its RequestBroker from verified records."""
@@ -1028,14 +1037,15 @@ def capture_production_dispatch(
             bundle_root,
             authority_user_data=authority_user_data,
         )
-        activation_store = ActivationStore(
-            authority_workspace / "activation",
-            authority_workspace,
+        if activation_snapshot_loader is None:
+            raise AuthorityDenied("Profile activation loader is unavailable")
+        persisted_active: Any = activation_snapshot_loader(
+            active=active,
+            workspace=authority_workspace,
             profile_id=profile_id,
-            authority=authority_store,
+            authority_store=authority_store,
             catalog=catalog,
         )
-        persisted_active = activation_store.load_active_snapshot()
     except Exception as exc:
         raise AuthorityDenied(
             "Authority store is not bound to the captured Profile activation"
@@ -1237,7 +1247,7 @@ def capture_production_dispatch(
         if edge.resolved_binding.operation.contract_id in _CONTROL_CONTRACTS
     )
     if control_edges:
-        def load_active_profile() -> ActiveDefaultProfile:
+        def load_active_profile() -> Any:
             from .profile_capture import capture_active_profile
 
             return capture_active_profile()
@@ -1247,6 +1257,7 @@ def capture_production_dispatch(
             packvm_readiness_reader=packvm_readiness_reader,
             active_profile_loader=load_active_profile,
             bundle_root=bundle_root,
+            runtime_surface_factory=runtime_surface_factory,
         )
         for captured_edge in sorted(control_edges, key=lambda item: item.key):
             if (
@@ -2192,32 +2203,24 @@ def capture_production_dispatch(
         ),
     )
     dispatch_holder.append(dispatch)
-    if control_session is not None and frontend_contract_bindings:
-        capability_bindings = tuple(
-            binding
-            for binding in frontend_contract_bindings
-            if getattr(binding, "method", "") == "POST"
-            and getattr(binding, "path", "") == "/api/ui/capability/invoke"
-        )
-        if len(capability_bindings) != 1:
+    if control_session is not None and http_contract_bindings:
+        if capability_binding_selector is None:
+            dispatch.close()
+            raise AuthorityDenied("application capability binding selector is unavailable")
+        capability_binding = capability_binding_selector(http_contract_bindings)
+        if capability_binding is None or capability_binding not in http_contract_bindings:
             dispatch.close()
             raise AuthorityDenied("capability invocation binding is absent or ambiguous")
-        capability_binding = capability_bindings[0]
 
         def capability_binding_reader() -> Mapping[str, Any]:
-            from ..capability_bindings_v4 import capture_capability_binding_snapshot
             from ..pack_control_v4 import capture_pack_catalog_reader
 
-            snapshot = capture_capability_binding_snapshot(
+            if capability_binding_snapshot_factory is None:
+                raise AuthorityDenied("capability projection factory is unavailable")
+            return capability_binding_snapshot_factory(
                 capability_binding,
                 session=dispatch,
                 catalog=capture_pack_catalog_reader().read(),
-            )
-            return snapshot.to_mapping(
-                profile_id=dispatch.profile_id,
-                profile_revision=dispatch.profile_revision,
-                activation_id=dispatch.activation_id,
-                plan_digest=dispatch.plan_digest,
             )
 
         control_session.bind_capability_reader(capability_binding_reader)

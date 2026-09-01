@@ -1,21 +1,20 @@
-"""Host-owned frontend contract route resolution.
-
-The web application is only allowed to address the canonical contract
-endpoint.  This module decodes the opaque operation token used by that
-endpoint and validates the resolved implementation route before the normal
-HTTP dispatcher sees it.  The implementation route remains Host-owned; the
-frontend never gets to select an arbitrary URL or handler.
-"""
+"""Load the Defaultspack frontend contract map into generic HTTP bindings."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import unquote
+
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractBinding,
+    HTTPContractRouteError,
+    HTTPContractTarget,
+    contract_binding_map,
+)
 
 from tobkiri_protocol.canonical import strict_loads
 from tobkiri_protocol.errors import ProtocolError
@@ -42,151 +41,16 @@ _CONTRACT_CONTEXT_FIELDS = (
 _ACTIVATION_ID_RE = re.compile(r"^activation:[a-z0-9][a-z0-9._-]{7,127}$")
 
 
-class ContractRouteError(ValueError):
-    """Raised when a canonical frontend operation cannot be resolved."""
-
-    def __init__(self, code: str, message: str, status: int = 404) -> None:
-        super().__init__(message)
-        self.code = code
-        self.status = status
+def _invalid_map(message: str) -> HTTPContractRouteError:
+    return HTTPContractRouteError("CONTRACT_MAP_INVALID", message, 500)
 
 
-@dataclass(frozen=True)
-class ResolvedContractRoute:
-    """A validated implementation target and its query projection."""
-
-    method: str
-    path: str
-    query: dict[str, str]
+def _unavailable_map(message: str) -> HTTPContractRouteError:
+    return HTTPContractRouteError("CONTRACT_MAP_UNAVAILABLE", message, 500)
 
 
-@dataclass(frozen=True)
-class FrontendContractTarget:
-    """One exact committed contribution mapped to a Broker operation."""
-
-    contribution_id: str
-    contract_id: str
-    operation_id: str
-    provider_id: str
-    function_id: str
-    allowed_payload_keys: frozenset[str] = frozenset()
-    owner_pack_id: str = ""
-    artifact_digest: str = ""
-
-
-@dataclass(frozen=True)
-class FrontendContractBinding:
-    """One exact frontend route and its selected contribution targets."""
-
-    method: str
-    path: str
-    presentation: str
-    targets: tuple[FrontendContractTarget, ...]
-    application_id: str = ""
-    route_namespace: str = ""
-    artifact_path: str = ""
-    artifact_digest: str = ""
-    profile_id: str = ""
-    profile_revision: str = ""
-    activation_id: str = ""
-    plan_digest: str = ""
-
-
-HOST_PROFILE_CONTROL_OPERATIONS = frozenset(
-    {
-        "profile.catalog.read",
-        "profile.change.resolve",
-        "profile.change.review",
-        "profile.change.approve",
-        "profile.change.activate",
-        "operation.status.read",
-    }
-)
-
-
-def host_profile_control_bindings(
-    bindings: tuple[FrontendContractBinding, ...] | None = None,
-) -> tuple[FrontendContractBinding, ...]:
-    """Return protocol-owned Profile routes safe before Profile activation.
-
-    The optional argument is ignored for source compatibility.  These Host
-    routes must never inherit identity or availability from an Application
-    Pack's frontend map.
-    """
-
-    del bindings
-    routes = (
-        ("GET", "/api/runtime-surface/profiles", "profile.catalog.read", ()),
-        (
-            "GET",
-            "/api/runtime-surface/operation-status",
-            "operation.status.read",
-            ("request_id",),
-        ),
-        (
-            "POST",
-            "/api/runtime-surface/profile-change/resolve",
-            "profile.change.resolve",
-            (
-                "profile_id",
-                "expected_profile_revision",
-                "expected_plan_digest",
-                "desired_pack_ids",
-                "profile_definition_digest",
-                "profile_catalog_digest",
-                "bundle_lock_digest",
-            ),
-        ),
-        (
-            "POST",
-            "/api/runtime-surface/profile-change/review",
-            "profile.change.review",
-            ("candidate_id", "candidate_digest"),
-        ),
-        (
-            "POST",
-            "/api/runtime-surface/profile-change/approve",
-            "profile.change.approve",
-            ("candidate_id", "candidate_digest"),
-        ),
-        (
-            "POST",
-            "/api/runtime-surface/profile-change/activate",
-            "profile.change.activate",
-            ("approval_id", "approval_digest"),
-        ),
-    )
-    return tuple(
-        FrontendContractBinding(
-            method=method,
-            path=path,
-            presentation="broker_result",
-            targets=(
-                FrontendContractTarget(
-                    contribution_id=f"host.profile-control.{operation_id}",
-                    contract_id="tobkiri.host.control-presentation.v4",
-                    operation_id=operation_id,
-                    provider_id="tobkiri.host.control-presentation",
-                    function_id="tobkiri.host.control-presentation",
-                    allowed_payload_keys=frozenset(allowed),
-                    owner_pack_id="host",
-                ),
-            ),
-        )
-        for method, path, operation_id, allowed in routes
-    )
-
-
-def _invalid_map(message: str) -> ContractRouteError:
-    return ContractRouteError("CONTRACT_MAP_INVALID", message, 500)
-
-
-def _unavailable_map(message: str) -> ContractRouteError:
-    return ContractRouteError("CONTRACT_MAP_UNAVAILABLE", message, 500)
-
-
-def _stale_map(message: str) -> ContractRouteError:
-    return ContractRouteError("CONTRACT_MAP_STALE", message, 500)
+def _stale_map(message: str) -> HTTPContractRouteError:
+    return HTTPContractRouteError("CONTRACT_MAP_STALE", message, 500)
 
 
 def _validate_pack_id(value: object, *, field: str) -> str:
@@ -443,7 +307,7 @@ def load_frontend_contract_bindings(
     activation_id: str | None = None,
     plan_digest: str | None = None,
     artifact_root: Path | None = None,
-) -> tuple[FrontendContractBinding, ...]:
+) -> tuple[HTTPContractBinding, ...]:
     """Load one verified Application map without discovery or fallback."""
 
     artifact = frontend_contract_map_artifact(application_manifest)
@@ -488,7 +352,7 @@ def load_frontend_contract_bindings(
     routes = document.get("routes")
     if not isinstance(routes, list) or not routes:
         raise _invalid_map("Frontend Contract Map routes are invalid")
-    bindings: list[FrontendContractBinding] = []
+    bindings: list[HTTPContractBinding] = []
     for route in routes:
         if not isinstance(route, dict) or set(route) != {
             "method",
@@ -512,7 +376,7 @@ def load_frontend_contract_bindings(
         targets_value = route.get("targets")
         if not isinstance(targets_value, list) or not targets_value:
             raise _invalid_map("Frontend route has no targets")
-        targets: list[FrontendContractTarget] = []
+        targets: list[HTTPContractTarget] = []
         for target in targets_value:
             if not isinstance(target, dict) or set(target) != {
                 "contribution_id",
@@ -545,7 +409,7 @@ def load_frontend_contract_bindings(
             if len(allowed) != len(set(allowed)):
                 raise _invalid_map("Frontend target payload is duplicated")
             targets.append(
-                FrontendContractTarget(
+                HTTPContractTarget(
                     contribution_id=target["contribution_id"],
                     contract_id=target["contract_id"],
                     operation_id=target["operation_id"],
@@ -556,7 +420,7 @@ def load_frontend_contract_bindings(
                 )
             )
         bindings.append(
-            FrontendContractBinding(
+            HTTPContractBinding(
                 method=method.upper(),
                 path=path,
                 presentation=presentation,
@@ -570,40 +434,6 @@ def load_frontend_contract_bindings(
         )
     contract_binding_map(tuple(bindings))
     return tuple(bindings)
-
-
-def contract_binding_map(
-    bindings: tuple[FrontendContractBinding, ...],
-) -> dict[tuple[str, str], FrontendContractBinding]:
-    """Build an exact route map, rejecting ambiguous Host ownership."""
-
-    result: dict[tuple[str, str], FrontendContractBinding] = {}
-    for binding in bindings:
-        key = (binding.method.upper(), binding.path)
-        if key in result:
-            raise ContractRouteError(
-                "CONTRACT_OPERATION_DUPLICATE",
-                "Frontend contract operation is duplicated",
-                500,
-            )
-        result[key] = binding
-    return result
-
-
-def is_contract_route_path(path: str) -> bool:
-    """Return whether *path* is the canonical frontend contract endpoint."""
-
-    value = str(path or "")
-    return value.startswith(CONTRACT_ROUTE_PREFIX)
-
-
-def contract_route_prefix(pack_id: str | None = None) -> str:
-    """Return the canonical endpoint prefix for one verified frontend pack."""
-
-    if pack_id is None:
-        return CONTRACT_ROUTE_PREFIX
-    normalized = _validate_route_namespace(str(pack_id or "").strip())
-    return f"/api/contracts/{normalized}/"
 
 
 def _safe_target_path(path: str) -> bool:
@@ -630,196 +460,9 @@ def _safe_target_path(path: str) -> bool:
     return True
 
 
-def _registered_target(
-    server: Any,
-    method: str,
-    path: str,
-    *,
-    namespace: str,
-    families: tuple[str, ...] | None = None,
-) -> bool:
-    """Check the live Host route tables without invoking a handler."""
-
-    del families
-    contract_routes = getattr(server, "_contract_routes", None)
-    if not isinstance(contract_routes, Mapping):
-        return False
-    route_key = (method, path)
-    if route_key not in contract_routes:
-        return False
-    metadata = contract_routes[route_key]
-    if isinstance(metadata, FrontendContractBinding):
-        expected_namespace = metadata.route_namespace
-        if (
-            not expected_namespace
-            or not metadata.application_id
-            or namespace != expected_namespace
-        ):
-            return False
-        _assert_binding_context_current(server, metadata)
-    requires_approval = isinstance(metadata, Mapping) and bool(
-        metadata.get("approval_required")
-    )
-    if requires_approval:
-        approval_check = getattr(server, "_contract_approval_check", None)
-        approved = (
-            bool(approval_check(method, path)) if callable(approval_check) else False
-        )
-        if not approved:
-            raise ContractRouteError(
-                "CONTRACT_APPROVAL_REQUIRED",
-                "Contract operation requires Host approval",
-                403,
-            )
-    return True
-
-
-def _assert_binding_context_current(
-    server: Any,
-    binding: FrontendContractBinding,
-) -> None:
-    """Reject a map binding that is not attached to the live capture."""
-
-    expected = {
-        field: getattr(binding, field, "") for field in _CONTRACT_CONTEXT_FIELDS
-    }
-    if not any(expected.values()):
-        return
-    if not all(expected.values()):
-        raise ContractRouteError(
-            "CONTRACT_MAP_STALE",
-            "Frontend Contract Map activation identity is incomplete",
-            409,
-        )
-    session = getattr(server, "_dispatch_session", None)
-    if session is None or any(
-        getattr(session, field, None) != value for field, value in expected.items()
-    ):
-        raise ContractRouteError(
-            "CONTRACT_MAP_STALE",
-            "Frontend Contract Map activation identity is stale",
-            409,
-        )
-
-
-def resolve_contract_route(
-    server: Any,
-    method: str,
-    request_path: str,
-    *,
-    pack_id: str | None = None,
-    route_families: tuple[str, ...] | None = None,
-) -> ResolvedContractRoute | None:
-    """Decode and validate a canonical operation token.
-
-    ``None`` means the request is not a canonical contract request.  Invalid
-    canonical requests raise :class:`ContractRouteError` and must be returned
-    to the caller as a closed error rather than falling through to a legacy
-    route.
-    """
-
-    request_value = str(request_path or "")
-    if pack_id is None:
-        if not request_value.startswith(CONTRACT_ROUTE_PREFIX):
-            return None
-        remainder = request_value[len(CONTRACT_ROUTE_PREFIX) :]
-        namespace, separator, token = remainder.partition("/")
-        if not separator:
-            raise ContractRouteError(
-                "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
-            )
-        namespace = _validate_route_namespace(namespace)
-        prefix = f"{CONTRACT_ROUTE_PREFIX}{namespace}/"
-    else:
-        namespace = str(pack_id or "").strip()
-        prefix = contract_route_prefix(namespace)
-        if not request_value.startswith(prefix):
-            return None
-        token = request_value[len(prefix) :]
-    if not request_value.startswith(prefix):
-        return None
-    if not token or "/" in token:
-        raise ContractRouteError(
-            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
-        )
-    try:
-        decoded = unquote(token)
-    except Exception as exc:  # pragma: no cover - urllib is defensive here
-        raise ContractRouteError(
-            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
-        ) from exc
-    if " " not in decoded:
-        raise ContractRouteError(
-            "CONTRACT_OPERATION_INVALID", "Invalid contract operation", 400
-        )
-    encoded_method, encoded_target = decoded.split(" ", 1)
-    operation_method = encoded_method.upper().strip()
-    request_method = str(method or "").upper().strip()
-    if operation_method != request_method:
-        raise ContractRouteError(
-            "CONTRACT_METHOD_MISMATCH", "Contract operation method mismatch", 405
-        )
-    if operation_method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-        raise ContractRouteError(
-            "CONTRACT_METHOD_UNSUPPORTED", "Unsupported contract operation method", 405
-        )
-
-    parsed = urlsplit(encoded_target)
-    if parsed.scheme or parsed.netloc or parsed.fragment:
-        raise ContractRouteError(
-            "CONTRACT_PATH_INVALID", "Invalid contract target path", 400
-        )
-    target_path = parsed.path
-    if not _safe_target_path(target_path):
-        raise ContractRouteError(
-            "CONTRACT_PATH_INVALID", "Invalid contract target path", 400
-        )
-    if not _registered_target(
-        server,
-        operation_method,
-        target_path,
-        namespace=namespace,
-        families=route_families,
-    ):
-        raise ContractRouteError(
-            "CONTRACT_OPERATION_UNKNOWN", "Unknown frontend contract operation", 404
-        )
-    parsed_query = parse_qs(parsed.query, keep_blank_values=True)
-    if any(len(values) != 1 for values in parsed_query.values()):
-        raise ContractRouteError(
-            "CONTRACT_QUERY_INVALID", "Invalid contract target query", 400
-        )
-    query = {key: values[0] for key, values in parsed_query.items() if values}
-    return ResolvedContractRoute(operation_method, target_path, query)
-
-
-def _validate_route_namespace(value: str) -> str:
-    """Validate one namespace parsed from a canonical route URL."""
-
-    normalized = str(value or "").strip()
-    if _PACK_ID_RE.fullmatch(normalized) is None:
-        raise ContractRouteError("CONTRACT_PACK_INVALID", "Invalid contract pack", 400)
-    try:
-        validate_canonical_id(normalized, field="contract pack")
-    except ProtocolError as error:
-        raise ContractRouteError(
-            "CONTRACT_PACK_INVALID", "Invalid contract pack", 400
-        ) from error
-    return normalized
-
-
 __all__ = [
-    "CONTRACT_ROUTE_PREFIX",
-    "ContractRouteError",
     "FRONTEND_CONTRACT_MAP_FILENAME",
-    "FrontendContractBinding",
-    "FrontendContractTarget",
-    "ResolvedContractRoute",
-    "contract_binding_map",
-    "contract_route_prefix",
     "frontend_contract_map_artifact",
-    "is_contract_route_path",
     "load_frontend_contract_bindings",
     "resolve_frontend_contract_map_path",
-    "resolve_contract_route",
 ]

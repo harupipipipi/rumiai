@@ -28,7 +28,7 @@ from core_runtime.profile_definition_store_v4 import (
     ProfileDefinitionStoreError,
     ProfileDefinitionStoreIntegrityError,
 )
-from core_runtime.runtime_surface_v4 import (
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
     RuntimeSurfaceError,
     RuntimeSurfaceErrorCode,
     RuntimeSurfaceService,
@@ -196,7 +196,7 @@ def test_profile_store_rejects_rehashed_tampered_bootstrap_revision(
 
 
 def test_host_profile_control_routes_match_inventory_and_reject_other_ops() -> None:
-    from core_runtime.frontend_contract_routes import (
+    from ecosystem.defaultspack.defaultspack.runtime_surface_targets import (
         HOST_PROFILE_CONTROL_OPERATIONS,
         host_profile_control_bindings,
     )

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import core_runtime.frontend_host as frontend_host_module
-from core_runtime.frontend_host import FrontendHostRegistry
+import ecosystem.defaultspack.domain.frontend.host as frontend_host_module
+from ecosystem.defaultspack.domain.frontend.host import FrontendHostRegistry
 from core_runtime.pack_artifact_integrity import write_host_install_record
 from core_runtime.resolved_profile import ResolutionInput, resolve_profile
 

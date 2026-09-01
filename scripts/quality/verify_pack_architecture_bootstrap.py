@@ -17,9 +17,10 @@ EXPECTED_REFERENCE_SHA256 = (
 EXPECTED_EXCEPTION_COUNT = 110
 
 
-def _load_baseline(path: Path) -> tuple[bytes, dict[str, Any]]:
+def _load_baseline(path: Path) -> tuple[bytes, dict[str, dict[str, Any]]]:
+    """Load a strict, exact-identity architecture baseline document."""
     payload = path.read_bytes()
-    document = json.loads(payload)
+    document: Any = json.loads(payload)
     if not isinstance(document, dict) or set(document) != {
         "schema_version",
         "policy",
@@ -31,21 +32,23 @@ def _load_baseline(path: Path) -> tuple[bytes, dict[str, Any]]:
     if document["policy"] != "shrink_only_exact_edges":
         raise ValueError("Pack architecture bootstrap policy is invalid")
     exceptions = document["exceptions"]
-    if not isinstance(exceptions, list) or len(exceptions) != EXPECTED_EXCEPTION_COUNT:
-        raise ValueError("Pack architecture bootstrap exception count is invalid")
-    identities = [
-        exception.get("identity") if isinstance(exception, dict) else None
-        for exception in exceptions
-    ]
-    if any(not isinstance(identity, str) or not identity for identity in identities):
-        raise ValueError("Pack architecture bootstrap identity is invalid")
-    if len(set(identities)) != len(identities):
+    if not isinstance(exceptions, list):
+        raise ValueError("Pack architecture bootstrap exceptions are invalid")
+    by_identity: dict[str, dict[str, Any]] = {}
+    for exception in exceptions:
+        identity = exception.get("identity") if isinstance(exception, dict) else None
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("Pack architecture bootstrap identity is invalid")
+        if identity in by_identity:
+            raise ValueError("Pack architecture bootstrap identities are not unique")
+        by_identity[identity] = exception
+    if len(by_identity) != len(exceptions):
         raise ValueError("Pack architecture bootstrap identities are not unique")
-    return payload, document
+    return payload, by_identity
 
 
 def verify_bootstrap(candidate: Path, reference: Path) -> None:
-    """Require a distinct immutable reference and an exact candidate match."""
+    """Require an exact-record candidate subset of an immutable reference."""
     candidate_stat = candidate.stat()
     reference_stat = reference.stat()
     if candidate.resolve() == reference.resolve() or (
@@ -53,12 +56,28 @@ def verify_bootstrap(candidate: Path, reference: Path) -> None:
         candidate_stat.st_ino,
     ) == (reference_stat.st_dev, reference_stat.st_ino):
         raise ValueError("candidate cannot authorize its own bootstrap baseline")
-    reference_payload, _ = _load_baseline(reference)
+    reference_payload, reference_exceptions = _load_baseline(reference)
     if hashlib.sha256(reference_payload).hexdigest() != EXPECTED_REFERENCE_SHA256:
         raise ValueError("Pack architecture bootstrap reference digest mismatch")
-    candidate_payload, _ = _load_baseline(candidate)
-    if candidate_payload != reference_payload:
-        raise ValueError("Pack architecture bootstrap candidate is not exact")
+    if len(reference_exceptions) != EXPECTED_EXCEPTION_COUNT:
+        raise ValueError(
+            "Pack architecture bootstrap reference exception count is invalid"
+        )
+    _, candidate_exceptions = _load_baseline(candidate)
+    additions = set(candidate_exceptions) - set(reference_exceptions)
+    if additions:
+        raise ValueError(
+            "Pack architecture bootstrap candidate expands the reviewed reference"
+        )
+    changed = [
+        identity
+        for identity, exception in candidate_exceptions.items()
+        if exception != reference_exceptions[identity]
+    ]
+    if changed:
+        raise ValueError(
+            "Pack architecture bootstrap candidate modifies a reviewed exception"
+        )
 
 
 def main() -> int:

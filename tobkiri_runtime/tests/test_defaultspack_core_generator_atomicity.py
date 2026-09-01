@@ -133,6 +133,56 @@ def test_checked_in_bundle_matches_canonical_render() -> None:
     assert _snapshot(generator.BUNDLE) == expected
 
 
+def test_canonical_pack_projections_are_generator_owned_derivatives() -> None:
+    """Each canonical Pack input has one source-bound bundle derivative."""
+
+    generator = _load_generator()
+    rendered = generator._render(SOURCE_COMMIT)
+    projections = [
+        (output, source)
+        for output, source in generator._canonical_pack_sources().items()
+        if output != source
+    ]
+
+    assert len(projections) == 64
+    for output, source in projections:
+        canonical_raw = source.read_bytes()
+        canonical = validate_document(canonical_raw, "pack")
+        derivative_raw = rendered[output]
+        derivative = validate_document(derivative_raw, "pack")
+        provenance = derivative["provenance"]
+
+        assert derivative_raw != canonical_raw
+        assert provenance["schema"] == "io.tobkiri.provenance.v2"
+        assert provenance["source_kind"] == "generated"
+        assert provenance["source_path"] == source.relative_to(ROOT).as_posix()
+        assert provenance["source_digest"] == _sha256(canonical_raw)
+        assert provenance["repository_commit"] == canonical["provenance"][
+            "repository_commit"
+        ]
+        assert provenance["generator"] == (
+            "tobkiri.scripts.generate_defaultspack_v4_bundle"
+        )
+        assert derivative["integrity"]["source_identity"] != canonical["integrity"][
+            "source_identity"
+        ]
+
+        canonical_catalog = generator._executable_catalog_source(source, canonical)
+        assert canonical_catalog is not None
+        output_catalog = output.with_name(
+            f"{derivative['pack']['id']}.executables.v4.json"
+        )
+        derivative_catalog_raw = rendered[output_catalog]
+        derivative_catalog = validate_document(
+            derivative_catalog_raw,
+            "executable_catalog",
+        )
+        assert derivative_catalog_raw != canonical_catalog.read_bytes()
+        assert derivative_catalog["source_identity"] == derivative["integrity"][
+            "source_identity"
+        ]
+
+
 def test_core_generator_publishes_complete_profile_release_closure(
     tmp_path: Path,
 ) -> None:

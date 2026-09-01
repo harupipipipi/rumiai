@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from core_runtime.api.setup_handlers import SetupHandlersMixin
 
 
@@ -14,16 +16,29 @@ class _Handler(SetupHandlersMixin):
     pass
 
 
+@pytest.fixture(autouse=True)
+def _install_profile_runtime() -> None:
+    """Compose the Pack port explicitly for this isolated Host-handler suite."""
+
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        install_defaultspack_profile_runtime,
+    )
+
+    install_defaultspack_profile_runtime()
+
+
 def _preview() -> dict[str, object]:
+    return _listing()["recommended_default_profile"]
+
+
+def _listing() -> dict[str, object]:
     fixture = (
         Path(__file__).resolve().parents[1]
         / "tobkiri_protocol"
         / "fixtures"
         / "defaults_setup_v4.canonical.json"
     )
-    return json.loads(fixture.read_text(encoding="utf-8"))[
-        "recommended_default_profile"
-    ]
+    return json.loads(fixture.read_text(encoding="utf-8"))
 
 
 def _request(*, confirmed: bool = True) -> dict[str, object]:
@@ -56,8 +71,8 @@ def _active() -> SimpleNamespace:
 def test_setup_lists_one_typed_finite_v4_transaction() -> None:
     with patch.object(
         SetupHandlersMixin,
-        "_recommended_default_profile_preview",
-        return_value=_preview(),
+        "_setup_listing",
+        return_value=_listing(),
     ):
         result = _Handler()._setup_list_packs()
 
@@ -77,8 +92,8 @@ def test_setup_lists_one_typed_finite_v4_transaction() -> None:
 def test_setup_rejects_tampered_confirmation() -> None:
     with patch.object(
         SetupHandlersMixin,
-        "_recommended_default_profile_preview",
-        return_value=_preview(),
+        "_setup_listing",
+        return_value=_listing(),
     ):
         request = _request()
         request["confirmation"] = {**request["confirmation"], "security_epoch": 8}
@@ -92,8 +107,8 @@ def test_setup_rejects_tampered_confirmation() -> None:
 def test_setup_rejects_tampered_or_extra_shell_digest_fields() -> None:
     with patch.object(
         SetupHandlersMixin,
-        "_recommended_default_profile_preview",
-        return_value=_preview(),
+        "_setup_listing",
+        return_value=_listing(),
     ):
         for shell_change in (
             {"executable_artifact_digest": "sha256:" + "0" * 64},
@@ -115,8 +130,8 @@ def test_setup_rejects_tampered_or_extra_shell_digest_fields() -> None:
 def test_setup_requires_explicit_confirmation() -> None:
     with patch.object(
         SetupHandlersMixin,
-        "_recommended_default_profile_preview",
-        return_value=_preview(),
+        "_setup_listing",
+        return_value=_listing(),
     ):
         result = _Handler()._setup_install_pack(_request(confirmed=False))
 
@@ -128,11 +143,11 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
     with (
         patch.object(
             SetupHandlersMixin,
-            "_recommended_default_profile_preview",
-            return_value=_preview(),
+            "_setup_listing",
+            return_value=_listing(),
         ),
         patch(
-            "core_runtime.bootstrap.profile_capture.capture_default_profile",
+            "core_runtime.bootstrap.profile_capture.capture_bootstrap_profile",
             return_value=_active(),
         ) as capture,
         patch(
@@ -169,9 +184,7 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
 
 
 def test_non_v4_install_shape_is_retired_without_capture() -> None:
-    with patch(
-        "core_runtime.bootstrap.profile_capture.capture_default_profile"
-    ) as capture:
+    with patch("core_runtime.bootstrap.profile_capture.capture_bootstrap_profile") as capture:
         result = _Handler()._setup_install_pack({"setup_pack_ids": ["legacy"]})
 
     capture.assert_not_called()
@@ -197,11 +210,10 @@ def test_real_preview_is_exact_and_integrity_checked() -> None:
     assert preview["profile_id"] == "defaults"
     assert preview["base_pack"] == "defaults-basepack"
     assert preview["shell"]["provider_id"] == "shell.tauri.default"
-    variant = load_packaged_profile_catalog().shells["shell.tauri.default"][
-        "launch"
-    ]["variants"][0]
-    assert preview["confirmation"]["shell"]["executable_artifact_digest"] == (
-        variant["entrypoint_digest"]
+    variant = load_packaged_profile_catalog().shells["shell.tauri.default"]["launch"]["variants"][0]
+    assert (
+        preview["confirmation"]["shell"]["executable_artifact_digest"]
+        == (variant["entrypoint_digest"])
     )
     assert len(preview["pack_ids"]) == len(set(preview["pack_ids"]))
     assert preview["conversation_provider"]

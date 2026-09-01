@@ -896,8 +896,8 @@ def prepare_chat_run(
         request_context["matched_skill_instructions"] = matched_skills
         tool_context["matched_skill_instructions"] = matched_skills
         try:
-            from core_runtime.ai_input_token_estimator import estimate_tokens
-            from core_runtime.ai_input_trace_store import AiInputTraceStore
+            from ..ai_input.ai_input_token_estimator import estimate_tokens
+            from ..ai_input.ai_input_trace_store import AiInputTraceStore
             from domain.prompt.usage import append_runtime_prompt_segment, compact_prompt_usage_for_metadata
 
             skill_segment = {
@@ -1011,8 +1011,8 @@ def _apply_effective_ai_input_to_request_context(
     ):
         return request_context, ""
     try:
-        from core_runtime.ai_input_graph_builder import build_runtime_ai_input_trace
-        from core_runtime.ai_input_trace_store import AiInputTraceStore
+        from ..ai_input.ai_input_graph_builder import build_runtime_ai_input_trace
+        from ..ai_input.ai_input_trace_store import AiInputTraceStore
         from domain.prompt.usage import compact_prompt_usage_for_metadata, prompt_usage_from_trace
     except Exception:
         return request_context, ""

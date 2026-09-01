@@ -1,4 +1,4 @@
-"""Canonical fail-closed validation for the Defaults setup v4 response."""
+"""Defaultspack's fail-closed setup response contract."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _fail(message: str) -> None:
 
 
 def validate_defaults_setup_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate one complete setup response against the shared v4 contract.
+    """Validate one complete Defaultspack setup response.
 
     JSON Schema owns the exact serialized field/type contract. These semantic
     checks bind its projections and digests to one finite Profile candidate.
@@ -29,9 +29,7 @@ def validate_defaults_setup_payload(payload: Mapping[str, Any]) -> dict[str, Any
     confirmation = profile["confirmation"]
 
     confirmation_body = {
-        key: value
-        for key, value in confirmation.items()
-        if key != "confirmation_digest"
+        key: value for key, value in confirmation.items() if key != "confirmation_digest"
     }
     if confirmation["confirmation_digest"] != canonical_digest(confirmation_body):
         _fail("confirmation_digest does not bind the confirmation body")
@@ -80,10 +78,7 @@ def validate_defaults_setup_payload(payload: Mapping[str, Any]) -> dict[str, Any
 
     if document["state"] == "active" and document["denial_diagnostic"] is not None:
         _fail("active setup state cannot carry a denial diagnostic")
-    if (
-        document["state"] == "activation_denied"
-        and not document["denial_diagnostic"]
-    ):
+    if document["state"] == "activation_denied" and not document["denial_diagnostic"]:
         _fail("activation_denied requires a denial diagnostic")
     return document
 

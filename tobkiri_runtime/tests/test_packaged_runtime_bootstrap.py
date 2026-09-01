@@ -26,6 +26,9 @@ from core_runtime.di_container import get_container, reset_container
 from core_runtime.hmac_key_manager import get_hmac_key_manager
 from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
 from core_runtime.pack_api_server import PackAPIServer
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    create_defaultspack_kernel,
+)
 from tobkiri_host.broker import RequestBroker
 from tobkiri_host.runtime import V4DispatchSession
 
@@ -34,6 +37,12 @@ def _free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
+
+
+def _kernel() -> Kernel:
+    """Build the application-composed Host rather than an unconfigured core."""
+
+    return create_defaultspack_kernel()
 
 
 def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
@@ -81,7 +90,7 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
         lambda **_kwargs: SetupServer(),
     )
 
-    kernel = Kernel()
+    kernel = _kernel()
     try:
         result = kernel.run_startup_until(kernel.API_INIT_STEP)
         readiness = get_runtime_readiness()
@@ -128,7 +137,7 @@ def test_kernel_bootstrap_publishes_and_reuses_desktop_api_token(
     )
 
     reset_container()
-    first_kernel = Kernel()
+    first_kernel = _kernel()
     try:
         first_kernel.run_startup_until(first_kernel.API_INIT_STEP)
         first_token = get_hmac_key_manager().get_active_key()
@@ -140,7 +149,7 @@ def test_kernel_bootstrap_publishes_and_reuses_desktop_api_token(
         first_kernel.shutdown()
 
     reset_container()
-    second_kernel = Kernel()
+    second_kernel = _kernel()
     try:
         second_kernel.run_startup_until(second_kernel.API_INIT_STEP)
         restarted_token = get_hmac_key_manager().get_active_key()
@@ -183,7 +192,7 @@ def test_kernel_bootstrap_refreshes_desktop_api_token_after_hmac_rotation(
     )
 
     reset_container()
-    first_kernel = Kernel()
+    first_kernel = _kernel()
     try:
         first_kernel.run_startup_until(first_kernel.API_INIT_STEP)
         original_token = token_cache.read_text(encoding="utf-8")
@@ -194,7 +203,7 @@ def test_kernel_bootstrap_refreshes_desktop_api_token_after_hmac_rotation(
         first_kernel.shutdown()
 
     reset_container()
-    refreshed_kernel = Kernel()
+    refreshed_kernel = _kernel()
     try:
         refreshed_kernel.run_startup_until(refreshed_kernel.API_INIT_STEP)
         assert token_cache.read_text(encoding="utf-8") == rotated_token
@@ -236,7 +245,7 @@ def test_kernel_bootstrap_fails_closed_when_token_cache_cannot_be_published(
 
     reset_container()
     with pytest.raises(OSError, match="simulated token cache failure"):
-        Kernel().run_startup_until(Kernel.API_INIT_STEP)
+        _kernel().run_startup_until(Kernel.API_INIT_STEP)
 
     assert server_started is False
     assert not (tmp_path / ".desktop_api_token").exists()
@@ -299,7 +308,7 @@ def test_public_kernel_first_start_requires_confirmed_defaults_transaction(
 
     monkeypatch.setattr(PackAPIServer, "_refresh_runtime_capture", delayed_refresh)
 
-    kernel = Kernel()
+    kernel = _kernel()
     try:
         kernel.run_startup_until("api_init")
         remaining = kernel.run_startup_remaining()
@@ -463,7 +472,7 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     assert len(providers) == 1
     assert not (user_data / "settings" / "startup_profiles.json").exists()
 
-    kernel = Kernel()
+    kernel = _kernel()
     monkeypatch.setenv("RUMI_PORT", str(_free_port()))
     try:
         with bind_host_contract(contract):

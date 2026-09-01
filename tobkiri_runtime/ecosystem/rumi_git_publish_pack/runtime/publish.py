@@ -29,40 +29,65 @@ class GitPublishService:
             raise ValueError(f"unknown Git publish operation: {name}")
         arguments = _arguments(payload, dry_run=name == "dry_run")
         root, repository = self._roots(payload)
-        _assert_local_head(repository, arguments["expected_head"])
-        remote_url = _git(repository, ["remote", "get-url", arguments["remote"]]).strip()
-        remote_host = _remote_host(remote_url)
-        remote_url_hash = hashlib.sha256(remote_url.encode("utf-8")).hexdigest()
+        _assert_repository_oid_widths(repository, arguments)
+        _assert_local_source(
+            repository,
+            arguments["branch"],
+            arguments["expected_source_oid"],
+        )
+        remote_url = _git(repository, ["remote", "get-url", "--push", arguments["remote"]]).strip()
+        if remote_url != arguments["expected_remote_url"]:
+            raise PermissionError("Git remote URL changed or was not preflighted")
+        remote_host = _remote_host(arguments["expected_remote_url"])
+        remote_url_hash = hashlib.sha256(
+            arguments["expected_remote_url"].encode("utf-8")
+        ).hexdigest()
         if arguments["expected_remote_url_hash"] != remote_url_hash:
             raise PermissionError("Git remote URL changed or was not preflighted")
         self._redeem(name, payload, arguments)
-        _assert_local_head(repository, arguments["expected_head"])
-        current_url = _git(repository, ["remote", "get-url", arguments["remote"]]).strip()
-        if hashlib.sha256(current_url.encode("utf-8")).hexdigest() != remote_url_hash:
+        _assert_local_source(
+            repository,
+            arguments["branch"],
+            arguments["expected_source_oid"],
+        )
+        current_url = _git(repository, ["remote", "get-url", "--push", arguments["remote"]]).strip()
+        if current_url != arguments["expected_remote_url"]:
             raise PermissionError("Git remote URL changed after authorization")
+        _assert_non_force_fast_forward(repository, arguments)
         args = ["push"]
         if arguments["dry_run"]:
             args.append("--dry-run")
+        # A lease is required for both normal and force flows.  The normal
+        # path separately proves its update is fast-forward before using the
+        # lease, so this CAS option cannot turn an unapproved non-FF update
+        # into a force push.
         args.append(
             "--force-with-lease="
-            f"refs/heads/{arguments['branch']}:{arguments['expected_remote_oid']}"
+            f"refs/heads/{arguments['branch']}:"
+            f"{arguments['expected_remote_oid']}"
         )
         if arguments["set_upstream"]:
             args.append("--set-upstream")
-        exact_refspec = (
-            f"refs/heads/{arguments['branch']}:"
-            f"refs/heads/{arguments['branch']}"
-        )
-        args.extend(["--", arguments["remote"], exact_refspec])
+        # Never push a mutable local branch name.  The source side is the
+        # object ID sealed into the authority receipt; changing the branch
+        # after approval cannot change the bytes that reach the remote.
+        exact_refspec = f"{arguments['expected_source_oid']}:refs/heads/{arguments['branch']}"
+        # Use the captured push URL itself.  Passing the remote name would
+        # re-read .git/config inside `git push`, allowing a retarget after the
+        # last hash check to choose a different network destination.
+        args.extend(["--", arguments["expected_remote_url"], exact_refspec])
         output = _git(repository, args, timeout=180)
         return {
             "workspace_id": str(payload.get("workspace_id") or ""),
-            "repository_root": repository.relative_to(root).as_posix()
-            if repository != root
-            else ".",
+            "repository_root": (
+                repository.relative_to(root).as_posix() if repository != root else "."
+            ),
             "remote": arguments["remote"],
             "remote_host": remote_host,
+            "remote_url": arguments["expected_remote_url"],
             "branch": arguments["branch"],
+            "source_oid": arguments["expected_source_oid"],
+            "expected_remote_oid": arguments["expected_remote_oid"],
             "force_with_lease": arguments["force_with_lease"],
             "dry_run": arguments["dry_run"],
             "published": not arguments["dry_run"],
@@ -91,9 +116,7 @@ class GitPublishService:
             raise PermissionError("Git repository root escapes workspace") from exc
         return root, repository
 
-    def _redeem(
-        self, name: str, payload: Mapping[str, Any], arguments: Mapping[str, Any]
-    ) -> None:
+    def _redeem(self, name: str, payload: Mapping[str, Any], arguments: Mapping[str, Any]) -> None:
         result = self.client.invoke(
             AUTHORITY,
             "redeem",
@@ -127,9 +150,9 @@ def _arguments(payload: Mapping[str, Any], *, dry_run: bool) -> dict[str, Any]:
     branch = str(payload.get("branch") or "").strip()
     if not _REMOTE.fullmatch(remote):
         raise ValueError("Git remote name is invalid")
-    if not _NAME.fullmatch(branch) or branch.startswith(('-', '/')) or ".." in branch:
+    if not _NAME.fullmatch(branch) or branch.startswith(("-", "/")) or ".." in branch:
         raise ValueError("Git branch is invalid")
-    expected_head = _oid(payload.get("expected_head"))
+    expected_source_oid = _oid(payload.get("expected_source_oid") or payload.get("expected_head"))
     expected_remote_oid = _oid(
         payload.get("expected_remote_oid"),
         allow_zero=True,
@@ -137,16 +160,20 @@ def _arguments(payload: Mapping[str, Any], *, dry_run: bool) -> dict[str, Any]:
     expected_mount_revision = int(payload.get("expected_mount_revision") or -1)
     if expected_mount_revision < 1:
         raise ValueError("expected_mount_revision is required")
+    expected_remote_url = str(payload.get("expected_remote_url") or "").strip()
+    _remote_host(expected_remote_url)
+    expected_remote_url_hash = str(payload.get("expected_remote_url_hash") or "").strip()
+    if hashlib.sha256(expected_remote_url.encode("utf-8")).hexdigest() != expected_remote_url_hash:
+        raise ValueError("Git remote URL snapshot is invalid")
     return {
         "remote": remote,
         "branch": branch,
         "force_with_lease": bool(payload.get("force_with_lease", False)),
         "set_upstream": bool(payload.get("set_upstream", False)),
         "dry_run": dry_run,
-        "expected_remote_url_hash": str(
-            payload.get("expected_remote_url_hash") or ""
-        ).strip(),
-        "expected_head": expected_head,
+        "expected_remote_url": expected_remote_url,
+        "expected_remote_url_hash": expected_remote_url_hash,
+        "expected_source_oid": expected_source_oid,
         "expected_remote_oid": expected_remote_oid,
         "expected_mount_revision": expected_mount_revision,
     }
@@ -154,17 +181,85 @@ def _arguments(payload: Mapping[str, Any], *, dry_run: bool) -> dict[str, Any]:
 
 def _oid(value: Any, *, allow_zero: bool = False) -> str:
     normalized = str(value or "").strip().lower()
-    if allow_zero and normalized == "0" * 40:
+    if allow_zero and _is_zero_oid(normalized):
         return normalized
     if not re.fullmatch(r"[0-9a-f]{40,64}", normalized):
         raise ValueError("Git object ID is invalid")
     return normalized
 
 
-def _assert_local_head(repository: Path, expected_head: str) -> None:
-    current = _git(repository, ["rev-parse", "HEAD"]).strip()
-    if current != expected_head:
-        raise PermissionError("Git local ref changed after preflight")
+def _is_zero_oid(value: str) -> bool:
+    """Recognize only supported all-zero Git object-ID widths."""
+
+    return len(value) in {40, 64} and value == "0" * len(value)
+
+
+def _object_oid_width(repository: Path) -> int:
+    """Return the object-ID width selected by this repository."""
+
+    object_format = _git(repository, ["rev-parse", "--show-object-format"]).strip()
+    if object_format == "sha1":
+        return 40
+    if object_format == "sha256":
+        return 64
+    raise PermissionError("Git object format is unsupported")
+
+
+def _assert_repository_oid_widths(
+    repository: Path,
+    arguments: Mapping[str, Any],
+) -> None:
+    """Reject receipt OIDs whose width differs from the Git object format."""
+
+    object_width = _object_oid_width(repository)
+    for field in ("expected_source_oid", "expected_remote_oid"):
+        if len(str(arguments[field])) != object_width:
+            raise PermissionError(f"Git {field} does not match the repository object format")
+
+
+def _assert_local_source(
+    repository: Path,
+    branch: str,
+    expected_source_oid: str,
+) -> None:
+    """Reject a changed source branch before its immutable OID is published."""
+
+    current = _git(repository, ["rev-parse", "--verify", f"refs/heads/{branch}"]).strip()
+    if current != expected_source_oid:
+        raise PermissionError("Git local source ref changed after preflight")
+
+
+def _assert_non_force_fast_forward(
+    repository: Path,
+    arguments: Mapping[str, Any],
+) -> None:
+    """Require a normal leased push to remain a genuine fast-forward."""
+
+    if arguments["force_with_lease"]:
+        return
+    expected_remote_oid = arguments["expected_remote_oid"]
+    if _is_zero_oid(expected_remote_oid):
+        return
+    completed = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "merge-base",
+            "--is-ancestor",
+            expected_remote_oid,
+            arguments["expected_source_oid"],
+        ],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise PermissionError(
+            "Git normal publication is not a fast-forward from the approved remote"
+        )
 
 
 def _remote_host(remote_url: str) -> str:

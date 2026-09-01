@@ -491,7 +491,7 @@ def test_lifecycle_ignores_ambient_limactl_and_reports_direct_vz_failure(
         lambda: None,
     )
 
-    lifecycle = PackVMLifecycleV4()
+    lifecycle = PackVMLifecycleV4(macos_vz_provisioner.default_packvm_provisioner())
 
     assert shutil.which("limactl") == str(limactl)
     assert isinstance(lifecycle._provisioner, MacOSVZProvisioner)

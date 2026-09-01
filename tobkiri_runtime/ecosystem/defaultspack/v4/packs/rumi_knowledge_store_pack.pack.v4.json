@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:8fe42baa26e51b2f26cf2ed1c655234b5f5f473d301b50aa0e1a4824e8e77b5f",
+      "digest": "sha256:70a78e87fd7ff89e87520587bd0ff5f152309786288e02800cc6e2156019ef14",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -67,9 +67,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:7ef869be74baf850bb0c244bad81a9abc6d00012e1110644bb70cf827dde43e5",
-    "contract_catalog_digest": "sha256:dfebb05eec3f4567b09fb9f2feef662877b93bb8a838c948a377f016f18667fa",
-    "source_identity": "sha256:e6336b9d1c81b4be1e4cd4673d61c0a5c2936ad22fb1b1d226f8c551c72ab342"
+    "source_identity": "sha256:54b940803fcc93f9a18effbb3ae568fc2ed9bfbd16c8dd6ffbaeadc84ddad740",
+    "artifact_set_digest": "sha256:a1462e6c39b94aed3be5f5c28ee7e6a61418dce9c5cba8832d958a37eb6eb927",
+    "contract_catalog_digest": "sha256:81e1dc2025ea37ddff82e6bcefc99cd0de2029757ea9970a1dfdb0797f293dda"
   },
   "migration": {
     "compatibility": "read_only",
@@ -85,37 +85,28 @@
   },
   "operation_catalog": [
     {
-      "contract_reference": "tobkiri.action.knowledge.manage.v1",
-      "effect_ceiling": [
-        "capability:knowledge.manage",
-        "host:brokered-execution"
-      ],
       "operation_id": "rumi_knowledge_store_pack.knowledge-manage",
       "owner": "rumi_knowledge_store_pack",
+      "contract_reference": "tobkiri.action.knowledge.manage.v1",
       "provider_id": "rumi_knowledge_store_pack.knowledge-store.manage",
-      "source_kind": "canonical_v4_contract"
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
     },
     {
-      "contract_reference": "tobkiri.action.knowledge.migrate.v1",
-      "effect_ceiling": [
-        "capability:knowledge.migrate",
-        "host:brokered-execution"
-      ],
       "operation_id": "rumi_knowledge_store_pack.knowledge-migrate",
       "owner": "rumi_knowledge_store_pack",
+      "contract_reference": "tobkiri.action.knowledge.migrate.v1",
       "provider_id": "rumi_knowledge_store_pack.knowledge-store.migrate",
-      "source_kind": "canonical_v4_contract"
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
     },
     {
-      "contract_reference": "tobkiri.resource.knowledge.v1",
-      "effect_ceiling": [
-        "capability:knowledge.read",
-        "host:brokered-execution"
-      ],
       "operation_id": "rumi_knowledge_store_pack.knowledge-resource",
       "owner": "rumi_knowledge_store_pack",
+      "contract_reference": "tobkiri.resource.knowledge.v1",
       "provider_id": "rumi_knowledge_store_pack.knowledge-store.resource",
-      "source_kind": "canonical_v4_contract"
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
     }
   ],
   "pack": {
@@ -127,47 +118,56 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_knowledge_store_pack/pack.v4.json",
+    "source_digest": "sha256:54b940803fcc93f9a18effbb3ae568fc2ed9bfbd16c8dd6ffbaeadc84ddad740",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:963928f6bd96db28b476c21548244b46ae8f5f1e2b2d470d3ad1f225c0f2b725",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "input_inventory_digest": "sha256:603047a3737d9d8945de2c982ebfc0f93fecba23df58073690abb81091bbcfc8",
+    "normative": true,
     "evidence": [
       {
-        "digest": "sha256:e6336b9d1c81b4be1e4cd4673d61c0a5c2936ad22fb1b1d226f8c551c72ab342",
-        "path": "schemas/pack_v4_catalog.v1.json",
-        "rule_id": "canonical-pack-v4-source-record"
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+      },
+      {
+        "path": "ecosystem/rumi_knowledge_store_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:54b940803fcc93f9a18effbb3ae568fc2ed9bfbd16c8dd6ffbaeadc84ddad740"
       }
-    ],
-    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
-    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
-    "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:e6336b9d1c81b4be1e4cd4673d61c0a5c2936ad22fb1b1d226f8c551c72ab342",
-    "source_kind": "migration",
-    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_knowledge_store_pack"
+    ]
   },
   "provider_catalog": [
     {
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.manage",
+      "owner": "rumi_knowledge_store_pack",
       "contract_reference": "tobkiri.action.knowledge.manage.v1",
       "operations": [
         "rumi_knowledge_store_pack.knowledge-manage"
-      ],
-      "owner": "rumi_knowledge_store_pack",
-      "provider_id": "rumi_knowledge_store_pack.knowledge-store.manage"
+      ]
     },
     {
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.migrate",
+      "owner": "rumi_knowledge_store_pack",
       "contract_reference": "tobkiri.action.knowledge.migrate.v1",
       "operations": [
         "rumi_knowledge_store_pack.knowledge-migrate"
-      ],
-      "owner": "rumi_knowledge_store_pack",
-      "provider_id": "rumi_knowledge_store_pack.knowledge-store.migrate"
+      ]
     },
     {
+      "provider_id": "rumi_knowledge_store_pack.knowledge-store.resource",
+      "owner": "rumi_knowledge_store_pack",
       "contract_reference": "tobkiri.resource.knowledge.v1",
       "operations": [
         "rumi_knowledge_store_pack.knowledge-resource"
-      ],
-      "owner": "rumi_knowledge_store_pack",
-      "provider_id": "rumi_knowledge_store_pack.knowledge-store.resource"
+      ]
     }
   ],
   "requirements": {

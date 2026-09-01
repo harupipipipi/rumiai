@@ -6,7 +6,7 @@ import math
 import re
 from typing import Any, Callable
 
-from core_runtime.ai_input_token_estimator import estimate_tokens
+from .ai_input_token_estimator import estimate_tokens
 
 
 TokenCounter = Callable[[str], int]

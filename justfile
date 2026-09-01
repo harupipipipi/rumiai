@@ -21,7 +21,7 @@ test *args:
 # Run the focused defaultspack coding/tooling regression cluster.
 tooling-test:
     python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
-    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "tooling-test-{run}.log" --cwd tobkiri_runtime -- python -m pytest \
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "tooling-test-{run}.log" --cwd tobkiri_runtime -- python -B -m pytest \
         tests/test_defaultspack_provider_tool_schema.py \
         tests/test_defaultspack_tool_protocol_v2.py \
         tests/test_defaultspack_terminal_policy.py \
@@ -50,6 +50,7 @@ integrity:
 # Run the Wave 1 repository-wide pack architecture boundary gate.
 pack-architecture:
     python scripts/quality/scan_pack_architecture.py
+    python scripts/quality/check_core_no_favoritism.py
 
 # Validate v4 schemas, provenance, migration guards, scanners, and inventory.
 pack-architecture-v4:

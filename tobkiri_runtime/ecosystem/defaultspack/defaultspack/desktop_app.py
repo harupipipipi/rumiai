@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from functools import partial
 import json
 import os
 import signal
@@ -409,9 +410,20 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
         runtime_user_data_root,
     )
     from core_runtime.di_container import get_container
-    from core_runtime.frontend_contract_routes import (
+    from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
         load_frontend_contract_bindings,
         resolve_frontend_contract_map_path,
+    )
+    from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+        defaultspack_capability_binding,
+        defaultspack_capability_snapshot_mapping,
+    )
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_activation_snapshot_loader,
+        defaultspack_packvm_backend_factory,
+    )
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
     )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
     from tobkiri_host.runtime import install_dispatch_session
@@ -434,9 +446,13 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
         bundle_root=bundle_root,
         ecosystem_root=ecosystem_root,
         authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
-        packvm_provisioner=packvm_lifecycle,
+        packvm_provisioner=defaultspack_packvm_backend_factory(packvm_lifecycle),
         packvm_readiness_reader=packvm_lifecycle.readiness_snapshot,
-        frontend_contract_bindings=bindings,
+        http_contract_bindings=bindings,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
+        capability_binding_selector=defaultspack_capability_binding,
     )
     install_dispatch_session(get_container(), session)
     _write_launch_event(
@@ -657,9 +673,33 @@ def main(argv: list[str] | None = None) -> int:
         ProfileReconfirmationRequired,
     )
     from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
+    from core_runtime.di_container import get_container
+    from ecosystem.defaultspack.backend.sandbox.isolation import (
+        ManagedSandboxSupervisor,
+    )
+    from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+        default_packvm_provisioner,
+    )
+    from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+        defaultspack_capability_snapshot,
+    )
+    from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+        DefaultspackHTTPPresentation,
+    )
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_runtime_capture_inputs,
+    )
 
-    packvm_lifecycle = PackVMLifecycleV4()
-    lifecycle = AppLifecycleManager(packvm_lifecycle=packvm_lifecycle)
+    packvm_lifecycle = PackVMLifecycleV4(default_packvm_provisioner())
+    get_container().register("managed_sandbox_supervisor", ManagedSandboxSupervisor)
+    runtime_capture_factory = partial(
+        defaultspack_runtime_capture_inputs,
+        packvm_provisioner=packvm_lifecycle,
+    )
+    lifecycle = AppLifecycleManager(
+        packvm_lifecycle=packvm_lifecycle,
+        runtime_capture_factory=runtime_capture_factory,
+    )
     reconfirmation_error: str | None = None
     try:
         dispatch_session, contract_bindings = _restore_active_profile_contracts(packvm_lifecycle)
@@ -707,6 +747,9 @@ def main(argv: list[str] | None = None) -> int:
         dispatch_session=dispatch_session,
         app_lifecycle_manager=lifecycle,
         contract_bindings=contract_bindings,
+        runtime_capture_factory=runtime_capture_factory,
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
         web_mounts=web_mounts,
         packvm_lifecycle=packvm_lifecycle,
         host_contract=host_contract,

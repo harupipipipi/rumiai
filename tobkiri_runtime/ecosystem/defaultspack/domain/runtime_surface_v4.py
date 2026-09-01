@@ -309,7 +309,7 @@ class RuntimeProfileChangeService:
         self._surface_service = surface_service
         self._bundle_root = bundle_root
         self._lock = threading.RLock()
-        from .bootstrap.profile_capture import runtime_user_data_root
+        from core_runtime.bootstrap.profile_capture import runtime_user_data_root
 
         self._user_data_root = (
             Path(user_data_root).resolve()
@@ -318,7 +318,7 @@ class RuntimeProfileChangeService:
         )
         if store_path is None:
             store_path = self._user_data_root / "control" / "reconciliation-v4.sqlite3"
-        from .control_reconciliation_v4 import ControlReconciliationStore
+        from core_runtime.control_reconciliation_v4 import ControlReconciliationStore
 
         self._store = ControlReconciliationStore(store_path)
 
@@ -370,7 +370,7 @@ class RuntimeProfileChangeService:
             revision, NO_ACTIVE_PROFILE_REVISION
         ) and hmac.compare_digest(plan_digest, NO_ACTIVE_PLAN_DIGEST)
         if no_active_predecessor:
-            from .active_profile_store_v4 import ActiveProfileStore
+            from core_runtime.active_profile_store_v4 import ActiveProfileStore
 
             if (
                 ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
@@ -425,7 +425,7 @@ class RuntimeProfileChangeService:
             catalog_digest = str(catalog_data["catalog_digest"])
             bundle_digest = str(catalog_data["bundle_lock_digest"])
         try:
-            from .pack_control_v4 import resolve_profile_pack_set
+            from core_runtime.pack_control_v4 import resolve_profile_pack_set
 
             if authoritative_selection:
                 if self._bundle_root is None:
@@ -708,7 +708,7 @@ class RuntimeProfileChangeService:
                 user_data_root=self._user_data_root,
             )
             try:
-                from .pack_control_v4 import activate_resolved_profile_pack_set
+                from core_runtime.pack_control_v4 import activate_resolved_profile_pack_set
 
                 bundle_binding = (
                     {}
@@ -801,7 +801,7 @@ class RuntimeProfileChangeService:
     ) -> None:
         """Fence every ceremony transition to the reviewed Host predecessor."""
 
-        from .active_profile_store_v4 import ActiveProfileStore
+        from core_runtime.active_profile_store_v4 import ActiveProfileStore
 
         current = ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
         expects_none = (
@@ -976,13 +976,13 @@ class RuntimeSurfaceService:
 
     @staticmethod
     def _load_active() -> ActiveDefaultProfile:
-        from .bootstrap.profile_capture import capture_active_profile
+        from core_runtime.bootstrap.profile_capture import capture_active_profile
 
         return capture_active_profile()
 
     @staticmethod
     def _load_catalog() -> BundledCatalog:
-        from .bootstrap.profile_capture import host_profile_catalog
+        from core_runtime.bootstrap.profile_capture import host_profile_catalog
 
         return host_profile_catalog()
 
@@ -1078,8 +1078,8 @@ class RuntimeSurfaceService:
             deadline.checkpoint()
             candidate_records: tuple[Mapping[str, Any], ...] = ()
             if session_id is not None:
-                from .bootstrap.profile_capture import runtime_user_data_root
-                from .control_reconciliation_v4 import ControlReconciliationStore
+                from core_runtime.bootstrap.profile_capture import runtime_user_data_root
+                from core_runtime.control_reconciliation_v4 import ControlReconciliationStore
 
                 candidate_records = ControlReconciliationStore(
                     runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
@@ -1095,7 +1095,7 @@ class RuntimeSurfaceService:
                 for record in candidate_records
             )
             catalog = _catalog_for_effective_sets(catalog, effective_sets)
-            from .profile_catalog_v4 import project_profile_catalog
+            from core_runtime.profile_catalog_v4 import project_profile_catalog
 
             projection = project_profile_catalog(
                 catalog,
@@ -1138,7 +1138,7 @@ class RuntimeSurfaceService:
 
         def verify(deadline: _ReadDeadline) -> None:
             try:
-                from .profile_catalog_v4 import require_profile_catalog_binding
+                from core_runtime.profile_catalog_v4 import require_profile_catalog_binding
 
                 deadline.checkpoint()
                 catalog = self._catalog_loader()
@@ -1519,7 +1519,7 @@ class RuntimeSurfaceService:
     ) -> Mapping[str, Any]:
         """Return one non-active catalog row without creating an execution plan."""
 
-        from .profile_catalog_v4 import project_profile_catalog
+        from core_runtime.profile_catalog_v4 import project_profile_catalog
 
         try:
             projection = project_profile_catalog(
@@ -2045,9 +2045,11 @@ class RuntimeSurfaceService:
         deadline.checkpoint()
         if self._frontend_contract_bindings is not None:
             return self._frontend_contract_bindings
-        from .frontend_contract_routes import load_frontend_contract_bindings
+        from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+            load_frontend_contract_bindings,
+        )
 
-        runtime_root = Path(__file__).resolve().parents[1]
+        runtime_root = Path(__file__).resolve().parents[3]
         application = _active_application_manifest(snapshot)
         map_artifact = _frontend_map_artifact(application)
         try:
@@ -2101,6 +2103,82 @@ class RuntimeSurfaceService:
             raise
         except Exception:
             return None
+
+
+def create_runtime_surface_services(
+    **kwargs: object,
+) -> tuple[RuntimeSurfaceService, RuntimeProfileChangeService]:
+    """Compose Defaultspack's surface behind the generic Host control port."""
+
+    snapshot_loader = _optional_runtime_reader(kwargs, "snapshot_loader")
+    catalog_loader = _optional_runtime_reader(kwargs, "catalog_loader")
+    user_settings_reader = _optional_runtime_reader(kwargs, "user_settings_reader")
+    packvm_readiness_reader = _optional_runtime_reader(
+        kwargs,
+        "packvm_readiness_reader",
+    )
+    capability_binding_reader = _optional_runtime_reader(
+        kwargs,
+        "capability_binding_reader",
+    )
+    frontend_contract_bindings = _optional_frontend_contract_bindings(kwargs)
+    bundle_root = _optional_path_argument(kwargs, "bundle_root")
+    user_data_root = _optional_path_argument(kwargs, "user_data_root")
+    surface = RuntimeSurfaceService(
+        snapshot_loader=snapshot_loader,
+        catalog_loader=catalog_loader,
+        user_settings_reader=user_settings_reader,
+        packvm_readiness_reader=packvm_readiness_reader,
+        capability_binding_reader=capability_binding_reader,
+        frontend_contract_bindings=frontend_contract_bindings,
+    )
+    changes = RuntimeProfileChangeService(
+        surface_service=surface,
+        bundle_root=bundle_root,
+        user_data_root=user_data_root,
+    )
+    return surface, changes
+
+
+def _optional_runtime_reader(
+    kwargs: Mapping[str, object],
+    name: str,
+) -> Callable[[], Any] | None:
+    """Read an optional callback from the Host's neutral composition bag."""
+
+    value = kwargs.get(name)
+    if value is None:
+        return None
+    if not callable(value):
+        raise TypeError(f"{name} must be callable")
+    return value
+
+
+def _optional_frontend_contract_bindings(
+    kwargs: Mapping[str, object],
+) -> tuple[object, ...] | None:
+    """Read immutable frontend bindings without accepting mutable sequences."""
+
+    value = kwargs.get("frontend_contract_bindings")
+    if value is None:
+        return None
+    if not isinstance(value, tuple):
+        raise TypeError("frontend_contract_bindings must be a tuple")
+    return value
+
+
+def _optional_path_argument(
+    kwargs: Mapping[str, object],
+    name: str,
+) -> Path | None:
+    """Read an optional filesystem root from the neutral composition bag."""
+
+    value = kwargs.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, Path):
+        raise TypeError(f"{name} must be a pathlib.Path")
+    return value
 
 
 def _map_profile_error(error: ProfileResolutionDenied) -> RuntimeSurfaceError:
@@ -2253,7 +2331,7 @@ def _verified_route_projection(
 
 
 def _principal_id(value: Mapping[str, Any]) -> str:
-    from .authority.v4 import FunctionPrincipal
+    from core_runtime.authority.v4 import FunctionPrincipal
 
     return FunctionPrincipal.from_dict(value).principal_id
 
@@ -2390,7 +2468,7 @@ def _captured_lifecycle_projection(
     """Read the exact active Pack-control catalog or fail the surface closed."""
 
     try:
-        from .pack_control_v4 import capture_pack_control_catalog
+        from core_runtime.pack_control_v4 import capture_pack_control_catalog
 
         return capture_pack_control_catalog(
             active=None if snapshot is None else snapshot.active
@@ -2517,8 +2595,8 @@ def _validated_contract_catalogs(
 ) -> dict[str, Mapping[str, Any]]:
     """Load only digest-pinned Contract catalogs for the selected Pack closure."""
 
-    from .external_pack_catalog_v4 import resolve_admitted_pack_root
-    from .pack_boundary import PackBoundaryError
+    from core_runtime.external_pack_catalog_v4 import resolve_admitted_pack_root
+    from core_runtime.pack_boundary import PackBoundaryError
 
     catalogs: dict[str, Mapping[str, Any]] = {}
     selected_pack_ids = sorted(
@@ -2702,7 +2780,7 @@ def _catalog_for_effective_sets(
     missing = {pack_id for pack_id in expected if pack_id not in catalog.packs}
     if not missing:
         return catalog
-    from .external_pack_catalog_v4 import resolve_admitted_pack_root
+    from core_runtime.external_pack_catalog_v4 import resolve_admitted_pack_root
 
     packs = dict(catalog.packs)
     for pack_id in sorted(missing):
@@ -2750,9 +2828,13 @@ def _commit_authority_profile_approval(
 ) -> Any:
     """Commit immutable approval provenance and its Authority audit event."""
 
-    from .authority.v4 import ApprovalRecord, AuthorityStore, FunctionPrincipal
-    from .authority.v4_models import authority_digest
-    from .pack_control_v4 import CONTROL_PRESENTATION_CONTRACT
+    from core_runtime.authority.v4 import (
+        ApprovalRecord,
+        AuthorityStore,
+        FunctionPrincipal,
+    )
+    from core_runtime.authority.v4_models import authority_digest
+    from core_runtime.pack_control_v4 import CONTROL_PRESENTATION_CONTRACT
 
     bindings = candidate.resolved.plan.get("bindings")
     approval_bindings = [
@@ -2830,7 +2912,7 @@ def _verify_authority_profile_approval(
 ) -> None:
     """Re-authenticate the durable approval immediately before activation."""
 
-    from .authority.v4 import AuthorityStore
+    from core_runtime.authority.v4 import AuthorityStore
 
     try:
         with AuthorityStore(user_data_root / "authority" / "v4.sqlite3") as authority:
@@ -2862,7 +2944,7 @@ def _map_change_error(error: Exception) -> RuntimeSurfaceError:
 
     if isinstance(error, RuntimeSurfaceError):
         return error
-    from .pack_control_v4 import PackControlDenied
+    from core_runtime.pack_control_v4 import PackControlDenied
 
     if isinstance(error, PackControlDenied):
         typed_codes = {

@@ -171,7 +171,7 @@ class FrontendRegistry:
     def _dynamic_frontend_catalog() -> dict[str, Any] | None:
         """Project the active core-owned frontend catalog into the legacy API."""
         try:
-            from core_runtime.frontend_host import build_frontend_catalog
+            from .host import build_frontend_catalog
             from core_runtime.resolved_profile_scope import persisted_resolved_profile
 
             plan = persisted_resolved_profile()

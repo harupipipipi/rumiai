@@ -60,7 +60,6 @@ from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import 
     PackVMImageAuthority,
     PackVMImageCache,
     PackVMImageCancelled,
-    PackVMImageProgress,
     PackVMPinnedImage,
 )
 
@@ -648,7 +647,7 @@ class MacOSVZProvisioner:
         self,
         request: PackVMProvisioningRequest,
         *,
-        progress: Callable[[PackVMImageProgress], None] | None = None,
+        progress: Callable[[Any], None] | None = None,
         cancelled: Callable[[], bool] | None = None,
     ) -> PackVMDoctor:
         """Fetch the exact raw EFI image and construct private VZ state once."""

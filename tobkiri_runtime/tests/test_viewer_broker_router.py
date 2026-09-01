@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from tests.conformance_support.host_contract import host_contract
+from tests.conformance_support.host_contract import host_contract  # noqa: E402
 
 
 def test_debug_status_rejects_fake_broker_with_same_bearer_token():
@@ -524,7 +524,7 @@ def test_computer_router_skips_viewer_for_internal_host_execution(tmp_path, monk
 
     monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
     monkeypatch.setattr(computer_router.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(computer_router, "run_host_contract_action", fake_run)
+    monkeypatch.setattr(computer_router, "_run_captured_host_contract_action", fake_run)
 
     def unexpected_viewer_call(cls):
         del cls

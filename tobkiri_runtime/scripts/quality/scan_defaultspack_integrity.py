@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import hashlib
 import re
 import sys
@@ -32,6 +33,16 @@ V4_DOCUMENT_SCHEMAS = {
 }
 V4_BUNDLE_LOCK = "bundle.lock.json"
 V4_BUNDLE_DEFAULTSPACK = "packs/defaultspack.pack.v4.json"
+V4_DEFAULTSPACK_CANONICAL_SOURCE = (
+    DEFAULTSPACK_ROOT / "pack.v4.json"
+).relative_to(ROOT).as_posix()
+V4_DEFAULTSPACK_PROJECTION_GENERATOR = (
+    "tobkiri.scripts.generate_defaultspack_v4_bundle"
+)
+V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH = (
+    "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py"
+)
+V4_DEFAULTSPACK_PROJECTION_GENERATOR_VERSION = "2.1.0"
 V4_SOURCE_ONLY_COMPANIONS = frozenset(
     {
         "defaults.profile.intent.v1.json",
@@ -319,6 +330,138 @@ def _check_executable_catalog(
         )
 
 
+def _projection_semantics(document: dict[str, Any]) -> dict[str, Any]:
+    """Return Pack semantics after removing generated projection-only fields."""
+
+    projection = copy.deepcopy(document)
+    projection.pop("provenance", None)
+    projection.pop("integrity", None)
+    artifacts = projection.get("artifacts")
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            if (
+                isinstance(artifact, dict)
+                and artifact.get("path") == "executables.v4.json"
+            ):
+                artifact.pop("digest", None)
+    return projection
+
+
+def _check_defaultspack_bundle_projection(
+    errors: list[str],
+    root: Path,
+    bundle_root: Path,
+    canonical_pack: dict[str, Any],
+    bundled_pack: dict[str, Any],
+) -> None:
+    """Verify the bundle Pack is a source-bound derivative, never a byte mirror."""
+
+    canonical_path = root / "pack.v4.json"
+    projection_path = bundle_root / V4_BUNDLE_DEFAULTSPACK
+    try:
+        canonical_raw = canonical_path.read_bytes()
+        projection_raw = projection_path.read_bytes()
+    except OSError as exc:
+        errors.append(f"cannot read bundled defaultspack projection: {exc}")
+        return
+    if projection_raw == canonical_raw:
+        errors.append("bundled defaultspack Pack must be a generated projection")
+
+    provenance = bundled_pack.get("provenance")
+    if not isinstance(provenance, dict):
+        errors.append("bundled defaultspack projection provenance is missing")
+        return
+    source_digest = _sha256_file(canonical_path)
+    generator_path = _safe_file(
+        errors,
+        ROOT.parent,
+        V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+        "defaultspack projection generator",
+    )
+    generator_digest = (
+        _sha256_file(generator_path) if generator_path is not None else None
+    )
+    expected_inventory = canonical_digest(
+        [
+            {
+                "path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+                "digest": source_digest,
+            }
+        ]
+    )
+    expected_content_root = canonical_digest(
+        {
+            "source_path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+            "source_digest": source_digest,
+            "generator_path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+            "generator_digest": generator_digest,
+            "input_inventory_digest": expected_inventory,
+        }
+    )
+    expected_values: dict[str, object] = {
+        "schema": "io.tobkiri.provenance.v2",
+        "source_kind": "generated",
+        "source_path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+        "source_digest": source_digest,
+        "repository_commit": canonical_pack.get("provenance", {}).get(
+            "repository_commit"
+        ),
+        "repository_commit_trusted": False,
+        "generator": V4_DEFAULTSPACK_PROJECTION_GENERATOR,
+        "generator_version": V4_DEFAULTSPACK_PROJECTION_GENERATOR_VERSION,
+        "generator_path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+        "generator_digest": generator_digest,
+        "input_inventory_digest": expected_inventory,
+        "content_root_digest": expected_content_root,
+        "normative": True,
+    }
+    for field, expected in expected_values.items():
+        if provenance.get(field) != expected:
+            errors.append(
+                "bundled defaultspack projection provenance is stale: "
+                f"{field}"
+            )
+    expected_evidence = [
+        {
+            "path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+            "rule_id": "normative-generator-bytes",
+            "digest": generator_digest,
+        },
+        {
+            "path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+            "rule_id": "normative-input-bytes",
+            "digest": source_digest,
+        },
+    ]
+    if provenance.get("evidence") != expected_evidence:
+        errors.append("bundled defaultspack projection provenance evidence is stale")
+
+    if _projection_semantics(bundled_pack) != _projection_semantics(canonical_pack):
+        errors.append(
+            "bundled defaultspack projection semantics differ from canonical Pack"
+        )
+
+    integrity = bundled_pack.get("integrity")
+    if not isinstance(integrity, dict):
+        errors.append("bundled defaultspack projection integrity is missing")
+        return
+    if integrity.get("source_identity") != source_digest:
+        errors.append("bundled defaultspack projection source identity is stale")
+    canonical_identity = canonical_pack.get("integrity", {}).get("source_identity")
+    if integrity.get("source_identity") == canonical_identity:
+        errors.append(
+            "bundled defaultspack projection reused canonical source identity"
+        )
+    if integrity.get("artifact_set_digest") != canonical_digest(
+        bundled_pack.get("artifacts", [])
+    ):
+        errors.append("bundled defaultspack projection artifact set is stale")
+    if integrity.get("contract_catalog_digest") != canonical_digest(
+        bundled_pack.get("contracts", [])
+    ):
+        errors.append("bundled defaultspack projection contract catalog is stale")
+
+
 def _check_bundle(
     errors: list[str], root: Path, pack: dict[str, Any]
 ) -> None:
@@ -464,11 +607,17 @@ def _check_bundle(
     else:
         candidate = bundle_root / V4_BUNDLE_DEFAULTSPACK
         if candidate.is_file() and not candidate.is_symlink():
-            try:
-                if candidate.read_bytes() != (root / "pack.v4.json").read_bytes():
-                    errors.append("bundled defaultspack Pack differs from pack.v4.json")
-            except OSError as exc:
-                errors.append(f"cannot compare bundled defaultspack Pack: {exc}")
+            bundled_pack = bundle_documents.get(("pack", "defaultspack"))
+            if bundled_pack is None:
+                errors.append("v4 bundle defaultspack Pack document is unavailable")
+            else:
+                _check_defaultspack_bundle_projection(
+                    errors,
+                    root,
+                    bundle_root,
+                    pack,
+                    bundled_pack,
+                )
 
 
 def check_v4_integrity(

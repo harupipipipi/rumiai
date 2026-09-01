@@ -23,10 +23,27 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
-from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
-from core_runtime.frontend_contract_routes import (
-    FrontendContractBinding,
-    FrontendContractTarget,
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractBinding as FrontendContractBinding,
+    HTTPContractTarget as FrontendContractTarget,
+)
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+    load_frontend_contract_bindings,
+)
+from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+    defaultspack_capability_binding,
+    defaultspack_capability_snapshot,
+    defaultspack_capability_snapshot_mapping,
+)
+from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+    DefaultspackHTTPPresentation,
+)
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    defaultspack_activation_snapshot_loader,
+    defaultspack_runtime_capture_inputs,
+)
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+    create_runtime_surface_services,
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
@@ -141,13 +158,20 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         bundle_root=bundle_root,
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
-        frontend_contract_bindings=bindings,
+        http_contract_bindings=bindings,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
+        capability_binding_selector=defaultspack_capability_binding,
     )
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
         dispatch_session=session,
         contract_bindings=bindings,
+        runtime_capture_factory=defaultspack_runtime_capture_inputs,
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
     )
 
     def publish_current_host_contract() -> None:
@@ -1036,7 +1060,11 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
         bundle_root=packaged_profile_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=restart_authority,
-        frontend_contract_bindings=restart_bindings,
+        http_contract_bindings=restart_bindings,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
+        capability_binding_selector=defaultspack_capability_binding,
     )
     assert (
         restarted_session.profile_id,
@@ -1059,13 +1087,20 @@ def test_authoritative_profile_catalog_selection_completes_real_http_ceremony(
         bundle_root=packaged_profile_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=restarted_authority,
-        frontend_contract_bindings=restart_bindings,
+        http_contract_bindings=restart_bindings,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
+        capability_binding_selector=defaultspack_capability_binding,
     )
     restarted_server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="desktop-bootstrap"),
         dispatch_session=restarted_session,
         contract_bindings=restart_bindings,
+        runtime_capture_factory=defaultspack_runtime_capture_inputs,
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
     )
     try:
         restarted_server.start()

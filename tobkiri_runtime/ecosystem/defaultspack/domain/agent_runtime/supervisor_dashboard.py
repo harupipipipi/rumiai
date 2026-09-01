@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
-from pathlib import Path
 from typing import Any, Iterable
 
-from .runtime_audit_helpers import redact_sensitive
-
-
-_BASE_DIR = Path(__file__).resolve().parents[1]
-_DEFAULTSPACK_IMPORT_ROOT = _BASE_DIR / "ecosystem" / "defaultspack"
+from core_runtime.runtime_audit_helpers import redact_sensitive
 
 
 STRUCTURED_OPERATION_LAYERS: list[dict[str, Any]] = [
@@ -312,22 +305,11 @@ def _runtime_metrics(
 
 def _default_agent_run_store() -> Any | None:
     try:
-        _ensure_import_roots()
-        module = importlib.import_module("domain.agent_runtime.run_store")
-        AgentRunStore = getattr(module, "AgentRunStore", None)
-        if AgentRunStore is None:
-            return None
+        from .run_store import AgentRunStore
 
         return AgentRunStore()
     except Exception:
         return None
-
-
-def _ensure_import_roots() -> None:
-    for root in (_BASE_DIR, _DEFAULTSPACK_IMPORT_ROOT):
-        value = str(root)
-        if value not in sys.path:
-            sys.path.insert(0, value)
 
 
 def _safe_call(store: Any, method_name: str, **kwargs: Any) -> list[dict[str, Any]]:

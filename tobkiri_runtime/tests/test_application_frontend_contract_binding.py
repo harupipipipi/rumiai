@@ -12,16 +12,18 @@ from urllib.parse import quote
 
 import pytest
 
-from core_runtime.frontend_contract_routes import (
-    ContractRouteError,
-    FrontendContractBinding,
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractRouteError as ContractRouteError,
+    HTTPContractBinding as FrontendContractBinding,
     contract_binding_map,
     contract_route_prefix,
-    frontend_contract_map_artifact,
     is_contract_route_path,
+    resolve_contract_route,
+)
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+    frontend_contract_map_artifact,
     load_frontend_contract_bindings,
     resolve_frontend_contract_map_path,
-    resolve_contract_route,
 )
 from tobkiri_protocol.canonical import canonical_digest
 

@@ -10,10 +10,6 @@ from typing import Any, Mapping, cast
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from ecosystem.defaultspack.domain.runtime_v4 import (
-    ActiveDefaultProfile,
-    BundledCatalog,
-)
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.errors import ProtocolError
 from tobkiri_protocol.ids import validate_artifact_digest, validate_canonical_id
@@ -22,7 +18,7 @@ _PROFILE_PACK_FIELDS = frozenset({"pack_id", "artifact_digest", "role"})
 _PROFILE_PACK_ROLES = frozenset({"backend", "contribution", "provider", "application"})
 
 
-def profile_catalog_digest(catalog: BundledCatalog) -> str:
+def profile_catalog_digest(catalog: Any) -> str:
     """Return a deterministic digest of the verified Profile catalog."""
 
     return canonical_digest(
@@ -33,7 +29,7 @@ def profile_catalog_digest(catalog: BundledCatalog) -> str:
     )
 
 
-def bundle_lock_digest(catalog: BundledCatalog) -> str:
+def bundle_lock_digest(catalog: Any) -> str:
     """Return the exact digest of the lock that admitted the catalog bytes."""
 
     lock_path = catalog.root / "bundle.lock.json"
@@ -42,7 +38,7 @@ def bundle_lock_digest(catalog: BundledCatalog) -> str:
     return "sha256:" + hashlib.sha256(lock_path.read_bytes()).hexdigest()
 
 
-def profile_definition_digest(catalog: BundledCatalog, profile_id: str) -> str:
+def profile_definition_digest(catalog: Any, profile_id: str) -> str:
     """Return one canonical Profile definition digest or fail closed."""
 
     definition = catalog.profiles.get(profile_id)
@@ -52,8 +48,8 @@ def profile_definition_digest(catalog: BundledCatalog, profile_id: str) -> str:
 
 
 def project_profile_catalog(
-    catalog: BundledCatalog,
-    active: ActiveDefaultProfile | None,
+    catalog: Any,
+    active: Any | None,
     *,
     candidates: Mapping[str, Mapping[str, Any]] | None = None,
     selected_profile_id: str | None = None,
@@ -125,7 +121,7 @@ def project_profile_catalog(
 
 
 def require_profile_catalog_binding(
-    catalog: BundledCatalog,
+    catalog: Any,
     *,
     profile_id: str,
     expected_definition_digest: str,
@@ -150,7 +146,7 @@ def require_profile_catalog_binding(
 
 
 def _project_definition(
-    catalog: BundledCatalog,
+    catalog: Any,
     profile_id: str,
     definition: Mapping[str, Any],
     *,
@@ -316,7 +312,7 @@ def _project_definition(
 
 
 def _resolved_pack_closure(
-    catalog: BundledCatalog,
+    catalog: Any,
     profile: Mapping[str, Any],
     effective_set: object,
     diagnostics: list[dict[str, str]],
@@ -474,7 +470,7 @@ def _is_valid_profile_pack_entry(item: Mapping[str, Any]) -> bool:
 
 
 def _static_pack_closure(
-    catalog: BundledCatalog,
+    catalog: Any,
     base_id: str,
     shell: Mapping[str, Any] | None,
     requested: list[dict[str, Any]],
@@ -534,7 +530,7 @@ def _static_pack_closure(
 
 
 def _base_binding(
-    catalog: BundledCatalog,
+    catalog: Any,
     base_id: str,
     base: Mapping[str, Any] | None,
 ) -> dict[str, object]:
@@ -548,7 +544,7 @@ def _base_binding(
 
 
 def _shell_binding(
-    catalog: BundledCatalog,
+    catalog: Any,
     shell_id: str,
     shell: Mapping[str, Any] | None,
 ) -> dict[str, object]:
@@ -564,7 +560,7 @@ def _shell_binding(
 
 
 def _application_binding(
-    catalog: BundledCatalog,
+    catalog: Any,
     application_rows: list[dict[str, Any]],
 ) -> dict[str, object] | None:
     if len(application_rows) != 1:

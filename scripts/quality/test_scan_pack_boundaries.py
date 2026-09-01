@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -10,10 +11,22 @@ import pytest
 
 
 SCRIPT = Path(__file__).with_name("scan_pack_boundaries.py")
+BOOTSTRAP_VERIFIER = Path(__file__).with_name("verify_pack_boundary_bootstrap.py")
 
 
 def _load_scanner() -> ModuleType:
     spec = importlib.util.spec_from_file_location("scan_pack_boundaries_test", SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_bootstrap_verifier() -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        "verify_pack_boundary_bootstrap_test", BOOTSTRAP_VERIFIER
+    )
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -26,9 +39,39 @@ def scanner() -> ModuleType:
     return _load_scanner()
 
 
+@pytest.fixture
+def bootstrap_verifier() -> ModuleType:
+    return _load_bootstrap_verifier()
+
+
 def _write_json(path: Path, value: object, *, indent: int = 2) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=indent) + "\n", encoding="utf-8")
+
+
+def _bootstrap_baseline(fingerprints: list[str]) -> dict[str, object]:
+    return {
+        "baseline_api_version": "io.tobkiri.pack-boundary-baseline.v1",
+        "policy": "exact-current-shrink-only-from-reference",
+        "summary": {"by_rule": {}, "total": len(fingerprints)},
+        "violations": [{"fingerprint": fingerprint} for fingerprint in fingerprints],
+    }
+
+
+def _trust_reference(
+    bootstrap_verifier: ModuleType, reference: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        bootstrap_verifier,
+        "EXPECTED_REFERENCE_SHA256",
+        hashlib.sha256(reference.read_bytes()).hexdigest(),
+    )
+    reference_document = json.loads(reference.read_text(encoding="utf-8"))
+    monkeypatch.setattr(
+        bootstrap_verifier,
+        "EXPECTED_REFERENCE_VIOLATION_COUNT",
+        len(reference_document["violations"]),
+    )
 
 
 def _pack(
@@ -330,6 +373,64 @@ def test_reference_baseline_rejects_simultaneous_manual_expansion(
     assert scanner.main([*args, "--update-baseline"]) == 0
 
     assert scanner.main([*args, "--reference-baseline", str(reference)]) == 1
+
+
+def test_bootstrap_reference_allows_only_shrinking_candidate(
+    bootstrap_verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.json"
+    candidate = tmp_path / "candidate.json"
+    _write_json(reference, _bootstrap_baseline(["sha256:one", "sha256:two"]))
+    _write_json(candidate, _bootstrap_baseline(["sha256:one"]))
+    _trust_reference(bootstrap_verifier, reference, monkeypatch)
+
+    bootstrap_verifier.verify_bootstrap(candidate, reference)
+
+
+def test_bootstrap_reference_rejects_candidate_expansion(
+    bootstrap_verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.json"
+    candidate = tmp_path / "candidate.json"
+    _write_json(reference, _bootstrap_baseline(["sha256:one"]))
+    _write_json(candidate, _bootstrap_baseline(["sha256:one", "sha256:two"]))
+    _trust_reference(bootstrap_verifier, reference, monkeypatch)
+
+    with pytest.raises(ValueError, match="expands the reviewed reference"):
+        bootstrap_verifier.verify_bootstrap(candidate, reference)
+
+
+def test_bootstrap_reference_rejects_candidate_as_its_own_authority(
+    bootstrap_verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    baseline = tmp_path / "baseline.json"
+    _write_json(baseline, _bootstrap_baseline(["sha256:one"]))
+    _trust_reference(bootstrap_verifier, baseline, monkeypatch)
+
+    with pytest.raises(ValueError, match="cannot authorize its own"):
+        bootstrap_verifier.verify_bootstrap(baseline, baseline)
+
+
+def test_bootstrap_reference_rejects_digest_mismatch(
+    bootstrap_verifier: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    reference = tmp_path / "reference.json"
+    candidate = tmp_path / "candidate.json"
+    _write_json(reference, _bootstrap_baseline(["sha256:one"]))
+    _write_json(candidate, _bootstrap_baseline(["sha256:one"]))
+    monkeypatch.setattr(bootstrap_verifier, "EXPECTED_REFERENCE_SHA256", "0" * 64)
+    monkeypatch.setattr(bootstrap_verifier, "EXPECTED_REFERENCE_VIOLATION_COUNT", 1)
+
+    with pytest.raises(ValueError, match="reference digest mismatch"):
+        bootstrap_verifier.verify_bootstrap(candidate, reference)
 
 
 @pytest.mark.parametrize(

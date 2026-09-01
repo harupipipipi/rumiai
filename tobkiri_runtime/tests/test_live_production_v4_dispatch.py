@@ -374,7 +374,7 @@ def test_direct_vz_auth_failure_never_falls_back_to_path_lima_or_mints_authority
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setattr(vz, "_default_state_dir", lambda: user_data / "packvm-vz")
     monkeypatch.setattr(vz, "_packaged_packvm_bundle_binding", lambda: None)
-    lifecycle = PackVMLifecycleV4()
+    lifecycle = PackVMLifecycleV4(vz.default_packvm_provisioner())
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     binding = next(
         item

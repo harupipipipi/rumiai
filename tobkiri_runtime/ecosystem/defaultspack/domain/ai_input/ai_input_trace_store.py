@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .profile_workspace import ProfileWorkspaceManager, validate_profile_id
+from core_runtime.profile_workspace import ProfileWorkspaceManager, validate_profile_id
 
 
 class AiInputTraceStore:

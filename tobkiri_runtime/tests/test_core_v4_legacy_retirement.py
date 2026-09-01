@@ -227,11 +227,14 @@ def test_canonical_startup_never_reads_or_writes_legacy_state(
         monkeypatch.setattr(Path, method_name, guard(getattr(Path, method_name)))
 
     import core_runtime.bootstrap.runtime as runtime_bootstrap
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        create_defaultspack_kernel,
+    )
 
     shutdown_pack_api_server()
     reset_container()
     monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 0)
-    kernel = runtime_bootstrap.Kernel()
+    kernel = create_defaultspack_kernel()
     try:
         result = kernel.run_startup()
         assert result["runtime_ready"] is True

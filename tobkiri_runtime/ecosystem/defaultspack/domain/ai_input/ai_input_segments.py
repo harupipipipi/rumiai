@@ -1,28 +1,22 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from typing import Any
 
 from .ai_input_models import PromptSegment, ToolSchemaSegment
 from .ai_input_token_estimator import estimate_json_tokens, estimate_tokens
-from .pack_trust import is_pack_trusted
-from .profile_workspace import ProfileWorkspaceManager, profile_workspace_payload
+from core_runtime.pack_trust import is_pack_trusted
+from core_runtime.profile_workspace import ProfileWorkspaceManager, profile_workspace_payload
 
-_DEFAULTSPACK_IMPORT_ROOT = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack"
-if str(_DEFAULTSPACK_IMPORT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_DEFAULTSPACK_IMPORT_ROOT))
-
-from ecosystem.defaultspack.domain.prompt.effective import resolve_effective_prompt  # noqa: E402
-from ecosystem.defaultspack.domain.tool.catalog_contract_client import (  # noqa: E402
+from ..prompt.effective import resolve_effective_prompt
+from ..tool.catalog_contract_client import (
     ContractToolCatalog as ToolRegistry,
 )
-from ecosystem.defaultspack.domain.tool.schema_adapter import (  # noqa: E402
+from ..tool.schema_adapter import (
     adapt_tool_definition,
     tool_name_from_definition,
 )
-from ecosystem.defaultspack.transport.registry import canonical_http_route_specs  # noqa: E402
+from ...transport.registry import canonical_http_route_specs
 
 
 def collect_prompt_segments(

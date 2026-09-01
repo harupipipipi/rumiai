@@ -20,14 +20,14 @@ from core_runtime.bootstrap.profile_capture import (
     runtime_user_data_root,
 )
 from core_runtime.authority.v4 import AuthorityStore
-from core_runtime.runtime_surface_v4 import (
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
     RUNTIME_SURFACE_API_VERSION,
     RuntimeSurfaceErrorCode,
     RuntimeProfileChangeService,
     RuntimeSurfaceError,
     RuntimeSurfaceService,
 )
-import core_runtime.runtime_surface_v4 as runtime_surface
+import ecosystem.defaultspack.domain.runtime_surface_v4 as runtime_surface
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
 from ecosystem.defaultspack.domain.runtime_v4 import ResolvedDefaultProfile
@@ -298,7 +298,9 @@ def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime)
 
 
 def test_contract_route_principal_mismatch_fails_closed(active_runtime) -> None:
-    from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
+    from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+        load_frontend_contract_bindings,
+    )
 
     catalog = BundledCatalog.load(_bundle_root())
     bindings = load_frontend_contract_bindings(

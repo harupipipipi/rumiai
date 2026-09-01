@@ -356,6 +356,7 @@ jobs:
           fi
           python scripts/quality/scan_pack_architecture.py \
             --reference-baseline "${reference}"
+          python scripts/quality/check_core_no_favoritism.py
 
       - name: Enforce shrink-only Pack boundary lint baseline
         env:
@@ -364,6 +365,8 @@ jobs:
           python -m pytest scripts/quality/test_scan_pack_boundaries.py -q
           reference="${RUNNER_TEMP}/pack-boundary-reference.json"
           baseline="scripts/quality/pack_boundary_baseline.json"
+          bootstrap_commit='5fbca365753a8bdb0de871f4036fbee4a7a23ed4'
+          bootstrap_blob='b5c7a417a3a8cdf1312eb75169f3f924da0ff7ef'
           if [ -z "${BASE_SHA}" ]; then
             echo "BASE_SHA is required for Pack boundary baseline validation" >&2
             exit 1
@@ -374,12 +377,15 @@ jobs:
           fi
           if git cat-file -e "${BASE_SHA}:${baseline}" 2>/dev/null; then
             git show "${BASE_SHA}:${baseline}" > "${reference}"
-            python scripts/quality/scan_pack_boundaries.py \
-              --reference-baseline "${reference}"
           else
-            echo "::warning::Bootstrapping reviewed Pack boundary baseline"
-            python scripts/quality/scan_pack_boundaries.py
+            echo "::warning::Using the content-addressed reviewed Pack boundary bootstrap baseline"
+            test "$(git rev-parse "${bootstrap_commit}:${baseline}")" = "${bootstrap_blob}"
+            git show "${bootstrap_commit}:${baseline}" > "${reference}"
+            python scripts/quality/verify_pack_boundary_bootstrap.py \
+              --candidate "${baseline}" --reference "${reference}"
           fi
+          python scripts/quality/scan_pack_boundaries.py \
+            --reference-baseline "${reference}"
 
       - name: Validate v4 schemas, provenance, and generated inventory
         run: python scripts/quality/validate_pack_architecture.py

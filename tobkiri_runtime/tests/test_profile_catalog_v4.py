@@ -21,7 +21,7 @@ from core_runtime.bootstrap.profile_capture import (
 )
 from core_runtime.active_profile_store_v4 import ActiveProfileStore
 from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
-from core_runtime.runtime_surface_v4 import (
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
     NO_ACTIVE_PLAN_DIGEST,
     NO_ACTIVE_PROFILE_REVISION,
     RuntimeProfileChangeService,

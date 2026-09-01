@@ -569,6 +569,17 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _compose_defaultspack_profile_runtime() -> None:
+    """Install the concrete Profile port at the explicit test composition root."""
+
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        install_defaultspack_profile_runtime,
+    )
+
+    install_defaultspack_profile_runtime()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _verified_packaged_profile_bundle(tmp_path_factory):
     """Route bootstrap tests through the official packaged-bundle generator."""
 

@@ -6,15 +6,10 @@ import copy
 from pathlib import Path
 from typing import Any, Mapping
 
-from tobkiri_protocol.migration import migrate_legacy_profile
+from tobkiri_protocol.migration import KNOWN_PACK_ALIASES, migrate_legacy_profile
 from tobkiri_protocol.validation import validate_document
 
 
-_LEGACY_PACK_ALIASES = {
-    "defaultspack": "defaults-basepack",
-    "rumi.defaultspack": "defaults-basepack",
-    "rumi_defaultspack": "defaults-basepack",
-}
 _LEGACY_CONTRACT_PROVIDERS = {
     # The generic adapter is the legacy defaultspack provider.  The other
     # implementation of this contract is the explicit human-handoff Pack and
@@ -164,7 +159,7 @@ def _selected_legacy_packs(
         )
         if not isinstance(value, str) or not value.strip():
             raise LegacyProfileSuccessorError("legacy Pack selection is ambiguous")
-        normalized = _LEGACY_PACK_ALIASES.get(value.strip(), value.strip())
+        normalized = KNOWN_PACK_ALIASES.get(value.strip(), value.strip())
         if normalized == base_id:
             continue
         if normalized not in selected:

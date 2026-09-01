@@ -22,7 +22,9 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
-from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+    load_frontend_contract_bindings,
+)
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,

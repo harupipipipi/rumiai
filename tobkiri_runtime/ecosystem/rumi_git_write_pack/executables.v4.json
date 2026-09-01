@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:0312e3cd0fb03b6fc581c2d36be967cedb9f291c025152e57c44273506d0f4d9",
+  "catalog_digest": "sha256:e99ad755c3ccfa47da7696961f455c1639998393bf2f45ce84bab5076feec3c1",
   "pack_id": "rumi_git_write_pack",
-  "source_identity": "sha256:ced19cf1404dcd5fa84dd96ccf5c735593ff5c57b9a9ba61af5323dce68bc614",
+  "source_identity": "sha256:bf27da552b25d64983cb712cd69a0f01832f11c9895adf7a6fc6a1aefaf92334",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-write.service",
-      "implementation_digest": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e",
+      "implementation_digest": "sha256:5ee6b5f70569eb2c9cf053094eb157cddba7caa4861ff89968cddc0e0554769d",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [

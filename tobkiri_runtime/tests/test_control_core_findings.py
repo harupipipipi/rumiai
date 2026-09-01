@@ -21,9 +21,9 @@ from core_runtime.control_reconciliation_v4 import (
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
 )
-from core_runtime.frontend_contract_routes import (
-    FrontendContractBinding,
-    FrontendContractTarget,
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractBinding as FrontendContractBinding,
+    HTTPContractTarget as FrontendContractTarget,
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager

@@ -14,8 +14,6 @@ import signal
 import threading
 from collections.abc import Sequence
 
-from core_runtime.bootstrap.runtime import Kernel
-
 
 def prepare_for_sealed_dispatch(scope: object) -> None:
     """Capture the Launcher-issued PackVM bundle identity before startup."""
@@ -45,7 +43,11 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Start only the canonical v4 Host and wait for process termination."""
     args = _parser().parse_args(argv)
-    kernel = Kernel()
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        create_defaultspack_kernel,
+    )
+
+    kernel = create_defaultspack_kernel()
     stop = threading.Event()
     try:
         result = kernel.run_startup()

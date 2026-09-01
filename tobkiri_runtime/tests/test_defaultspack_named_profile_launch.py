@@ -27,6 +27,9 @@ from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 from core_runtime.panel_auth import PanelAuthManager
 from defaultspack import desktop_app
+from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+    default_packvm_provisioner,
+)
 
 
 BUNDLE_ROOT = Path(sys.argv[1])
@@ -36,7 +39,7 @@ profile_capture._bundle_root = lambda _base_dir=None: BUNDLE_ROOT
 session = None
 server = None
 try:
-    lifecycle = PackVMLifecycleV4()
+    lifecycle = PackVMLifecycleV4(default_packvm_provisioner())
     session, bindings = desktop_app._restore_active_profile_contracts(lifecycle)
     server = PackAPIServer(
         port=0,

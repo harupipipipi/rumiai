@@ -13,10 +13,18 @@ from urllib.parse import quote
 
 import pytest
 
-from core_runtime.frontend_contract_routes import (
-    FrontendContractBinding,
-    FrontendContractTarget,
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractBinding as FrontendContractBinding,
+    HTTPContractTarget as FrontendContractTarget,
+)
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
     load_frontend_contract_bindings,
+)
+from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+    defaultspack_capability_snapshot,
+)
+from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+    DefaultspackHTTPPresentation,
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
@@ -233,6 +241,8 @@ def test_conversation_capability_is_capture_gated_and_http_brokered(
         ),
         dispatch_session=session,
         contract_bindings=(capability_binding, catalog_binding),
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
         host_contract=host_contract_for_session(session),
     )
     server.start()
@@ -464,6 +474,8 @@ def test_unready_conversation_is_omitted_without_blocking_packapi_start(
                 plan_digest=_CapturedConversationSession.plan_digest,
             ),
         ),
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
         host_contract=host_contract_for_session(session),
     )
 

@@ -13,23 +13,32 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 from tobkiri_host.errors import HostCoreError
+from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import validate_document
 from tobkiri_protocol.secure_persistence import (
     SecureDirectory,
     SecurePersistenceError,
 )
-from ecosystem.defaultspack.domain.runtime_v4 import ActiveDefaultProfile
-
 from .external_pack_catalog_v4 import (
     control_catalog_revision,
     external_pack_content_digest,
     load_admitted_pack_catalog as load_pack_catalog,
     resolve_admitted_pack_root as resolve_pack_root,
 )
-from .frontend_contract_routes import HOST_PROFILE_CONTROL_OPERATIONS
+from .profile_runtime_port import require_profile_runtime
+HOST_PROFILE_CONTROL_OPERATIONS = frozenset(
+    {
+        "profile.catalog.read",
+        "profile.change.resolve",
+        "profile.change.review",
+        "profile.change.approve",
+        "profile.change.activate",
+        "operation.status.read",
+    }
+)
 
 PACK_CONTROL_CONTRACT = "tobkiri.host.pack-control.v4"
 CONTROL_PRESENTATION_CONTRACT = "tobkiri.host.control-presentation.v4"
@@ -67,6 +76,75 @@ PACK_CONTROL_OPERATIONS = frozenset(
 _CANDIDATE_TTL_SECONDS = 120.0
 _PERSISTENCE_STORES: dict[Path, SecureDirectory] = {}
 _PERSISTENCE_STORES_LOCK = threading.RLock()
+NO_ACTIVE_PROFILE_REVISION = canonical_digest(
+    {
+        "schema": "io.tobkiri.profile-predecessor.v1",
+        "state": "none",
+        "field": "revision",
+    }
+)
+NO_ACTIVE_PLAN_DIGEST = canonical_digest(
+    {"schema": "io.tobkiri.profile-predecessor.v1", "state": "none", "field": "plan"}
+)
+NO_ACTIVE_ACTIVATION_ID = "activation:none"
+
+
+class RuntimeSurfacePort(Protocol):
+    """Neutral runtime read surface used by Host control contracts."""
+
+    def bind_capability_reader(self, reader: Callable[[], Mapping[str, object]]) -> None: ...
+
+    def cancel_pending_reads(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def read_profile(
+        self,
+        *,
+        expected_profile_revision: str | None = None,
+        expected_plan_digest: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> Mapping[str, object]: ...
+
+    def read_profile_catalog(
+        self,
+        *,
+        session_id: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> Mapping[str, object]: ...
+
+    def read_settings(
+        self,
+        *,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> Mapping[str, object]: ...
+
+    def read_advanced(
+        self,
+        view: str,
+        *,
+        expected_profile_revision: str | None = None,
+        expected_plan_digest: str | None = None,
+        profile_id: str | None = None,
+        selected_profile_id: str | None = None,
+    ) -> Mapping[str, object]: ...
+
+
+class ProfileChangePort(Protocol):
+    """Neutral Profile mutation projection supplied by the active app."""
+
+
+class RuntimeSurfaceFactory(Protocol):
+    """Build application-specific surfaces without importing them in core."""
+
+    def __call__(
+        self,
+        **kwargs: object,
+    ) -> tuple[RuntimeSurfacePort, ProfileChangePort]:
+        """Return the surface and change service for this Host capture."""
 
 
 class PackControlDenied(HostCoreError):
@@ -152,15 +230,11 @@ class HostProfileControlSession:
         *,
         bundle_root: Path | None = None,
         user_data_root: Path | None = None,
+        runtime_surface_factory: RuntimeSurfaceFactory | None = None,
     ) -> None:
         from .bootstrap.profile_capture import host_profile_catalog
         from .bootstrap.profile_capture import runtime_user_data_root
         from .profile_catalog_v4 import profile_catalog_digest
-        from .runtime_surface_v4 import (
-            RuntimeProfileChangeService,
-            RuntimeSurfaceService,
-        )
-
         self._bundle_root = bundle_root
         self._user_data_root = (
             Path(user_data_root).resolve()
@@ -186,9 +260,10 @@ class HostProfileControlSession:
 
         self._catalog_loader = load_catalog
         self._catalog_digest = profile_catalog_digest(load_catalog())
-        self._runtime_surface = RuntimeSurfaceService(catalog_loader=load_catalog)
-        self._profile_changes = RuntimeProfileChangeService(
-            surface_service=self._runtime_surface,
+        if runtime_surface_factory is None:
+            raise PackControlUnavailable("runtime surface composition is unavailable")
+        self._runtime_surface, self._profile_changes = runtime_surface_factory(
+            catalog_loader=load_catalog,
             bundle_root=bundle_root,
             user_data_root=self._user_data_root,
         )
@@ -320,10 +395,9 @@ class HostProfileControlSession:
                 }
             return result
         except Exception as error:
-            from .runtime_surface_v4 import RuntimeSurfaceError
-
-            if isinstance(error, RuntimeSurfaceError):
-                return error.as_dict()
+            as_dict = getattr(error, "as_dict", None)
+            if callable(as_dict):
+                return as_dict()
             raise
 
     def _catalog_payload(
@@ -341,7 +415,7 @@ class HostProfileControlSession:
             for record in candidates
         }
         return {
-            "runtime_surface_api_version": "io.tobkiri.launcher.runtime-surface.v4",
+            "host_operation_api_version": "io.tobkiri.host.operation.v1",
             "surface": "profiles",
             "state": "catalog_ready",
             "host_catalog_digest": self._catalog_digest,
@@ -372,20 +446,15 @@ class CapturedPackControlSession:
         packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
         active_profile_loader: Callable[[], Any] | None = None,
         bundle_root: Path | None = None,
+        runtime_surface_factory: RuntimeSurfaceFactory | None = None,
     ) -> None:
         self._binding = binding
         self._lock = threading.RLock()
         self._candidates: dict[str, _ApprovalCandidate] = {}
-        from .runtime_surface_v4 import (
-            RuntimeProfileChangeService,
-            RuntimeSurfaceService,
-        )
-        from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
-
         catalog_loader = None
         if bundle_root is not None:
 
-            def load_catalog() -> BundledCatalog:
+            def load_catalog() -> Any:
                 """Union the supplied artifact bundle with Host registry Profiles."""
 
                 from .bootstrap.profile_capture import host_profile_catalog
@@ -393,13 +462,12 @@ class CapturedPackControlSession:
                 return host_profile_catalog(bundle_root=bundle_root)
 
             catalog_loader = load_catalog
-        self._runtime_surface = RuntimeSurfaceService(
+        if runtime_surface_factory is None:
+            raise PackControlUnavailable("runtime surface composition is unavailable")
+        self._runtime_surface, self._profile_changes = runtime_surface_factory(
             snapshot_loader=active_profile_loader,
             catalog_loader=catalog_loader,
             packvm_readiness_reader=packvm_readiness_reader,
-        )
-        self._profile_changes = RuntimeProfileChangeService(
-            surface_service=self._runtime_surface,
             bundle_root=bundle_root,
         )
 
@@ -407,13 +475,15 @@ class CapturedPackControlSession:
     def capture(
         cls,
         *,
-        active: ActiveDefaultProfile | None = None,
+        active: Any | None = None,
         packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
+        runtime_surface_factory: RuntimeSurfaceFactory | None = None,
     ) -> "CapturedPackControlSession":
         """Capture the active Profile and canonical catalog revisions."""
         return cls(
             _capture_binding(active),
             packvm_readiness_reader=packvm_readiness_reader,
+            runtime_surface_factory=runtime_surface_factory,
         )
 
     @property
@@ -598,7 +668,7 @@ class CapturedPackControlSession:
                     if selected_profile_id is not None
                     else requested_profile_id
                 )
-                return self._runtime_surface.read_profile(
+                profile_result = self._runtime_surface.read_profile(
                     profile_id=(
                         str(requested_profile_id)
                         if requested_profile_id is not None
@@ -610,7 +680,8 @@ class CapturedPackControlSession:
                     expected_plan_digest=_optional_string(
                         arguments.pop("expected_plan_digest", None)
                     ),
-                ) | _require_empty(arguments)
+                )
+                return {**dict(profile_result), **_require_empty(arguments)}
             if operation_id == "profile.catalog.read":
                 requested_profile_id = arguments.pop("profile_id", None)
                 if selected_profile_id is not None and requested_profile_id is not None:
@@ -742,10 +813,9 @@ class CapturedPackControlSession:
                 }
             return result
         except Exception as error:
-            from .runtime_surface_v4 import RuntimeSurfaceError
-
-            if isinstance(error, RuntimeSurfaceError):
-                return error.as_dict()
+            as_dict = getattr(error, "as_dict", None)
+            if callable(as_dict):
+                return as_dict()
             raise
 
     def _reject_identity_override(
@@ -772,7 +842,7 @@ class CapturedPackControlSession:
                     )
                 raise PackControlDigestMismatch(f"captured {key} does not match")
 
-    def _capture_current_binding(self) -> tuple[_Binding, ActiveDefaultProfile]:
+    def _capture_current_binding(self) -> tuple[_Binding, Any]:
         """Capture current Profile authority without holding session state."""
 
         from .bootstrap.profile_capture import capture_active_profile
@@ -812,7 +882,7 @@ class CapturedPackControlSession:
     def _catalog_payload(
         self,
         *,
-        active_snapshot: ActiveDefaultProfile | None = None,
+        active_snapshot: Any | None = None,
     ) -> dict[str, Any]:
         return _catalog_payload(self._binding, active_snapshot=active_snapshot)
 
@@ -979,7 +1049,7 @@ class CapturedPackControlSession:
         self,
         arguments: Mapping[str, Any],
         *,
-        active_snapshot: ActiveDefaultProfile | None = None,
+        active_snapshot: Any | None = None,
     ) -> dict[str, Any]:
         pack_id = str(arguments.get("pack_id") or "").strip()
         catalog = self._catalog_payload(active_snapshot=active_snapshot)
@@ -997,7 +1067,7 @@ class CapturedPackControlSession:
     def _dashboard(
         self,
         *,
-        active_snapshot: ActiveDefaultProfile | None = None,
+        active_snapshot: Any | None = None,
     ) -> dict[str, Any]:
         """Return the finite Home projection from the captured Pack state."""
 
@@ -1029,10 +1099,11 @@ class CapturedPackControlSession:
 
 def capture_pack_control_session(
     *,
-    active: ActiveDefaultProfile | None = None,
+    active: Any | None = None,
     packvm_readiness_reader: Callable[[], Mapping[str, Any]] | None = None,
     active_profile_loader: Callable[[], Any] | None = None,
     bundle_root: Path | None = None,
+    runtime_surface_factory: RuntimeSurfaceFactory | None = None,
 ) -> CapturedPackControlSession:
     """Capture the Pack control session used by the production HTTP surface."""
     return CapturedPackControlSession(
@@ -1040,11 +1111,12 @@ def capture_pack_control_session(
         packvm_readiness_reader=packvm_readiness_reader,
         active_profile_loader=active_profile_loader,
         bundle_root=bundle_root,
+        runtime_surface_factory=runtime_surface_factory,
     )
 
 
 def capture_pack_control_catalog(
-    *, active: ActiveDefaultProfile | None = None
+    *, active: Any | None = None
 ) -> Mapping[str, Any]:
     """Capture the authoritative lifecycle projection for the active Profile."""
 
@@ -1109,7 +1181,7 @@ def _binding_payload(binding: _Binding) -> dict[str, str]:
 def _catalog_payload(
     binding: _Binding,
     *,
-    active_snapshot: ActiveDefaultProfile | None = None,
+    active_snapshot: Any | None = None,
 ) -> dict[str, Any]:
     installed = _read_control_state(binding.profile_id)
     state, active_profile = _active_profile(active_snapshot)
@@ -1200,7 +1272,7 @@ def _catalog_payload(
 def _required_profile_pack_ids(
     profile_id: str,
     *,
-    active_snapshot: ActiveDefaultProfile | None = None,
+    active_snapshot: Any | None = None,
 ) -> frozenset[str]:
     """Return the static Pack closure declared by one registry Profile.
 
@@ -1368,7 +1440,7 @@ def _declared_operations(record: Mapping[str, Any]) -> list[dict[str, Any]]:
     )
 
 
-def _capture_binding(active: ActiveDefaultProfile | None = None) -> _Binding:
+def _capture_binding(active: Any | None = None) -> _Binding:
     state, profile = _active_profile(active)
     resolved_profile = state["resolved_profile"]
     catalog_revision = control_catalog_revision()
@@ -1409,7 +1481,7 @@ def _binding_for_resolved(resolved: Any) -> _Binding:
 
 
 def _active_profile(
-    active: ActiveDefaultProfile | None = None,
+    active: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         if active is None:
@@ -1462,11 +1534,6 @@ def resolve_profile_pack_set(
     assertion nor resolving the candidate changes runtime state.
     """
 
-    from ecosystem.defaultspack.domain.runtime_v4 import (
-        BundledCatalog,
-        dynamic_profile_edges,
-        resolve_default_profile,
-    )
     from .authority.v4 import AuthorityStore
     from .bootstrap.profile_capture import (
         _authority_reference,
@@ -1561,15 +1628,8 @@ def resolve_profile_pack_set(
             for dependency in sorted(dependencies)
             if dependency not in requested_closure
         )
-    catalog = BundledCatalog(
-        root=catalog.root,
-        packs=external_packs,
-        bases=catalog.bases,
-        shells=catalog.shells,
-        profiles=catalog.profiles,
-        artifact_root=catalog.artifact_root,
-        executable_catalogs=catalog.executable_catalogs,
-    )
+    runtime = require_profile_runtime()
+    catalog = runtime.catalog_with_packs(catalog, external_packs)
     source = catalog.profiles.get(profile_id)
     if source is None:
         raise PackControlInvalidRequest("selected Profile is unavailable")
@@ -1610,7 +1670,7 @@ def resolve_profile_pack_set(
             str(manifest["pack"]["artifact_digest"])
             for manifest in catalog.packs.values()
         }
-        baseline = resolve_default_profile(
+        baseline = runtime.resolve_profile(
             catalog,
             profile_id,
             approved_artifact_digests=verified_digests,
@@ -1636,7 +1696,9 @@ def resolve_profile_pack_set(
         # so mint the exact authority references before resolving the plan.
         # The resolver derives only the selected Pack/dependency closure and
         # binds every operation to the selected Shell caller.
-        for edge in dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
+        for edge in runtime.dynamic_profile_edges(
+            catalog, profile_id, additional_pack_ids
+        ):
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
         approved_digests = {
             str(item["artifact_digest"]) for item in baseline.lock["effective_set"]
@@ -1658,7 +1720,7 @@ def resolve_profile_pack_set(
             if not approved:
                 _raise_approval_failure(reason)
             approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
-        resolved = resolve_default_profile(
+        resolved = runtime.resolve_profile(
             catalog,
             profile_id,
             approved_artifact_digests=approved_digests,
@@ -1682,8 +1744,6 @@ def activate_resolved_profile_pack_set(
 ) -> Mapping[str, Any]:
     """Activate one reviewed candidate if its captured predecessor is current."""
 
-    from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
-
     from .authority.v4 import AuthorityStore
     from .bootstrap.profile_capture import (
         _ensure_profile_workspace,
@@ -1702,12 +1762,6 @@ def activate_resolved_profile_pack_set(
     profile_id = str(resolved.profile["profile_id"])
     workspace = _ensure_profile_workspace(user_data, profile_id)
     pointers = ActiveProfileStore(user_data)
-    from .runtime_surface_v4 import (
-        NO_ACTIVE_ACTIVATION_ID,
-        NO_ACTIVE_PLAN_DIGEST,
-        NO_ACTIVE_PROFILE_REVISION,
-    )
-
     expects_no_active = (
         hmac.compare_digest(expected_profile_revision, NO_ACTIVE_PROFILE_REVISION)
         and hmac.compare_digest(expected_plan_digest, NO_ACTIVE_PLAN_DIGEST)
@@ -1749,9 +1803,7 @@ def activate_resolved_profile_pack_set(
             )
             and hmac.compare_digest(predecessor.plan_digest, candidate_plan_digest)
         ):
-            from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
-
-            raise ProfileResolutionDenied("activation predecessor is stale")
+            raise require_profile_runtime().denied("activation predecessor is stale")
         raise PackControlStaleRevision("reviewed Profile predecessor is stale")
     catalog = (
         host_profile_catalog(bundle_root=bundle_root, user_data_root=user_data)
@@ -1759,9 +1811,9 @@ def activate_resolved_profile_pack_set(
         else host_profile_catalog()
     )
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
-        store = ActivationStore(
-            workspace / "activation",
-            workspace,
+        store = require_profile_runtime().activation_store(
+            root=workspace / "activation",
+            workspace=workspace,
             profile_id=profile_id,
             authority=authority,
             catalog=catalog,
@@ -1860,7 +1912,7 @@ def activate_resolved_profile_pack_set(
     from .bootstrap.profile_capture import cache_active_profile
 
     cache_active_profile(
-        ActiveDefaultProfile(resolved=resolved, activation=activation),
+        require_profile_runtime().active_profile(resolved, activation),
         user_data=user_data,
     )
     return activation

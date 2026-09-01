@@ -328,6 +328,155 @@ def _generated_provenance(
     )
 
 
+def _sha256_digest(payload: bytes) -> str:
+    """Return the protocol digest for exact input bytes."""
+
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _canonical_pack_projection_provenance(
+    source: Path,
+    source_bytes: bytes,
+    source_document: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind a bundled Pack derivative to one canonical Pack input.
+
+    A Defaultspack bundle is a generated distribution closure, not a second
+    canonical Pack registry.  Its provenance therefore identifies the exact
+    canonical Pack bytes and this generator, while carrying forward the
+    canonical Pack's reviewed source commit as an informational value.
+    """
+
+    source_provenance = source_document.get("provenance")
+    if not isinstance(source_provenance, Mapping):
+        raise ValueError(f"canonical Pack has no provenance: {source}")
+    repository_commit = source_provenance.get("repository_commit")
+    if not isinstance(repository_commit, str) or len(repository_commit) != 40:
+        raise ValueError(f"canonical Pack has no trusted repository commit: {source}")
+    if repository_commit == "working-tree" or any(
+        character not in "0123456789abcdef" for character in repository_commit
+    ):
+        raise ValueError(f"canonical Pack has no trusted repository commit: {source}")
+
+    source_path = source.relative_to(ROOT).as_posix()
+    source_digest = _sha256_digest(source_bytes)
+    generator_path = Path(__file__).relative_to(ROOT.parent).as_posix()
+    generator_digest = _sha256_digest(Path(__file__).read_bytes())
+    input_inventory = {source_path: source_digest}
+    input_inventory_digest = canonical_digest(
+        [
+            {"path": path, "digest": input_inventory[path]}
+            for path in sorted(input_inventory)
+        ]
+    )
+    content_root_digest = canonical_digest(
+        {
+            "source_path": source_path,
+            "source_digest": source_digest,
+            "generator_path": generator_path,
+            "generator_digest": generator_digest,
+            "input_inventory_digest": input_inventory_digest,
+        }
+    )
+    return {
+        "schema": "io.tobkiri.provenance.v2",
+        "source_kind": "generated",
+        "source_path": source_path,
+        "source_digest": source_digest,
+        # This is retained from the canonical Pack.  The generated derivative
+        # does not itself make a Git-trust assertion, hence the v2 false flag.
+        "repository_commit": repository_commit,
+        "repository_commit_trusted": False,
+        "content_root_digest": content_root_digest,
+        "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+        "generator_version": "2.1.0",
+        "generator_path": generator_path,
+        "generator_digest": generator_digest,
+        "input_inventory_digest": input_inventory_digest,
+        "normative": True,
+        "evidence": [
+            {
+                "path": generator_path,
+                "rule_id": "normative-generator-bytes",
+                "digest": generator_digest,
+            },
+            {
+                "path": source_path,
+                "rule_id": "normative-input-bytes",
+                "digest": source_digest,
+            },
+        ],
+    }
+
+
+def _render_projection_executable_catalog(
+    source: Path,
+    document: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Regenerate a projection executable catalog for its derived Pack identity."""
+
+    from scripts.generate_executable_catalogs_v4 import _render_document
+
+    pack_id = str(document["pack"]["id"])
+    contracts_path = source.parent / "contracts.v4.json"
+    artifact_index_path = source.parent / "artifact-index.v4.json"
+    if not contracts_path.is_file() or not artifact_index_path.is_file():
+        raise ValueError(
+            "canonical runnable Pack has no executable catalog inputs: "
+            f"{pack_id}"
+        )
+    contracts = validate_document(
+        json.loads(contracts_path.read_text(encoding="utf-8")),
+        "pack_contract_catalog",
+    )
+    artifact_index = validate_document(
+        json.loads(artifact_index_path.read_text(encoding="utf-8")),
+        "pack_artifact_index",
+    )
+    return _render_document(pack_id, source.parent, dict(document), contracts, artifact_index)
+
+
+def _projection_pack_identity(
+    document: dict[str, Any],
+    *,
+    source_identity: str,
+) -> dict[str, Any]:
+    """Refresh projection integrity without making the catalog pin recursive."""
+
+    document["integrity"] = {
+        # A Pack's source identity identifies the canonical Pack input.  The
+        # executable catalog is an output of this same identity, so including
+        # its output digest here would create a self-referential hash cycle.
+        "source_identity": source_identity,
+        "artifact_set_digest": canonical_digest(document["artifacts"]),
+        "contract_catalog_digest": canonical_digest(document["contracts"]),
+    }
+    return validate_document(document, "pack")
+
+
+def _pin_projection_executable_catalog(
+    document: dict[str, Any],
+    catalog_raw: bytes,
+) -> dict[str, Any]:
+    """Bind a generated executable catalog byte stream into its Pack artifact set."""
+
+    catalog_entries = [
+        artifact
+        for artifact in document["artifacts"]
+        if artifact.get("path") == "executables.v4.json"
+    ]
+    if len(catalog_entries) != 1:
+        raise ValueError(
+            "canonical runnable Pack must pin exactly one executable catalog: "
+            f"{document['pack']['id']}"
+        )
+    catalog_entries[0]["digest"] = _sha256_digest(catalog_raw)
+    return _projection_pack_identity(
+        document,
+        source_identity=str(document["integrity"]["source_identity"]),
+    )
+
+
 def _tauri_role_pack(spec: dict[str, str], source_commit: str) -> dict[str, Any]:
     """Generate one canonical Tauri role without projecting shell authority."""
     pack_id = spec["pack_id"]
@@ -589,24 +738,47 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
     )
     for path in sorted(pack_sources):
         source = pack_sources[path]
-        canonical = CANONICAL_PACK_FILES.get(path.name)
         role_spec = TAURI_ROLE_PACKS.get(path.name)
-        canonical_source = canonical is not None or source.parent.parent == ROOT / "ecosystem"
+        is_canonical_projection = role_spec is None and source != path
+        source_bytes = source.read_bytes() if role_spec is None else b""
         document = (
             _tauri_role_pack(role_spec, source_commit)
             if role_spec is not None
-            else json.loads(source.read_text(encoding="utf-8"))
+            else json.loads(source_bytes)
         )
         if str(document["pack"]["id"]).startswith("shell."):
             document = _unavailable_shell_pack(document, source_commit)
         elif document["pack"]["id"] == "defaults-basepack":
             document = _declarative_base_pack(document, source_commit)
-        rendered[path] = _pretty(
-            validate_document(document, "pack")
-            if canonical_source or role_spec is not None
-            else _normalize_pack(document)
-        )
-        if role_spec is None:
+        elif is_canonical_projection:
+            document["provenance"] = _canonical_pack_projection_provenance(
+                source,
+                source_bytes,
+                document,
+            )
+            document = _normalize_pack(document)
+            document = _projection_pack_identity(
+                document,
+                source_identity=_sha256_digest(source_bytes),
+            )
+
+        if is_canonical_projection:
+            source_catalog = _executable_catalog_source(source, document)
+            if source_catalog is None:
+                raise ValueError(
+                    "canonical projection is missing its executable catalog: "
+                    f"{document['pack']['id']}"
+                )
+            catalog_path = path.with_name(f"{document['pack']['id']}.executables.v4.json")
+            catalog = _render_projection_executable_catalog(source, document)
+            catalog_raw = _pretty(catalog)
+            document = _pin_projection_executable_catalog(document, catalog_raw)
+            # Re-render from the fully pinned Pack rather than copying the
+            # canonical sidecar.  The catalog's identity must be the derived
+            # Pack identity, not the canonical source Pack identity.
+            catalog_raw = _pretty(_render_projection_executable_catalog(source, document))
+            rendered[catalog_path] = catalog_raw
+        elif role_spec is None:
             source_catalog = _executable_catalog_source(source, document)
             if source_catalog is not None:
                 catalog_path = path.with_name(
@@ -626,6 +798,11 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                         f"{document['pack']['id']}"
                     )
                 rendered[catalog_path] = source_catalog.read_bytes()
+        rendered[path] = _pretty(
+            validate_document(document, "pack")
+            if is_canonical_projection or role_spec is not None
+            else _normalize_pack(document)
+        )
 
     base_path = BUNDLE / "defaults-basepack.base.v1.json"
     shell_paths = sorted(BUNDLE.glob("*.shell.v1.json"))

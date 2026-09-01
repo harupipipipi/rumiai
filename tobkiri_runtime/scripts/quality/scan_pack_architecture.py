@@ -35,8 +35,13 @@ IGNORED_SOURCE_DIRECTORY_NAMES = frozenset(
         "venv",
     }
 )
-IGNORED_SOURCE_DIRECTORY_PATHS = (
-    Path("tobkiri_launcher") / "src-tauri" / "gen",
+IGNORED_SOURCE_DIRECTORY_PATHS = (Path("tobkiri_launcher") / "src-tauri" / "gen",)
+APPLICATION_COMPOSITION_ROOT = Path("tobkiri_runtime") / "app.py"
+PRODUCT_SPECIAL_CASE_EXCLUDED_PATHS = frozenset(
+    {
+        APPLICATION_COMPOSITION_ROOT,
+        Path("scripts") / "quality" / "check_core_no_favoritism.py",
+    }
 )
 IMPORT_RE = re.compile(
     r"(?:import|export)\s+(?:[^'\"]+?\s+from\s+)?['\"]([^'\"]+)['\"]|"
@@ -75,10 +80,7 @@ class Violation:
     @property
     def identity(self) -> str:
         """Return the line-independent shrink-only baseline identity."""
-        return (
-            f"{self.rule}|{self.path}|{self.fingerprint}|"
-            f"{self.source}|{self.target}"
-        )
+        return f"{self.rule}|{self.path}|{self.fingerprint}|{self.source}|{self.target}"
 
 
 class BaselineError(ValueError):
@@ -158,8 +160,7 @@ def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
         or not isinstance(payload.get("exceptions"), list)
     ):
         raise BaselineError(
-            "baseline must use schema_version 2, shrink_only_exact_edges, "
-            "and exceptions[]"
+            "baseline must use schema_version 2, shrink_only_exact_edges, and exceptions[]"
         )
     required = {
         "identity",
@@ -183,13 +184,10 @@ def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
         for field in required - {"line", "fix_by_wave"}:
             value = str(item[field]).strip()
             if not value or any(marker in value for marker in ("*", "?", "[", "]")):
-                raise BaselineError(
-                    f"baseline exception {index} has broad {field}: {value!r}"
-                )
+                raise BaselineError(f"baseline exception {index} has broad {field}: {value!r}")
         identity = str(item["identity"])
         expected = (
-            f"{item['rule']}|{item['path']}|{item['fingerprint']}|"
-            f"{item['source']}|{item['target']}"
+            f"{item['rule']}|{item['path']}|{item['fingerprint']}|{item['source']}|{item['target']}"
         )
         if identity != expected or identity in result:
             raise BaselineError(f"invalid or duplicate baseline identity: {identity}")
@@ -198,16 +196,12 @@ def load_baseline(path: Path) -> dict[str, dict[str, Any]]:
         if not isinstance(item["fix_by_wave"], int) or item["fix_by_wave"] < 1:
             raise BaselineError(f"invalid fix_by_wave for {identity}")
         if str(item["violation_category"]) != str(item["rule"]):
-            raise BaselineError(
-                f"violation_category must equal rule for {identity}"
-            )
+            raise BaselineError(f"violation_category must equal rule for {identity}")
         for field in ("introduced_at", "sunset_at"):
             try:
                 dt.date.fromisoformat(str(item[field]))
             except ValueError as exc:
-                raise BaselineError(
-                    f"{field} must be an ISO date for {identity}"
-                ) from exc
+                raise BaselineError(f"{field} must be an ISO date for {identity}") from exc
         result[identity] = item
     return result
 
@@ -219,17 +213,10 @@ def verify_shrink_only_baseline(
     """Reject new or changed exceptions while allowing line relocation."""
     additions = sorted(set(baseline) - set(reference))
     if additions:
-        raise BaselineError(
-            "shrink-only baseline contains new identities: "
-            + ", ".join(additions)
-        )
+        raise BaselineError("shrink-only baseline contains new identities: " + ", ".join(additions))
     for identity, item in baseline.items():
-        if _relocation_stable_metadata(item) != _relocation_stable_metadata(
-            reference[identity]
-        ):
-            raise BaselineError(
-                f"shrink-only baseline metadata changed for {identity}"
-            )
+        if _relocation_stable_metadata(item) != _relocation_stable_metadata(reference[identity]):
+            raise BaselineError(f"shrink-only baseline metadata changed for {identity}")
 
 
 def find_unbaselined_violations(
@@ -246,20 +233,53 @@ def find_stale_baseline_exceptions(
 ) -> list[dict[str, Any]]:
     """Return exceptions whose exact semantic edge no longer exists."""
     active_identities = {item.identity for item in violations}
-    return [
+    return [item for identity, item in baseline.items() if identity not in active_identities]
+
+
+def write_shrunk_baseline(
+    path: Path,
+    baseline: dict[str, dict[str, Any]],
+    violations: Iterable[Violation],
+) -> int:
+    """Remove only resolved baseline identities through the canonical scanner.
+
+    The reference check is performed by the caller before this function runs.
+    This writer deliberately never adds an identity, relocates an existing
+    exception, or changes its review metadata.  A newly observed edge makes
+    the update fail instead of silently broadening the candidate baseline.
+    """
+
+    materialized = list(violations)
+    unbaselined = find_unbaselined_violations(materialized, baseline)
+    if unbaselined:
+        identities = ", ".join(item.identity for item in unbaselined)
+        raise BaselineError("cannot update baseline with unbaselined identities: " + identities)
+    active_identities = {item.identity for item in materialized}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BaselineError(f"baseline is unreadable: {exc}") from exc
+    exceptions = payload.get("exceptions") if isinstance(payload, dict) else None
+    if not isinstance(exceptions, list):
+        raise BaselineError("baseline exceptions are unavailable for shrink update")
+    shrunk = [
         item
-        for identity, item in baseline.items()
-        if identity not in active_identities
+        for item in exceptions
+        if isinstance(item, dict) and item.get("identity") in active_identities
     ]
+    if len(shrunk) > len(exceptions):
+        raise BaselineError("baseline shrink update is invalid")
+    payload["exceptions"] = shrunk
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return len(exceptions) - len(shrunk)
 
 
 def _relocation_stable_metadata(item: dict[str, Any]) -> str:
     return json.dumps(
-        {
-            key: value
-            for key, value in item.items()
-            if key not in {"identity", "line"}
-        },
+        {key: value for key, value in item.items() if key not in {"identity", "line"}},
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -270,9 +290,7 @@ def find_expired_baseline_exceptions(
 ) -> list[dict[str, Any]]:
     """Return exceptions whose sunset date has passed."""
     return [
-        item
-        for item in baseline.values()
-        if dt.date.fromisoformat(str(item["sunset_at"])) < today
+        item for item in baseline.values() if dt.date.fromisoformat(str(item["sunset_at"])) < today
     ]
 
 
@@ -290,19 +308,13 @@ def scan_repository(root: Path) -> list[Violation]:
     violations.update(_scan_catalog_disk_alignment(root, ecosystem, pack_names))
     violations.update(_scan_catalog_graph(root, catalog, pack_names))
     for path in _source_files(root):
-        source_pack = _owning_pack(path, pack_roots)
+        source_pack = _source_pack(root, path, pack_roots)
         text = path.read_text(encoding="utf-8", errors="replace")
         if path.suffix == ".py":
-            violations.update(
-                _scan_python(root, path, text, source_pack, pack_names, pack_roots)
-            )
+            violations.update(_scan_python(root, path, text, source_pack, pack_names, pack_roots))
         else:
-            violations.update(
-                _scan_script_imports(root, path, text, source_pack, pack_roots)
-            )
-        violations.update(
-            _scan_literal_paths(root, path, text, source_pack, pack_names)
-        )
+            violations.update(_scan_script_imports(root, path, text, source_pack, pack_roots))
+        violations.update(_scan_literal_paths(root, path, text, source_pack, pack_names))
         violations.update(_scan_runtime_policy(root, path, text, source_pack))
         if "/webapp/" in path.as_posix():
             for match in API_LITERAL_RE.finditer(text):
@@ -319,11 +331,9 @@ def scan_repository(root: Path) -> list[Violation]:
                         match.group(0),
                     )
                 )
-        if path.suffix == ".py":
+        if path.suffix == ".py" and not _is_product_special_case_exclusion(root, path):
             violations.update(
-                _scan_product_special_cases(
-                    root, path, text, source_pack, pack_names
-                )
+                _scan_product_special_cases(root, path, text, source_pack, pack_names)
             )
     return _disambiguate_fingerprints(violations)
 
@@ -343,14 +353,10 @@ def _is_ignored_source_path(root: Path, path: Path) -> bool:
     """Return whether a source belongs to an explicit dependency/generated tree."""
     relative = path.relative_to(root)
     directory_parts = relative.parts[:-1]
-    if any(
-        part in IGNORED_SOURCE_DIRECTORY_NAMES
-        for part in directory_parts
-    ):
+    if any(part in IGNORED_SOURCE_DIRECTORY_NAMES for part in directory_parts):
         return True
     return any(
-        relative.is_relative_to(ignored_path)
-        for ignored_path in IGNORED_SOURCE_DIRECTORY_PATHS
+        relative.is_relative_to(ignored_path) for ignored_path in IGNORED_SOURCE_DIRECTORY_PATHS
     )
 
 
@@ -359,11 +365,15 @@ def _scan_catalog_disk_alignment(
 ) -> set[Violation]:
     """Report Pack directories that disagree with the canonical inventory."""
     found: set[Violation] = set()
-    disk_names = {
-        path.name
-        for path in ecosystem.iterdir()
-        if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
-    } if ecosystem.is_dir() else set()
+    disk_names = (
+        {
+            path.name
+            for path in ecosystem.iterdir()
+            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+        }
+        if ecosystem.is_dir()
+        else set()
+    )
     for pack_id in sorted(pack_names - disk_names):
         found.add(
             _line_violation(
@@ -409,9 +419,7 @@ def _scan_catalog_graph(
             continue
         for dependency in dependencies:
             if isinstance(dependency, dict):
-                target = str(
-                    dependency.get("pack_id") or dependency.get("id") or ""
-                ).strip()
+                target = str(dependency.get("pack_id") or dependency.get("id") or "").strip()
             else:
                 target = str(dependency).strip()
             if target and target not in pack_names:
@@ -443,6 +451,18 @@ def _owning_pack(path: Path, roots: dict[str, Path]) -> str:
     return "kernel" if "core_runtime" in path.parts else "host"
 
 
+def _source_pack(root: Path, path: Path, roots: dict[str, Path]) -> str:
+    """Return a source Pack, recognizing the single product composition root."""
+    if path.relative_to(root) == APPLICATION_COMPOSITION_ROOT:
+        return "defaultspack"
+    return _owning_pack(path, roots)
+
+
+def _is_product_special_case_exclusion(root: Path, path: Path) -> bool:
+    """Exclude only approved composition/policy sources from literal policy checks."""
+    return path.relative_to(root) in PRODUCT_SPECIAL_CASE_EXCLUDED_PATHS
+
+
 def _scan_python(
     root: Path,
     path: Path,
@@ -463,9 +483,7 @@ def _scan_python(
         elif isinstance(node, ast.ImportFrom):
             modules = [node.module or ""]
             if node.level:
-                target_path = (
-                    path.parent / Path(*([".."] * (node.level - 1)))
-                ).resolve()
+                target_path = (path.parent / Path(*([".."] * (node.level - 1)))).resolve()
                 target_pack = _owning_pack(target_path, pack_roots)
                 if target_pack != source_pack:
                     found.add(
@@ -486,16 +504,16 @@ def _scan_python(
                 if value:
                     modules = [value]
         for module in modules:
-            target_pack = _module_pack(module, pack_names)
-            if target_pack and target_pack != source_pack:
+            imported_pack = _module_pack(module, pack_names)
+            if imported_pack and imported_pack != source_pack:
                 found.add(
                     _line_violation(
                         root,
                         path,
-                        node.lineno,
+                        getattr(node, "lineno", 1),
                         "cross_pack_import",
                         source_pack,
-                        target_pack,
+                        imported_pack,
                         _ast_fingerprint(node),
                     )
                 )
@@ -522,19 +540,17 @@ def _pack_references(value: str, pack_names: set[str]) -> set[str]:
     if not value:
         return set()
     parts = set(part for part in re.split(r"[./:]", value) if part)
-    return {
-        pack_id
-        for pack_id in pack_names
-        if value == pack_id or pack_id in parts
-    }
+    return {pack_id for pack_id in pack_names if value == pack_id or pack_id in parts}
 
 
 def _pack_values(
-    node: ast.AST,
+    node: ast.AST | None,
     aliases: Mapping[str, set[str]],
     pack_names: set[str],
 ) -> set[str]:
     """Resolve the small constant subset needed for product-branch checks."""
+    if node is None:
+        return set()
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return _pack_references(node.value, pack_names)
     if isinstance(node, ast.Name):
@@ -564,9 +580,7 @@ def _pack_aliases(tree: ast.AST, pack_names: set[str]) -> dict[str, set[str]]:
         elif isinstance(node, ast.ImportFrom):
             module_references = _pack_references(node.module or "", pack_names)
             for imported in node.names:
-                references = module_references or _pack_references(
-                    imported.name, pack_names
-                )
+                references = module_references or _pack_references(imported.name, pack_names)
                 if references:
                     aliases[imported.asname or imported.name] = references
         elif isinstance(node, ast.Assign):
@@ -706,9 +720,7 @@ def _scan_literal_paths(
     return found
 
 
-def _scan_runtime_policy(
-    root: Path, path: Path, text: str, source_pack: str
-) -> set[Violation]:
+def _scan_runtime_policy(root: Path, path: Path, text: str, source_pack: str) -> set[Violation]:
     """Detect discovery, secret, and kernel domain-policy bypasses."""
     found: set[Violation] = set()
     normalized = path.as_posix()
@@ -842,9 +854,7 @@ def _disambiguate_fingerprints(
             result.append(
                 replace(
                     item,
-                    fingerprint=(
-                        f"{item.fingerprint}:occurrence-v1-{occurrence}"
-                    ),
+                    fingerprint=(f"{item.fingerprint}:occurrence-v1-{occurrence}"),
                 )
             )
     return sorted(result)
@@ -908,11 +918,7 @@ def _sarif(violations: list[Violation]) -> dict[str, Any]:
                 "results": [
                     {
                         "ruleId": item.rule,
-                        "message": {
-                            "text": (
-                                f"{item.source} -> {item.target}. {item.guidance}"
-                            )
-                        },
+                        "message": {"text": (f"{item.source} -> {item.target}. {item.guidance}")},
                         "locations": [
                             {
                                 "physicalLocation": {
@@ -935,6 +941,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).parents[3])
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--reference-baseline", type=Path)
+    parser.add_argument("--update-baseline", action="store_true")
     parser.add_argument(
         "--today",
         type=dt.date.fromisoformat,
@@ -957,8 +964,7 @@ def main() -> int:
     reference_path = args.reference_baseline.resolve()
     if reference_path == baseline_path.resolve():
         print(
-            "pack-architecture: candidate and reference baselines must be "
-            "different files",
+            "pack-architecture: candidate and reference baselines must be different files",
             file=sys.stderr,
         )
         return 2
@@ -984,6 +990,22 @@ def main() -> int:
         print(f"pack-architecture: {exc}", file=sys.stderr)
         return 2
     stale = find_stale_baseline_exceptions(violations, baseline)
+    active = find_unbaselined_violations(violations, baseline)
+    if args.update_baseline:
+        if active:
+            identities = ", ".join(item.identity for item in active)
+            print(
+                "pack-architecture: cannot update baseline with new identities: " + identities,
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            removed = write_shrunk_baseline(baseline_path, baseline, violations)
+        except BaselineError as exc:
+            print(f"pack-architecture: {exc}", file=sys.stderr)
+            return 2
+        print(f"pack-architecture: updated baseline by removing {removed} resolved identities")
+        return 0
     if stale:
         identities = ", ".join(str(item["identity"]) for item in stale)
         print(
@@ -992,16 +1014,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    active = find_unbaselined_violations(violations, baseline)
     if args.format == "json":
         print(
             json.dumps(
-                {
-                    "violations": [
-                        asdict(item) | {"identity": item.identity}
-                        for item in active
-                    ]
-                },
+                {"violations": [asdict(item) | {"identity": item.identity} for item in active]},
                 indent=2,
             )
         )

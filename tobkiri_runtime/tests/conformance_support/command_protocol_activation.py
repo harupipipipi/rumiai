@@ -93,7 +93,7 @@ def load_captured_application_bindings(
 ) -> tuple[Any, ...]:
     """Use startup's Application selection and route-map path resolver."""
 
-    from core_runtime.frontend_contract_routes import (
+    from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
         load_frontend_contract_bindings,
         resolve_frontend_contract_map_path,
     )

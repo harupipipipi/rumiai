@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:78a35617044e609e18d26a948b559c5e7b50496f6a9886fde3587e42f115a4f4",
+      "digest": "sha256:0de016e865a9ff61093ced653a4049fabaf537bb03424a3c7e8078521101a036",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -33,9 +33,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:0e83fef1d62ae54f14e254215b004684921686df15b281546ff6fc1c1437a5b3",
-    "contract_catalog_digest": "sha256:ab48473543841c24a21b430ffdfaf7a8e2af753a18f4a5f5ed6dab03b90cd08e",
-    "source_identity": "sha256:cbfd13fd1c21552f632a1d3f40932a741a54f1ddace248ec1c569172f1e71134"
+    "source_identity": "sha256:0964303d3ae86891b7aa0855d9dc5101206b1d61132076f08ae462640e676016",
+    "artifact_set_digest": "sha256:9b58e9b0dd7630065ff870be524630f5d152f7cbdc927f1e3cdb43260677d4e5",
+    "contract_catalog_digest": "sha256:2a7c97099ac8e68f5afd81df346cb60b5e5de1f9d75a721326bfc60e33821030"
   },
   "migration": {
     "compatibility": "read_only",
@@ -49,15 +49,12 @@
   },
   "operation_catalog": [
     {
-      "contract_reference": "tobkiri.service.host.authorize.v1",
-      "effect_ceiling": [
-        "capability:host.authority.consume",
-        "host:brokered-execution"
-      ],
       "operation_id": "rumi_host_authority_bridge_pack.host-authority",
       "owner": "rumi_host_authority_bridge_pack",
+      "contract_reference": "tobkiri.service.host.authorize.v1",
       "provider_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
-      "source_kind": "canonical_v4_contract"
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
     }
   ],
   "pack": {
@@ -69,31 +66,40 @@
   },
   "pack_api_version": "io.tobkiri.pack.v4",
   "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
+    "source_digest": "sha256:0964303d3ae86891b7aa0855d9dc5101206b1d61132076f08ae462640e676016",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:b130c9ceadf58593586fa50a5cc3b0c662179b485f8eb536f9ae9b0015dba475",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "input_inventory_digest": "sha256:a946ac0dac4694058f9057d9dd2ede9bfab18232af819628d8266d4af791441f",
+    "normative": true,
     "evidence": [
       {
-        "digest": "sha256:cbfd13fd1c21552f632a1d3f40932a741a54f1ddace248ec1c569172f1e71134",
-        "path": "schemas/pack_v4_catalog.v1.json",
-        "rule_id": "canonical-pack-v4-source-record"
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+      },
+      {
+        "path": "ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:0964303d3ae86891b7aa0855d9dc5101206b1d61132076f08ae462640e676016"
       }
-    ],
-    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
-    "generator_version": "1.0.0",
-    "normative": true,
-    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
-    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
-    "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:cbfd13fd1c21552f632a1d3f40932a741a54f1ddace248ec1c569172f1e71134",
-    "source_kind": "migration",
-    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_host_authority_bridge_pack"
+    ]
   },
   "provider_catalog": [
     {
+      "provider_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
+      "owner": "rumi_host_authority_bridge_pack",
       "contract_reference": "tobkiri.service.host.authorize.v1",
       "operations": [
         "rumi_host_authority_bridge_pack.host-authority"
-      ],
-      "owner": "rumi_host_authority_bridge_pack",
-      "provider_id": "rumi_host_authority_bridge_pack.host-authority.authorize"
+      ]
     }
   ],
   "requirements": {

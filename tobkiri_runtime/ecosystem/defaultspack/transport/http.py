@@ -469,7 +469,9 @@ class DefaultsHttpServer:
         if not profile_id:
             return
         try:
-            from core_runtime.ai_input_trace_store import AiInputTraceStore
+            from ecosystem.defaultspack.domain.ai_input.ai_input_trace_store import (
+                AiInputTraceStore,
+            )
 
             AiInputTraceStore().append_blocked_event(
                 profile_id,

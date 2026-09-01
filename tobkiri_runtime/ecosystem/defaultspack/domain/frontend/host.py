@@ -13,10 +13,10 @@ try:
 except ImportError:  # Desktop runtime keeps third-party bootstrap minimal.
     Draft202012Validator = None  # type: ignore[assignment,misc]
 
-from .global_contracts.canonical import content_identity
-from .pack_artifact_integrity import verify_declared_artifacts
-from .paths import PackLocation, resolve_pack_locations
-from .resolved_profile import ResolvedProfile
+from core_runtime.global_contracts.canonical import content_identity
+from core_runtime.pack_artifact_integrity import verify_declared_artifacts
+from core_runtime.paths import PackLocation, resolve_pack_locations
+from core_runtime.resolved_profile import ResolvedProfile
 
 CONTRIBUTION_VERSION = "rumi.ui.contribution.v1"
 _PACK_QUARANTINE_CODES = {
@@ -29,11 +29,7 @@ _PACK_QUARANTINE_CODES = {
     "frontend_pack_hash_mismatch",
     "frontend_pack_artifact_integrity_failed",
 }
-SCHEMA_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "schemas"
-    / "frontend_contribution.schema.json"
-)
+SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "frontend_contribution.schema.json"
 
 
 @dataclass(frozen=True)

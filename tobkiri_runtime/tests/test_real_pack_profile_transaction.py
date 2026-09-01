@@ -51,7 +51,9 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
-from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+    load_frontend_contract_bindings,
+)
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import get_panel_auth_manager
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
@@ -86,8 +88,11 @@ def _capture():
     packvm_lifecycle = None
     if os.environ.get("TOBKIRI_TEST_NATIVE_PACKVM") == "1":
         from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
+        from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
+            default_packvm_provisioner,
+        )
 
-        packvm_lifecycle = PackVMLifecycleV4()
+        packvm_lifecycle = PackVMLifecycleV4(default_packvm_provisioner())
         if packvm_lifecycle.production_backend_registration() is None:
             raise RuntimeError(
                 "native PackVM acceptance requires provisioned signed direct-VZ facts"
