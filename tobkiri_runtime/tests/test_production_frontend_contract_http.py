@@ -48,7 +48,7 @@ from ecosystem.defaultspack.domain.runtime_surface_v4 import (
 )
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
-from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore, BundledCatalog
 from tests.conformance_support.command_protocol_activation import (
     COMMAND_PROTOCOL_HTTP_CASES,
     file_snapshot,
@@ -1290,7 +1290,7 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         }
     ]
     read_worker_capture_loads: list[int] = []
-    original_load = profile_capture.ActivationStore.load_active_snapshot
+    original_load = ActivationStore.load_active_snapshot
 
     def counted_load(store):
         if threading.current_thread().name.startswith("tobkiri-runtime-read"):
@@ -1298,7 +1298,7 @@ def test_profile_ceremony_uses_four_canonical_broker_operations(
         return original_load(store)
 
     monkeypatch.setattr(
-        profile_capture.ActivationStore,
+        ActivationStore,
         "load_active_snapshot",
         counted_load,
     )
