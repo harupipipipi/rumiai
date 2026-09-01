@@ -102,6 +102,7 @@ def _signed_external_pack(
     *,
     kind: str | None = None,
     runtime_suffix: str | None = None,
+    materialization_catalog_digest: str | None = None,
 ) -> tuple[Path, Path]:
     source = tmp_path / PACK_ID
     shutil.copytree(FIXTURE, source)
@@ -121,7 +122,16 @@ def _signed_external_pack(
             runtime.read_text(encoding="utf-8") + runtime_suffix,
             encoding="utf-8",
         )
-    if kind is not None or runtime_suffix is not None:
+    if materialization_catalog_digest is not None:
+        executable_path = source / "executables.v4.json"
+        executable = json.loads(executable_path.read_text(encoding="utf-8"))
+        executable["materialization_catalog_digest"] = materialization_catalog_digest
+        _write_json(executable_path, executable)
+    if (
+        kind is not None
+        or runtime_suffix is not None
+        or materialization_catalog_digest is not None
+    ):
         _refresh_fixture_artifacts(source)
     private_key = Ed25519PrivateKey.generate()
     manifest = build_signed_manifest(
@@ -271,6 +281,24 @@ def test_unsigned_wrong_digest_and_symlink_sources_fail_closed(
     source.rename(target)
     source.symlink_to(target, target_is_directory=True)
     with pytest.raises(ExternalPackCatalogDenied, match="real directory"):
+        admit_signed_external_pack(source, trust_store_path=trust_store)
+
+
+def test_signed_external_pack_cannot_claim_bundle_materialization_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An external Pack cannot impersonate a sealed bundle projection."""
+
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    source, trust_store = _signed_external_pack(
+        tmp_path,
+        materialization_catalog_digest="sha256:" + "a" * 64,
+    )
+    with pytest.raises(
+        ExternalPackCatalogDenied,
+        match="cannot replace its executable catalog identity",
+    ):
         admit_signed_external_pack(source, trust_store_path=trust_store)
 
 

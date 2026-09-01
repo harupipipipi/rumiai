@@ -288,6 +288,7 @@ def load_admitted_external_executable_catalog(
     try:
         manifest = validate_file(root / "pack.v4.json", "pack")
         executable = validate_file(root / "executables.v4.json", "executable_catalog")
+        _require_external_catalog_identity(executable)
         compiled = compile_pack_root(root)
     except Exception as error:
         raise ExternalPackCatalogDenied(
@@ -427,6 +428,7 @@ def _project_catalog_record(
 ) -> dict[str, Any]:
     manifest = validate_file(root / "pack.v4.json", "pack")
     executable = validate_file(root / "executables.v4.json", "executable_catalog")
+    _require_external_catalog_identity(executable)
     pack_id = str(manifest["pack"]["id"])
     if manifest["pack"]["kind"] != "normal_sandbox":
         raise ExternalPackCatalogDenied(
@@ -589,6 +591,8 @@ def _verify_entry_root(
         ):
             raise ExternalPackCatalogDenied("external Pack root identity changed")
     try:
+        executable = validate_file(root / "executables.v4.json", "executable_catalog")
+        _require_external_catalog_identity(executable)
         compiled = compile_pack_root(root)
     except Exception as error:
         raise ExternalPackCatalogDenied(
@@ -611,6 +615,15 @@ def _verify_entry_root(
     )
     if content_digest != entry.get("content_digest"):
         raise ExternalPackCatalogDenied("external Normal Pack content digest changed")
+
+
+def _require_external_catalog_identity(executable: Mapping[str, Any]) -> None:
+    """Reject bundle-only executable catalog aliases from external Packs."""
+
+    if executable.get("materialization_catalog_digest") is not None:
+        raise ExternalPackCatalogDenied(
+            "external Pack cannot replace its executable catalog identity"
+        )
 
 
 def _validate_entry(pack_id: str, entry: Mapping[str, Any]) -> None:
