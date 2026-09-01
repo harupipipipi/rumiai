@@ -240,16 +240,9 @@ MIGRATION_STAGES = (
     "release-verified",
 )
 MIGRATION_PROOF_PATH = (
-    ROOT
-    / "tobkiri_runtime"
-    / "scripts"
-    / "quality"
-    / "evidence"
-    / "pack_migration_proof.v1.json"
+    ROOT / "tobkiri_runtime" / "scripts" / "quality" / "evidence" / "pack_migration_proof.v1.json"
 )
-MIGRATION_PROOF_GENERATOR = (
-    RUNTIME / "scripts" / "quality" / "run_independent_migration_proof.py"
-)
+MIGRATION_PROOF_GENERATOR = RUNTIME / "scripts" / "quality" / "run_independent_migration_proof.py"
 
 
 def _production_files() -> tuple[Path, ...]:
@@ -316,8 +309,7 @@ def _production_pack_dirs() -> tuple[Path, ...]:
     catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
     excluded = (
         frozenset(catalog.get("excluded_packs", ()))
-        if isinstance(catalog, Mapping)
-        and isinstance(catalog.get("excluded_packs"), list)
+        if isinstance(catalog, Mapping) and isinstance(catalog.get("excluded_packs"), list)
         else frozenset()
     )
     return tuple(
@@ -364,8 +356,7 @@ def _compatibility_alias_findings() -> list[dict[str, Any]]:
             findings.append(_finding(alias_path, 1, "compatibility_alias_missing"))
             continue
         if (
-            alias.get("schema")
-            != "io.tobkiri.profile-projection-compatibility-alias.v1"
+            alias.get("schema") != "io.tobkiri.profile-projection-compatibility-alias.v1"
             or alias.get("legacy_pack_id") != pack_id
             or alias.get("runtime_authority") is not False
             or alias.get("read_only") is not True
@@ -604,9 +595,7 @@ def _declaration_disk_runtime_findings() -> list[dict[str, Any]]:
             variants = []
         variant_by_function: dict[str, Mapping[str, Any]] = {}
         for variant in variants:
-            if not isinstance(variant, Mapping) or not isinstance(
-                variant.get("function_id"), str
-            ):
+            if not isinstance(variant, Mapping) or not isinstance(variant.get("function_id"), str):
                 findings.append(
                     _finding(
                         pack_dir / "executables.v4.json",
@@ -722,9 +711,7 @@ def _declaration_disk_runtime_findings() -> list[dict[str, Any]]:
                     )
                 )
                 continue
-            if function.get("implementation_digest") != variant.get(
-                "implementation_digest"
-            ):
+            if function.get("implementation_digest") != variant.get("implementation_digest"):
                 findings.append(
                     _finding(
                         pack_dir / "pack.v4.json",
@@ -817,12 +804,8 @@ def _executable_source_findings() -> list[dict[str, Any]]:
             "implementation_path",
             "implementation_digest",
         )
-        if (
-            not isinstance(function_id, str)
-            or any(
-                not isinstance(entry.get(field), str) or not entry[field].strip()
-                for field in required
-            )
+        if not isinstance(function_id, str) or any(
+            not isinstance(entry.get(field), str) or not entry[field].strip() for field in required
         ):
             invalid.append(str(function_id or record_key))
             continue
@@ -861,8 +844,7 @@ def _executable_source_findings() -> list[dict[str, Any]]:
             or record_key not in {expected_record["pack_id"], key[0]}
             or entry.get("contract_id") != expected_record["contract_id"]
             or entry.get("implementation_path") != expected_record["implementation_path"]
-            or entry.get("implementation_digest")
-            != expected_record["implementation_digest"]
+            or entry.get("implementation_digest") != expected_record["implementation_digest"]
         ):
             mismatched.append(f"{key[0]}:{key[1]}")
     if missing or unexpected or invalid or duplicate or mismatched:
@@ -871,9 +853,7 @@ def _executable_source_findings() -> list[dict[str, Any]]:
                 path,
                 1,
                 "executable_source_registry_incomplete",
-                expected_function_count=len(
-                    {function_id for function_id, _ in expected}
-                ),
+                expected_function_count=len({function_id for function_id, _ in expected}),
                 expected_operation_count=len(expected),
                 actual_function_count=len({function_id for function_id, _ in actual}),
                 actual_operation_count=len(actual),
@@ -882,9 +862,7 @@ def _executable_source_findings() -> list[dict[str, Any]]:
                 invalid_count=len(invalid),
                 duplicate_count=len(duplicate),
                 mismatched_count=len(mismatched),
-                missing_sample=[
-                    f"{function}:{operation}" for function, operation in missing[:20]
-                ],
+                missing_sample=[f"{function}:{operation}" for function, operation in missing[:20]],
                 unexpected_sample=[
                     f"{function}:{operation}" for function, operation in unexpected[:20]
                 ],
@@ -978,8 +956,7 @@ def _load_independent_migration_proof() -> tuple[
     if (
         source.get("authority") != "evidence-only"
         or source.get("attestation") != "none"
-        or source.get("freshness_basis")
-        != "exact-input-digests-and-deterministic-recomputation"
+        or source.get("freshness_basis") != "exact-input-digests-and-deterministic-recomputation"
         or not isinstance(source.get("input_digest"), str)
         or not digest_pattern.fullmatch(source["input_digest"])
         or not isinstance(inputs, list)
@@ -1291,8 +1268,7 @@ def _pack_semantic_review_errors(
                 not isinstance(parameters, Mapping)
                 or parameters.get("status") != "verified"
                 or parameters.get("method") != "canonical-json-schema-equality"
-                or parameters.get("legacy_schema_digest")
-                != parameters.get("v4_schema_digest")
+                or parameters.get("legacy_schema_digest") != parameters.get("v4_schema_digest")
             ):
                 errors.append("pack_specific_parameter_mapping_missing")
                 break
@@ -1423,18 +1399,20 @@ def _migration_status(
 def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
     """Return staged migration statuses, not self-declared authority labels."""
     catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
-    records_by_id = {
-        str(record.get("pack_id")): record
-        for record in catalog.get("packs", ())
-        if isinstance(record, Mapping) and record.get("pack_id")
-    } if isinstance(catalog, Mapping) else {}
+    records_by_id = (
+        {
+            str(record.get("pack_id")): record
+            for record in catalog.get("packs", ())
+            if isinstance(record, Mapping) and record.get("pack_id")
+        }
+        if isinstance(catalog, Mapping)
+        else {}
+    )
     proof, _ = _load_independent_migration_proof()
     v4_only_ids = _authority_source_sets()["v4_only_ids"]
     legacy_authority = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
     legacy_classified = (
-        legacy_authority.get("packs", {})
-        if isinstance(legacy_authority, Mapping)
-        else {}
+        legacy_authority.get("packs", {}) if isinstance(legacy_authority, Mapping) else {}
     )
     records = []
     for path in _production_pack_dirs():
@@ -1470,8 +1448,7 @@ def _migration_evidence_findings() -> list[dict[str, Any]]:
     proof, findings = _load_independent_migration_proof()
     findings.extend(_migration_proof_generator_findings())
     statuses = {
-        path.name: _migration_status(path.name, path, proof)
-        for path in _production_pack_dirs()
+        path.name: _migration_status(path.name, path, proof) for path in _production_pack_dirs()
     }
     status_counts = Counter(statuses.values())
     pack_ids = set(statuses)
@@ -1496,9 +1473,7 @@ def _migration_evidence_findings() -> list[dict[str, Any]]:
             else None
         )
         transaction = (
-            profile_proof.get("transaction")
-            if isinstance(profile_proof, Mapping)
-            else None
+            profile_proof.get("transaction") if isinstance(profile_proof, Mapping) else None
         )
         profile_receipt = (
             transaction.get("receipt_digest") if isinstance(transaction, Mapping) else None
@@ -1534,9 +1509,7 @@ def _migration_evidence_findings() -> list[dict[str, Any]]:
             )
     findings.extend(_generic_release_receipt_findings(proof))
     unverified = sorted(
-        pack_id
-        for pack_id, status in statuses.items()
-        if status != "release-verified"
+        pack_id for pack_id, status in statuses.items() if status != "release-verified"
     )
     if unverified:
         findings.append(
@@ -1658,10 +1631,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
         }
     )
     expected_properties_plan = expected_required_plan | {"launch_contribution"}
-    if (
-        required_plan != expected_required_plan
-        or properties_plan != expected_properties_plan
-    ):
+    if required_plan != expected_required_plan or properties_plan != expected_properties_plan:
         findings.append(
             {
                 "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
@@ -1818,10 +1788,7 @@ def _legacy_aliases(tree: ast.AST) -> set[str]:
 def _is_legacy_entry_module(module: str) -> bool:
     """Match retired entry roots and every importable child module."""
 
-    return any(
-        module == root or module.startswith(root + ".")
-        for root in LEGACY_ENTRY_MODULES
-    )
+    return any(module == root or module.startswith(root + ".") for root in LEGACY_ENTRY_MODULES)
 
 
 def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dict[str, Any]]:
@@ -2665,13 +2632,9 @@ def _audit_snapshot() -> dict[str, Any]:
             "v4_artifact_files": len(pack_dirs) * len(PACK_ARTIFACTS),
             "v4_pack_artifacts": [_relative(path) for path in _v4_pack_artifacts()],
             "v4_profile_artifacts": [_relative(path) for path in _v4_profile_artifacts()],
-            "migration_status_counts": dict(
-                sorted(_manifest_authority_counts()[0].items())
-            ),
+            "migration_status_counts": dict(sorted(_manifest_authority_counts()[0].items())),
             "migration_status_records": _manifest_authority_counts()[1],
-            "declared_source_sets": {
-                name: sorted(values) for name, values in source_sets.items()
-            },
+            "declared_source_sets": {name: sorted(values) for name, values in source_sets.items()},
             "canonical_source_ids": sorted(
                 source_sets["manifest_ids"] | source_sets["v4_only_ids"]
             ),
@@ -2691,15 +2654,13 @@ def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
     _assert_zero("compatibility aliases", _compatibility_alias_findings())
     assert pack_count == len(_authority_source_sets()["v4_ids"])
     assert len(_v4_pack_artifacts()) == pack_count
-    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == pack_count * len(
-        PACK_ARTIFACTS
-    )
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == pack_count * len(PACK_ARTIFACTS)
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
     _assert_zero("declaration/disk/runtime alignment", _declaration_disk_runtime_findings())
 
 
 def test_signed_frontend_maps_do_not_activate_uncaptured_command_protocol() -> None:
-    """Command Protocol stays dark until it has capture-bound replay authority."""
+    """Only the exact capture-bound high-risk adapter may publish this namespace."""
 
     aliases = (
         "/api/command-protocol/v1",
@@ -2710,13 +2671,9 @@ def test_signed_frontend_maps_do_not_activate_uncaptured_command_protocol() -> N
     )
     assert all(is_conservative_command_protocol_alias(path) for path in aliases)
     assert route_pattern_exposes_command_protocol("/api/{path}")
-    assert route_pattern_exposes_command_protocol(
-        "/api/command-protocol/{version}"
-    )
+    assert route_pattern_exposes_command_protocol("/api/command-protocol/{version}")
     assert route_pattern_exposes_command_protocol("/api/{protocol}/v1")
-    assert not is_conservative_command_protocol_alias(
-        "/api/files/%25252525252541"
-    )
+    assert not is_conservative_command_protocol_alias("/api/files/%25252525252541")
     _assert_zero(
         "uncaptured Command Protocol frontend publication",
         _frontend_command_protocol_findings(),
@@ -2954,9 +2911,7 @@ def _child_failure_diagnostic(
     payload = {
         "command": command,
         "cwd": str(cwd),
-        "environment": {
-            key: environment.get(key) for key in _CHILD_DIAGNOSTIC_ENV_KEYS
-        },
+        "environment": {key: environment.get(key) for key in _CHILD_DIAGNOSTIC_ENV_KEYS},
         "returncode": returncode,
         "stdout": _child_output_for_diagnostic(stdout),
         "stderr": _child_output_for_diagnostic(stderr),
@@ -3240,9 +3195,7 @@ print(
         {
             "TOBKIRI_USER_DATA": str(fresh_user_data),
             "RUMI_USER_DATA": str(fresh_user_data),
-            "RUMI_SANDBOX_LIMA_STATE": str(
-                fresh_user_data / "sandbox" / "lima-runtime.json"
-            ),
+            "RUMI_SANDBOX_LIMA_STATE": str(fresh_user_data / "sandbox" / "lima-runtime.json"),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(tmp_path / "python-cache"),
         }
@@ -3319,9 +3272,9 @@ def test_retired_setup_functions_and_conformance_pack_are_not_production_packs()
     assert not (RUNTIME / "bootstrap.py").exists()
     assert not (RUNTIME / "rumi_setup").exists()
     assert not (RUNTIME / "tobkiri_host" / "conformance").exists()
-    lifecycle_source = (
-        RUNTIME / "core_runtime" / "app_lifecycle_manager.py"
-    ).read_text(encoding="utf-8")
+    lifecycle_source = (RUNTIME / "core_runtime" / "app_lifecycle_manager.py").read_text(
+        encoding="utf-8"
+    )
     assert "setup_pack_selection.json" not in lifecycle_source
     functions_root = ECOSYSTEM / "defaultspack" / "functions"
     for function_id in (
@@ -3334,11 +3287,7 @@ def test_retired_setup_functions_and_conformance_pack_are_not_production_packs()
         assert not (functions_root / function_id / "main.py").exists()
     assert not (ECOSYSTEM / "conformance_minimal_echo_pack").exists()
     assert (
-        RUNTIME
-        / "tests"
-        / "fixtures"
-        / "conformance_minimal_echo_pack"
-        / "pack.v4.json"
+        RUNTIME / "tests" / "fixtures" / "conformance_minimal_echo_pack" / "pack.v4.json"
     ).is_file()
 
 
@@ -3433,10 +3382,9 @@ def test_migration_status_promotes_only_pack_specific_semantic_proof() -> None:
     assert not proof_findings
     assert len(proof) == len(_production_pack_dirs())
     statuses = Counter(
-        _migration_status(path.name, path, proof)
-        for path in _production_pack_dirs()
+        _migration_status(path.name, path, proof) for path in _production_pack_dirs()
     )
-    assert statuses == {"semantically-reviewed": 45, "generated-draft": 94}
+    assert statuses == {"semantically-reviewed": 41, "generated-draft": 99}
 
 
 def test_current_sha_evidence_is_red_while_pack_semantics_are_unproved() -> None:
@@ -3451,21 +3399,16 @@ def test_current_sha_evidence_is_red_while_pack_semantics_are_unproved() -> None
     pack_count = len(_production_pack_dirs())
     assert report["pack_inventory"]["production_pack_directories"] == pack_count
     assert report["pack_inventory"]["catalog_pack_directories"] == pack_count
-    assert report["pack_inventory"]["v4_artifact_files"] == pack_count * len(
-        PACK_ARTIFACTS
-    )
+    assert report["pack_inventory"]["v4_artifact_files"] == pack_count * len(PACK_ARTIFACTS)
     assert report["pack_inventory"]["migration_status_counts"] == {
-        "generated-draft": 94,
-        "semantically-reviewed": 45,
+        "generated-draft": 99,
+        "semantically-reviewed": 41,
     }
     assert report["gates"]["artifact_contracts"]["status"] == "GREEN"
     assert report["gates"]["declaration_disk_runtime"]["status"] == "GREEN"
     assert report["gates"]["executable_source_registry"]["status"] == "GREEN"
     assert report["gates"]["migration_evidence"]["status"] == "RED"
-    migration_rules = {
-        item["rule"]
-        for item in report["gates"]["migration_evidence"]["findings"]
-    }
+    migration_rules = {item["rule"] for item in report["gates"]["migration_evidence"]["findings"]}
     assert "migration_release_proof_missing" in migration_rules
 
 
@@ -3475,9 +3418,7 @@ def test_independent_migration_proof_rejects_tampered_signature(
 ) -> None:
     """Proof content changes cannot pass by retaining the old content digest."""
     payload = _load_json(MIGRATION_PROOF_PATH)
-    payload["source"]["profile_collection_proof"]["identity_proof"][
-        "defaults_collapsed"
-    ] = True
+    payload["source"]["profile_collection_proof"]["identity_proof"]["defaults_collapsed"] = True
     tampered = tmp_path / "pack_migration_proof.v1.json"
     tampered.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setattr(

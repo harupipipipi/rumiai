@@ -40,6 +40,7 @@ _ENVELOPE_SCHEMA = "io.tobkiri.defaultspack-activation-envelope.v1"
 _POINTER_SCHEMA = "io.tobkiri.defaultspack-active-pointer.v1"
 _PENDING_SCHEMA = "io.tobkiri.defaultspack-pending-activation.v1"
 _FOUNDATIONAL_CONTRACT = "conversation.turn.v1"
+_AUTHORITY_MODES = frozenset({"profile_grant", "interactive_only"})
 
 
 class DefaultProfileV4Error(RuntimeError):
@@ -270,9 +271,11 @@ class BundledCatalog:
             artifact_root=(
                 artifact_root.resolve(strict=True)
                 if artifact_root
-                else (root.parent / "platform-artifacts").resolve(strict=True)
-                if (root.parent / "platform-artifacts").is_dir()
-                else None
+                else (
+                    (root.parent / "platform-artifacts").resolve(strict=True)
+                    if (root.parent / "platform-artifacts").is_dir()
+                    else None
+                )
             ),
             executable_catalogs=collections["executable_catalog"],
         )
@@ -406,6 +409,15 @@ def _edge_key(edge: Mapping[str, Any]) -> str:
     )
 
 
+def _authority_mode(edge: Mapping[str, Any]) -> str:
+    """Return the closed activation authority policy for one requested edge."""
+
+    value = edge.get("authority_mode", "profile_grant")
+    if value not in _AUTHORITY_MODES:
+        raise ProfileResolutionDenied("requested edge authority mode is invalid")
+    return str(value)
+
+
 def _provider_candidates(
     packs: list[Mapping[str, Any]], contract_id: str, operation_id: str
 ) -> list[tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]]]:
@@ -500,6 +512,13 @@ def dynamic_profile_edges(
         if manifest is None:
             raise ProfileResolutionDenied(f"dynamic Pack is not in the exact inventory: {pack_id}")
         closure.add(pack_id)
+        if depth >= 1:
+            # Only a selected optional Pack and its direct signed dependency
+            # receive dynamic caller edges.  The resolver validates the full
+            # transitive implementation closure separately; inferring callers
+            # beyond this point would both broaden authority and walk valid
+            # Host-provider dependency cycles.
+            continue
         dependencies = tuple(
             str(dependency) for dependency in manifest["requirements"]["pack_dependencies"]
         )
@@ -563,6 +582,10 @@ def dynamic_profile_edges(
                     raise ProfileResolutionDenied(
                         f"dynamic Pack dependency caller is ambiguous: {pack_id}"
                     )
+                # Dynamic Pack edges are never user-selected interactive
+                # authority.  Their absent mode deliberately means the closed
+                # ``profile_grant`` default, preserving older resolved Profile
+                # bytes while preventing a dynamic source from opting in.
                 result.append(
                     {
                         "caller_function_id": operation_caller,
@@ -623,11 +646,13 @@ def _exact_executable_variant(
     expected_execution_kind = (
         "host_extension"
         if manifest["pack"]["kind"] == "host_extension"
-        else "wasm"
-        if function.get("isolation") == "wasm_component"
-        else "remote"
-        if function.get("isolation") == "remote"
-        else "pack_vm"
+        else (
+            "wasm"
+            if function.get("isolation") == "wasm_component"
+            else "remote"
+            if function.get("isolation") == "remote"
+            else "pack_vm"
+        )
     )
     if variant["execution_kind"] != expected_execution_kind:
         raise ProfileResolutionDenied("executable variant execution kind is stale")
@@ -941,6 +966,7 @@ def resolve_default_profile(
     references: list[str] = []
     for source_edge in all_source_edges:
         edge = dict(source_edge)
+        authority_mode = _authority_mode(edge)
         candidates = _provider_candidates(selected, edge["contract_id"], edge["operation_id"])
         candidates = [item for item in candidates if item[1]["id"] == edge["target_provider_id"]]
         if len(candidates) != 1:
@@ -1007,27 +1033,28 @@ def resolve_default_profile(
         previous_pin = variant_pins.setdefault(pin_key, pin)
         if previous_pin != pin:
             raise ProfileResolutionDenied("one executable variant has conflicting pins")
-        bindings.append(
-            {
-                "caller_function_id": edge["caller_function_id"],
-                "pack_id": manifest["pack"]["id"],
-                "artifact_digest": manifest["pack"]["artifact_digest"],
-                "function_principal": principal,
-                "contract_id": edge["contract_id"],
-                "operation_id": edge["operation_id"],
-                "domain_kind": domain_kind,
-                "executable_catalog_digest": pin["executable_catalog_digest"],
-                "variant_id": pin["variant_id"],
-                "platform": pin["platform"],
-                "architecture": pin["architecture"],
-                "runtime_abi": pin["runtime_abi"],
-                "backend": pin["backend"],
-                "execution_kind": pin["execution_kind"],
-                "authority_reference": reference,
-                "requested_scope_digest": canonical_digest(edge["requested_scope_template"]),
-                "adapter_digests": [],
-            }
-        )
+        binding = {
+            "caller_function_id": edge["caller_function_id"],
+            "pack_id": manifest["pack"]["id"],
+            "artifact_digest": manifest["pack"]["artifact_digest"],
+            "function_principal": principal,
+            "contract_id": edge["contract_id"],
+            "operation_id": edge["operation_id"],
+            "domain_kind": domain_kind,
+            "executable_catalog_digest": pin["executable_catalog_digest"],
+            "variant_id": pin["variant_id"],
+            "platform": pin["platform"],
+            "architecture": pin["architecture"],
+            "runtime_abi": pin["runtime_abi"],
+            "backend": pin["backend"],
+            "execution_kind": pin["execution_kind"],
+            "authority_reference": reference,
+            "requested_scope_digest": canonical_digest(edge["requested_scope_template"]),
+            "adapter_digests": [],
+        }
+        if authority_mode == "interactive_only":
+            binding["authority_mode"] = authority_mode
+        bindings.append(binding)
 
     profile = dict(source)
     profile["state"] = "resolved"
@@ -1204,7 +1231,8 @@ def resolve_default_profile(
         "effective_set": effective_set,
         "content_projections": profile["content_projections"],
         "variant_pins": sorted(
-            variant_pins.values(), key=lambda item: (item["pack_id"], item["variant_id"])
+            variant_pins.values(),
+            key=lambda item: (item["pack_id"], item["variant_id"]),
         ),
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
@@ -1692,7 +1720,12 @@ class ActivationStore:
                     acquired = True
                     break
                 except OSError as exc:
-                    if exc.errno not in {None, errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    if exc.errno not in {
+                        None,
+                        errno.EACCES,
+                        errno.EAGAIN,
+                        errno.EDEADLK,
+                    }:
                         raise ProfileResolutionDenied(
                             "activation process lock is unavailable"
                         ) from exc
@@ -2420,6 +2453,7 @@ class ActivationStore:
             _edge_key(edge): (
                 edge["authority_reference"],
                 canonical_digest(edge["requested_scope_template"]),
+                _authority_mode(edge),
             )
             for edge in profile["requested_edges"]
         }
@@ -2448,6 +2482,7 @@ class ActivationStore:
                 or (
                     matches[0]["authority_reference"],
                     matches[0]["requested_scope_digest"],
+                    _authority_mode(matches[0]),
                 )
                 != edge_bindings[_edge_key(edge)]
             ):

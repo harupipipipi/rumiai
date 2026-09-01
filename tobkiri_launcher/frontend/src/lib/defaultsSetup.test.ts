@@ -83,6 +83,25 @@ test('packaged authenticated setup payload shape accepts the v4 binding fields',
   );
 });
 
+test('setup bindings accept only the declared optional authority mode', () => {
+  const interactive = state();
+  interactive.recommended_default_profile.confirmation.bindings[0].authority_mode =
+    'interactive_only';
+  assert.equal(
+    parseDefaultsSetupState(interactive).recommended_default_profile.confirmation
+      .bindings[0].authority_mode,
+    'interactive_only',
+  );
+
+  const tampered = state();
+  tampered.recommended_default_profile.confirmation.bindings[0].authority_mode =
+    'ambient';
+  assert.throws(
+    () => parseDefaultsSetupState(tampered),
+    /authority mode is invalid/,
+  );
+});
+
 test('the pre-fix frontend binding fixture reproduces the packaged GUI rejection', () => {
   const invalid = state();
   const canonicalBinding = invalid.recommended_default_profile.confirmation.bindings[0];

@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -84,16 +85,19 @@ def test_all_command_bindings_are_concretely_probed_and_pack_blocks_execute(
     assert all(item["verified_handler"] is True for item in matrix)
     assert all(item["concrete_binding"] for item in matrix)
     assert fast["status"] == "succeeded"
-    assert {
-        item["execution"]["kind"] for item in catalog["commands"]
-    } <= {"state_mutation", "host_operation", "pack_operation"}
-    assert {
-        item["presentation"]["input"]["kind"] for item in catalog["commands"]
-    } <= {"search_select", "select", "toggle", "action", "form"}
-    assert all(
-        "legacy_type" not in item["execution"]
-        for item in catalog["commands"]
-    )
+    assert {item["execution"]["kind"] for item in catalog["commands"]} <= {
+        "state_mutation",
+        "host_operation",
+        "pack_operation",
+    }
+    assert {item["presentation"]["input"]["kind"] for item in catalog["commands"]} <= {
+        "search_select",
+        "select",
+        "toggle",
+        "action",
+        "form",
+    }
+    assert all("legacy_type" not in item["execution"] for item in catalog["commands"])
     assert all("legacy" not in item for item in catalog["commands"])
 
     by_id = {item["identity"]["id"]: item for item in catalog["commands"]}
@@ -111,10 +115,13 @@ def test_all_command_bindings_are_concretely_probed_and_pack_blocks_execute(
 def test_owner_scope_comes_only_from_trusted_context() -> None:
     registry = CommandProtocolRegistry(DEFAULTSPACK_ROOT)
 
-    assert registry.owner_key(
-        {},
-        {"authenticated_principal_id": "alice", "authorized_profile_id": "work"},
-    ) == "alice:work"
+    assert (
+        registry.owner_key(
+            {},
+            {"authenticated_principal_id": "alice", "authorized_profile_id": "work"},
+        )
+        == "alice:work"
+    )
     with pytest.raises(ValueError, match="reserved transport fields"):
         registry.owner_key(
             {"_owner_key": "bob:default"},
@@ -138,19 +145,14 @@ def test_owner_scope_comes_only_from_trusted_context() -> None:
 def test_resolved_catalog_never_silently_exposes_missing_frontend_handler() -> None:
     catalog = CommandProtocolRegistry(DEFAULTSPACK_ROOT).catalog()
     unavailable = [
-        item
-        for item in catalog["commands"]
-        if item["availability"]["status"] == "unavailable"
+        item for item in catalog["commands"] if item["availability"]["status"] == "unavailable"
     ]
 
     assert len(unavailable) == 5
-    assert {
-        item["availability"]["reason_code"] for item in unavailable
-    } == {"host_interactive_approval_unavailable"}
-    assert not any(
-        item["code"] == "handler_missing"
-        for item in catalog["diagnostics"]
-    )
+    assert {item["availability"]["reason_code"] for item in unavailable} == {
+        "host_interactive_approval_unavailable"
+    }
+    assert not any(item["code"] == "handler_missing" for item in catalog["diagnostics"])
 
 
 def test_all_55_commands_have_authority_and_completion_conformance() -> None:
@@ -160,15 +162,10 @@ def test_all_55_commands_have_authority_and_completion_conformance() -> None:
     assert len({item["command_id"] for item in matrix}) == 55
     assert all(item["operation_ref"] for item in matrix)
     assert all(item["completion_semantics"] != "noop" for item in matrix)
-    high_risk = [
-        item for item in matrix if item["authority"]["approval_required"]
-    ]
+    high_risk = [item for item in matrix if item["authority"]["approval_required"]]
     assert len(high_risk) == 5
     assert all(item["authority"]["permissions"] for item in high_risk)
-    assert all(
-        item["completion_semantics"] == "backend_side_effect"
-        for item in high_risk
-    )
+    assert all(item["completion_semantics"] == "backend_side_effect" for item in high_risk)
 
 
 def test_protocol_deepthink_invocation_returns_authoritative_state(
@@ -395,9 +392,7 @@ def test_high_risk_executor_policy_refuses_removed_runtime_authority(
         {
             "canonical_id": "defaultspack:terminal",
             "execution": {"operation_ref": "host:request_terminal_approval"},
-            "authorization": {
-                "executor_policy_ref": "tobkiri.command.human_approved"
-            },
+            "authorization": {"executor_policy_ref": "tobkiri.command.human_approved"},
         },
         {"invocation_id": "inv-1", "conversation_id": "conversation-1"},
         {},
@@ -537,7 +532,7 @@ def test_high_risk_terminal_rejects_path_executable_swap_after_approval(
     )
     approved = operations.prepare_high_risk_plan(
         "request_terminal_approval",
-        {"cmd": 'python -c "open(\'ran.txt\', \'w\').write(\'ran\')"'},
+        {"cmd": "python -c \"open('ran.txt', 'w').write('ran')\""},
         context,
     )
     monkeypatch.setenv(
@@ -547,7 +542,7 @@ def test_high_risk_terminal_rejects_path_executable_swap_after_approval(
     result = operations._execute_high_risk_host_operation(
         {"id": "terminal"},
         "request_terminal_approval",
-        {"cmd": 'python -c "open(\'ran.txt\', \'w\').write(\'ran\')"'},
+        {"cmd": "python -c \"open('ran.txt', 'w').write('ran')\""},
         {**context, "_approved_operation_plan": approved},
     )
 
@@ -603,10 +598,7 @@ def test_high_risk_host_policy_requires_authoritative_roots_and_executable(
         argv=(
             "python",
             "-c",
-            (
-                "import os; "
-                "print(os.environ.get('UNTRUSTED_COMMAND_SECRET', 'absent'))"
-            ),
+            ("import os; print(os.environ.get('UNTRUSTED_COMMAND_SECRET', 'absent'))"),
         ),
         cwd=workspace,
         stdin=None,
@@ -658,14 +650,25 @@ def test_windows_host_process_gets_required_curated_environment(
     assert all(entry and entry != "." and Path(entry).is_absolute() for entry in path_entries)
 
 
-def test_command_protocol_routes_are_not_legacy_transport_routes() -> None:
+def test_only_captured_command_protocol_route_is_not_legacy_transport() -> None:
     legacy_specs = canonical_http_route_specs(include_always_available=True)
     bindings = load_current_signed_application_bindings()
 
-    assert not any(
-        route_pattern_exposes_command_protocol(spec.pattern) for spec in legacy_specs
-    )
+    assert not any(route_pattern_exposes_command_protocol(spec.pattern) for spec in legacy_specs)
     assert command_protocol_binding_findings(bindings) == []
+
+    high_risk = next(binding for binding in bindings if "command-protocol" in binding.path)
+    assert command_protocol_binding_findings(
+        (replace(high_risk, path="/api/command-protocol/v1/invoke"),)
+    )
+    assert command_protocol_binding_findings(
+        (
+            replace(
+                high_risk,
+                targets=(replace(high_risk.targets[0], function_id="untrusted.function"),),
+            ),
+        )
+    )
 
 
 def test_invocation_id_is_idempotent_and_conflict_safe(

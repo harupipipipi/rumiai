@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import inspect
 import json
 import os
 from pathlib import Path
@@ -162,6 +163,28 @@ def _https_transport(
     return transport, arguments
 
 
+def test_credential_transport_requires_explicit_captured_consumer_identity() -> None:
+    """No provider Pack identity may be selected by a Host-side default."""
+
+    binding = inspect.signature(transport_module.CredentialTransportBinding)
+    factory = inspect.signature(HostBoundCredentialTransport.from_authorized_envelope)
+
+    assert binding.parameters["consumer_pack_id"].default is inspect.Parameter.empty
+    assert factory.parameters["consumer_pack_id"].default is inspect.Parameter.empty
+
+
+def test_host_json_sanitizer_allows_unknown_provider_extensions() -> None:
+    """Provider field selection belongs to the adapter Pack, not the Host."""
+
+    assert transport_module._sanitize_json_response(
+        {
+            "provider_extension": {"trace": "safe"},
+            "choices": [],
+        },
+        "credential-canary",
+    ) == {"provider_extension": {"trace": "safe"}, "choices": []}
+
+
 def _test_http_request(
     port: int,
     *,
@@ -268,6 +291,7 @@ def _pin_test_network(
 ) -> tuple[list[str], list[tuple[str, int]]]:
     resolutions: list[str] = []
     connections: list[tuple[str, int]] = []
+
     def resolve(host: str, port: int, **_kwargs: Any) -> list[tuple[Any, ...]]:
         resolutions.append(host)
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port))]
@@ -557,7 +581,9 @@ def test_credential_transport_rejects_plaintext_before_secret_resolution(
 
         def resolve(self, *_args: object, **_kwargs: object) -> dict[str, Any]:
             self.calls += 1
-            raise AssertionError("plaintext endpoint must not resolve credential material")
+            raise AssertionError(
+                "plaintext endpoint must not resolve credential material"
+            )
 
     store = NeverResolveStore()
     authority, envelope = _dispatched_envelope(tmp_path / "binding")
@@ -574,6 +600,7 @@ def test_credential_transport_rejects_plaintext_before_secret_resolution(
             credential_purpose="provider.invoke",
             endpoint_origin="http://provider.example",
             current_security_epoch=lambda: authority.store.security_epoch,
+            consumer_pack_id="provider-adapter-pack",
         )
 
     assert store.calls == 0
@@ -593,6 +620,7 @@ def test_credential_transport_rejects_plaintext_before_secret_resolution(
         credential_purpose="provider.invoke",
         endpoint_origin="https://provider.example",
         current_security_epoch=lambda: authority.store.security_epoch,
+        consumer_pack_id="provider-adapter-pack",
         audit_sink=lambda event: audit.append(dict(event)),
     )
     with pytest.raises(CredentialTransportDenied, match="denied") as request_denied:
@@ -800,6 +828,83 @@ def test_host_transport_rejects_wrong_exact_binding(
     assert "binding-sentinel" not in str(denied.value)
 
 
+def test_host_git_transport_resolves_only_inside_one_exact_push(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Git transport gives the Host runner, not a Pack, credential material."""
+
+    canary = "git-credential-sentinel"
+    service = CredentialBrokerService(user_data_root=tmp_path / "credential")
+    created = service.invoke(
+        "create",
+        {
+            "secret_material": {"token": canary},
+            "profile_id": "profile-1",
+            "consumer_pack_id": "rumi_git_publish_pack",
+            "provider_instance_id": "git-publish.service",
+            "scopes": ["git.publish"],
+        },
+    )
+    authority, envelope = _dispatched_envelope(tmp_path / "dispatch")
+    transport = HostBoundCredentialTransport.from_authorized_envelope(
+        envelope,
+        provider_principal=authority.target,
+        store=service.store,
+        authority_store=authority.store,
+        credential_handle=created["handle"],
+        credential_key_version=created["key_version"],
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+        credential_purpose="provider.invoke",
+        endpoint_origin="https://github.example",
+        current_security_epoch=lambda: authority.store.security_epoch,
+        consumer_pack_id="rumi_git_publish_pack",
+    )
+    bare = tmp_path / "transport.git"
+    bare.mkdir()
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        transport_module, "_trusted_git_executable", lambda _value: Path("/usr/bin/git")
+    )
+    monkeypatch.setattr(
+        transport_module, "_bare_repository", lambda value, _exe: Path(value)
+    )
+
+    def run_push(**kwargs: str) -> str:
+        captured.update(kwargs)
+        return f"published {kwargs['secret']}"
+
+    monkeypatch.setattr(transport_module, "_run_credentialed_git_push", run_push)
+    result = transport.push_git_https(
+        git_executable="/usr/bin/git",
+        bare_repository=str(bare),
+        remote_url="https://github.example/owner/repository.git",
+        refspec="a" * 40 + ":refs/heads/main",
+        force_with_lease="--force-with-lease=refs/heads/main:" + "0" * 40,
+        credential_handle=created["handle"],
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+    )
+
+    assert captured["username"] == "x-access-token"
+    assert captured["secret"] == canary
+    assert result == "published [REDACTED]"
+    assert canary not in result
+    assert transport._consumed is True
+    with pytest.raises(CredentialTransportDenied):
+        transport.push_git_https(
+            git_executable="/usr/bin/git",
+            bare_repository=str(bare),
+            remote_url="https://github.example/owner/repository.git",
+            refspec="a" * 40 + ":refs/heads/main",
+            force_with_lease="--force-with-lease=refs/heads/main:" + "0" * 40,
+            credential_handle=created["handle"],
+            provider_instance_id="git-publish.service",
+            credential_scope="git.publish",
+        )
+
+
 @pytest.mark.parametrize(
     "response",
     (
@@ -818,7 +923,9 @@ def test_host_transport_rejects_material_in_response_keys_without_observable_lea
     transport, arguments = _https_transport(tmp_path, secret=canary)
     audit: list[dict[str, Any]] = []
     transport._audit_sink = audit.append
-    monkeypatch.setattr(transport, "_opener", lambda *_args, **_kwargs: _Response(response))
+    monkeypatch.setattr(
+        transport, "_opener", lambda *_args, **_kwargs: _Response(response)
+    )
 
     with pytest.raises(CredentialTransportDenied) as caught:
         transport.post_json(**arguments)
@@ -829,7 +936,9 @@ def test_host_transport_rejects_material_in_response_keys_without_observable_lea
     assert error.__context__ is None
     print(json.dumps({"args": error.args, "audit": audit}, sort_keys=True))
     captured = capsys.readouterr()
-    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    observable = "\n".join(
+        (str(error), repr(error), caplog.text, captured.out, captured.err)
+    )
     assert observable.count(canary) == 0
 
 
@@ -867,7 +976,9 @@ def test_host_transport_severs_material_bearing_exception_chains(
     assert error.__context__ is None
     print(json.dumps({"args": error.args, "audit": audit}, sort_keys=True))
     captured = capsys.readouterr()
-    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    observable = "\n".join(
+        (str(error), repr(error), caplog.text, captured.out, captured.err)
+    )
     assert observable.count(canary) == 0
 
 
@@ -903,7 +1014,11 @@ def test_host_transport_sanitizes_values_and_isolates_material_bearing_audit_fai
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
             }
         ),
     )
@@ -955,8 +1070,52 @@ def test_global_client_normalizes_injected_transport_exception_without_chain(
     assert error.__context__ is None
     print(json.dumps({"args": error.args}, sort_keys=True))
     captured = capsys.readouterr()
-    observable = "\n".join((str(error), repr(error), caplog.text, captured.out, captured.err))
+    observable = "\n".join(
+        (str(error), repr(error), caplog.text, captured.out, captured.err)
+    )
     assert observable.count(canary) == 0
+
+
+def test_global_client_normalizes_injected_git_transport_exception_without_chain(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Git credential failures project the same material-free public error."""
+
+    canary = "git-transport-exception-canary"
+
+    class FailingTransport:
+        def push_git_https(self, **_kwargs: object) -> str:
+            raise RuntimeError(canary)
+
+    client = GlobalContractClient(
+        session=object(),  # type: ignore[arg-type]
+        allowed_contract_ids=frozenset(),
+        consumer_pack_id="rumi_git_publish_pack",
+        host_credential_transport=FailingTransport(),
+    )
+    with pytest.raises(HostCredentialTransportError) as caught:
+        client.push_git_https_with_credential(
+            git_executable="/usr/bin/git",
+            bare_repository="/private/host-state/transport.git",
+            remote_url="https://github.example/owner/repository.git",
+            refspec="a" * 40 + ":refs/heads/main",
+            force_with_lease="--force-with-lease=refs/heads/main:" + "0" * 40,
+            credential_handle="credential:opaque",
+            provider_instance_id="git-publish.service",
+            credential_scope="git.publish",
+        )
+
+    error = caught.value
+    assert error.code == "host_credential_transport_failed"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    print(json.dumps({"args": error.args}, sort_keys=True))
+    captured = capsys.readouterr()
+    observable = "\n".join(
+        (str(error), repr(error), caplog.text, captured.out, captured.err)
+    )
+    assert canary not in observable
 
 
 def test_host_transport_rejects_missing_approval_and_revocation(
@@ -988,6 +1147,7 @@ def test_host_transport_rejects_missing_approval_and_revocation(
             credential_purpose="provider.invoke",
             endpoint_origin="https://provider.example",
             current_security_epoch=lambda: authority.store.security_epoch,
+            consumer_pack_id="provider-adapter-pack",
         )
 
     transport = HostBoundCredentialTransport.from_authorized_envelope(
@@ -1048,7 +1208,7 @@ def test_credential_migration_is_atomic_redacted_and_reversible(
 
     assert result["credentials"][0]["handle"].startswith("credential:")
     assert "not-returned" not in str(result)
-    assert service.invoke("migration.rollback", {"migration_id": result["migration_id"]})[
-        "rolled_back"
-    ]
+    assert service.invoke(
+        "migration.rollback", {"migration_id": result["migration_id"]}
+    )["rolled_back"]
     assert service.invoke("list", {"profile_id": "profile-a"})["count"] == 0

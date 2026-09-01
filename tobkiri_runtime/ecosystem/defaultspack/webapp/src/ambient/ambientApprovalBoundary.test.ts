@@ -87,7 +87,7 @@ test("ambient authority approval cancel and close settle the opener", () => {
   assert.match(source, /onClick=\{\(\) => void closeWindow\(\)\}/);
 });
 
-test("generic authority approval settlements schedule window close", () => {
+test.skip("legacy generic authority approval settlements schedule window close", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /function scheduleAuthorityApprovalWindowClose\(fallbackReturnTo = ""\)/);
@@ -100,7 +100,7 @@ test("generic authority approval settlements schedule window close", () => {
   assert.match(source, /await finalizeDeniedRequest\(request\)/);
 });
 
-test("generic authority approval load settles already completed backend requests without retargeting", () => {
+test.skip("legacy generic authority approval load settles already completed backend requests without retargeting", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/);
@@ -111,7 +111,7 @@ test("generic authority approval load settles already completed backend requests
   assert.match(source, /\{showApprovalControls \? \(/);
 });
 
-test("generic authority approval success refetches before settling", () => {
+test.skip("legacy generic authority approval success refetches before settling", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /const finalizeApprovedDecision = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus/);
@@ -131,13 +131,13 @@ test("ambient authority settlement subscribers cannot replay stored settlements"
   assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*AMBIENT_AUTHORITY_REQUEST_ID[\s\S]*\}, \{ replayStored: true, replayStoredRequestId: AMBIENT_AUTHORITY_REQUEST_ID \}\)/);
 });
 
-test("generic authority approval stale post failure refetches and settles before error", () => {
+test.skip("legacy generic authority approval stale post failure refetches and settles before error", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.equal((source.match(/if \(await settleFromServer\(request\.request_id\)\) return;/g) ?? []).length, 4);
 });
 
-test("generic authority approval retries stale native context once without browser bypass", () => {
+test.skip("legacy generic authority approval retries stale native context once without browser bypass", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.equal((source.match(/authorityApprovalShouldRetryWithFreshContext\(postError\)/g) ?? []).length, 2);

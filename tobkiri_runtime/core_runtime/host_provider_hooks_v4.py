@@ -68,11 +68,13 @@ def load_host_provider_factory(
         sys.modules.pop(module_name, None)
         raise AuthorizationError("Host Provider executable changed during import")
     exported_factory = getattr(module, "HOST_PROVIDER_FACTORY", None)
-    factory = (
-        exported_factory.get(binding.function.function_id)
-        if isinstance(exported_factory, dict)
-        else exported_factory
-    )
+    if isinstance(exported_factory, dict):
+        if binding.function.function_id not in exported_factory:
+            sys.modules.pop(module_name, None)
+            return None
+        factory = exported_factory[binding.function.function_id]
+    else:
+        factory = exported_factory
     if (
         factory is None
         or not isinstance(getattr(factory, "function_id", None), str)

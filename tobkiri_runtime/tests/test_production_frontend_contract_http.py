@@ -553,7 +553,14 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
         )
         return status_code, payload
 
-    target_pack = "rumi_git_read_pack"
+    # Use the production optional-Pack lifecycle fixture.  Picking the first
+    # optional catalog row is not sufficient: declarative content Packs are
+    # intentionally installable but have no runtime Function to enable.
+    target_pack = "tobkiri_workflow_pack"
+    target_row = next(
+        item for item in catalog["data"]["packs"] if item["pack_id"] == target_pack
+    )
+    assert target_row["required"] is False
     assert post("/api/pack-control/install", {"pack_id": target_pack})[0] == 200
     never_approved_request = str(uuid.uuid4())
     denied_status, denied = post(

@@ -151,7 +151,7 @@
         "pack_identity": "rumi:ecosystem/rumi_provider_registry_pack",
         "provenance": {
           "build_identity": "rumi_provider_registry_pack:1.0.0",
-          "content_hash": "sha256:29ee31801cb8fa8ea0dd2accd96ba57acb268ded3f6fb1f23b2b31fde94d30ff",
+          "content_hash": "sha256:c9ee7eb31cccbc757963a05d42b813a79bebbdb38e601d7efc3d3aa9c29ef0db",
           "signature": null,
           "trust_class": "local"
         },
@@ -226,7 +226,7 @@
   ],
   "provenance": {
     "build_identity": "rumi_provider_registry_pack:1.0.0",
-    "content_hash": "sha256:29ee31801cb8fa8ea0dd2accd96ba57acb268ded3f6fb1f23b2b31fde94d30ff",
+    "content_hash": "sha256:c9ee7eb31cccbc757963a05d42b813a79bebbdb38e601d7efc3d3aa9c29ef0db",
     "signature": null,
     "trust_class": "local"
   },

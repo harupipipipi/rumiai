@@ -75,6 +75,10 @@ const RUNTIME_PACK_PATH: &str = "packs/runtime.tauri.application.default.pack.v4
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplicationAuthority {
     pub pack_root: PathBuf,
+    /// Artifacts captured while resolving this selected Pack root.
+    /// Consumers must not re-read the mutable artifact index after resolution.
+    pub verified_artifacts: BTreeMap<String, VerifiedPackArtifact>,
+    pub materialized_pack_id: String,
     pub launch: ApplicationLaunch,
     pub profile_id: String,
     /// The source Profile bytes digest for bootstrap, or the Profile revision
@@ -88,6 +92,13 @@ pub(crate) struct ApplicationAuthority {
     pub shell_provider_id: String,
     pub application_id: String,
     pub launch_contribution: Option<RuntimeLaunchContribution>,
+}
+
+/// One artifact declaration accepted by the selected Pack verifier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerifiedPackArtifact {
+    pub digest: String,
+    pub role: String,
 }
 
 /// Canonical Application launch selector carried by the active ResolvedPlan.
@@ -314,13 +325,17 @@ impl SignedApplicationResolver {
         // old Defaultspack-only authority rule.
         let root_pack = read_json(&pack_root.join("pack.v4.json"), "materialized Pack")?;
         let root_pack_id = value_str(&root_pack, "/pack/id")
-            .context("materialized Pack is missing its Pack identity")?;
-        ensure_materialized_pack_selected(root_pack_id, &selected.pack_ids)?;
-        verify_pack_artifact_index(&pack_root, &bundle_root, root_pack_id)?;
+            .context("materialized Pack is missing its Pack identity")?
+            .to_owned();
+        ensure_materialized_pack_selected(&root_pack_id, &selected.pack_ids)?;
+        let verified_artifacts =
+            verify_pack_artifact_index(&pack_root, &bundle_root, &root_pack_id)?;
 
         let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
         Ok(ApplicationAuthority {
             pack_root,
+            verified_artifacts,
+            materialized_pack_id: root_pack_id,
             launch,
             profile_id: selected.profile_id,
             profile_digest: selected.profile_digest,
@@ -2089,7 +2104,7 @@ fn verify_pack_artifact_index(
     pack_root: &Path,
     bundle_root: &Path,
     expected_pack_id: &str,
-) -> Result<()> {
+) -> Result<BTreeMap<String, VerifiedPackArtifact>> {
     let index = read_json(
         &pack_root.join("artifact-index.v4.json"),
         "selected Pack artifact index",
@@ -2117,8 +2132,19 @@ fn verify_pack_artifact_index(
     for entry in entries {
         let relative = value_str(entry, "/path").context("artifact index path is missing")?;
         let expected = value_str(entry, "/digest").context("artifact index digest is missing")?;
+        let role = value_str(entry, "/role").context("artifact index role is missing")?;
         let bytes = read_regular_file(&pack_root.join(safe_relative(relative)?), "Pack artifact")?;
-        if sha256(&bytes) != expected || actual.insert(relative, expected).is_some() {
+        if sha256(&bytes) != expected
+            || actual
+                .insert(
+                    relative.to_owned(),
+                    VerifiedPackArtifact {
+                        digest: expected.to_owned(),
+                        role: role.to_owned(),
+                    },
+                )
+                .is_some()
+        {
             bail!("selected Pack artifact index contains a duplicate or stale artifact");
         }
     }
@@ -2139,7 +2165,7 @@ fn verify_pack_artifact_index(
     {
         bail!("selected Pack artifact index is stale for its Pack v4 authority");
     }
-    Ok(())
+    Ok(actual)
 }
 
 /// Bind the materialized Pack source to the Profile-locked Pack authority.

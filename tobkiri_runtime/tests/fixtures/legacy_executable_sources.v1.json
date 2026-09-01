@@ -11,6 +11,23 @@
       "pack_id": "rumi_ai_gateway_pack",
       "entrypoint_id": "ai-gateway-stream",
       "operation_id": "rumi_ai_gateway_pack.ai-gateway.stream"
+    },
+    {
+      "pack_id": "rumi_git_publish_pack",
+      "entrypoint_id": "git-publish",
+      "operation_id": "rumi_git_publish_pack.git-push"
+    },
+    {
+      "pack_id": "rumi_git_write_pack",
+      "entrypoint_id": "git-write",
+      "operation_id": "rumi_git_write_pack.git-commit"
+    }
+  ],
+  "function_id_overrides": [
+    {
+      "pack_id": "rumi_git_write_pack",
+      "entrypoint_id": "git-write",
+      "function_id": "rumi_git_write_pack.git-commit.service"
     }
   ],
   "packs": {
@@ -227,6 +244,110 @@
             "output": {"type": "object"},
             "error": {"type": "object"}
           }
+        }
+      ]
+    },
+    "rumi_shell_execute_pack": {
+      "entries": [
+        {
+          "function_id": "rumi_shell_execute_pack.shell-prepare.service",
+          "operation_ids": ["rumi_shell_execute_pack.shell-prepare"],
+          "contract_id": "tobkiri.service.shell.execute.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/execute.py",
+          "schemas": {
+            "input": {"type": "object"},
+            "output": {"type": "object"},
+            "error": {"type": "object"}
+          }
+        }
+      ]
+    },
+    "rumi_git_write_pack": {
+      "entries": [
+        {
+          "function_id": "rumi_git_write_pack.git-commit-prepare.service",
+          "operation_ids": ["rumi_git_write_pack.git-commit-prepare"],
+          "contract_id": "tobkiri.service.git.write.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/write.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        },
+        {
+          "function_id": "rumi_git_write_pack.git-restore-prepare.service",
+          "operation_ids": ["rumi_git_write_pack.git-restore-prepare"],
+          "contract_id": "tobkiri.service.git.write.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/write.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        },
+        {
+          "function_id": "rumi_git_write_pack.git-restore.service",
+          "operation_ids": ["rumi_git_write_pack.git-restore"],
+          "contract_id": "tobkiri.service.git.write.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/write.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        },
+        {
+          "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
+          "operation_ids": ["rumi_git_write_pack.git-apply-patch-prepare"],
+          "contract_id": "tobkiri.service.git.write.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/write.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        },
+        {
+          "function_id": "rumi_git_write_pack.git-apply-patch.service",
+          "operation_ids": ["rumi_git_write_pack.git-apply-patch"],
+          "contract_id": "tobkiri.service.git.write.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/write.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        }
+      ]
+    },
+    "rumi_git_publish_pack": {
+      "entries": [
+        {
+          "function_id": "rumi_git_publish_pack.git-push-prepare.service",
+          "operation_ids": ["rumi_git_publish_pack.git-push-prepare"],
+          "contract_id": "tobkiri.service.git.publish.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/publish.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        }
+      ]
+    },
+    "rumi_host_authority_bridge_pack": {
+      "entries": [
+        {
+          "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+          "operation_ids": ["interactive_approval.get", "interactive_approval.list", "interactive_approval.approve", "interactive_approval.deny"],
+          "contract_id": "tobkiri.service.interactive-approval.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/bridge.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        },
+        {
+          "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
+          "operation_ids": ["interactive_effect.manage"],
+          "contract_id": "tobkiri.service.interactive-effect.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/bridge.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
+        }
+      ]
+    },
+    "rumi_command_protocol_pack": {
+      "entries": [
+        {
+          "function_id": "rumi_command_protocol_pack.high-risk-command.service",
+          "operation_ids": ["high_risk_command.manage"],
+          "contract_id": "tobkiri.service.command.high-risk.v1",
+          "contract_version": "1.0.0",
+          "implementation_path": "runtime/high_risk_adapter.py",
+          "schemas": {"input": {"type": "object"}, "output": {"type": "object"}, "error": {"type": "object"}}
         }
       ]
     },

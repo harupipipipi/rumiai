@@ -24,6 +24,7 @@
     "runtime.py",
     "shells.py",
     "tauri_roles.py",
-    "triggers.py"
+    "triggers.py",
+    "workspace_mutation.py"
   ]
 }

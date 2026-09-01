@@ -39,7 +39,7 @@
     "tool_approval_prompt": "owned_by_rumi_artifact_app_runtime_pack",
     "tool_aliases": "prefer_explicit_pack_namespace"
   },
-  "defaultspack_promotion": {
+  "base_pack_promotion": {
     "eligible": false,
     "reason": "Rumi Artifact App Runtime Pack is declarative and cannot enter defaultspack until owner-pack integration, audit receipts, and real success cases prove it should be default.",
     "criteria": [

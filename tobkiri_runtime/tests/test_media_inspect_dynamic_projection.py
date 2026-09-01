@@ -683,8 +683,8 @@ def test_file_operations_have_exact_distinct_callers(media_server) -> None:
         )
 
 
-def test_pack_root_identity_rejects_symlink_and_detects_swap(tmp_path: Path) -> None:
-    """Captured Pack roots reject nested symlinks and same-path replacement."""
+def test_pack_root_identity_rejects_root_symlink_and_detects_swap(tmp_path: Path) -> None:
+    """Root binding ignores unrelated content but rejects root replacement links."""
 
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
@@ -697,10 +697,46 @@ def test_pack_root_identity_rejects_symlink_and_detects_swap(tmp_path: Path) -> 
     (pack_root / "runtime.py").write_text("pass\n", encoding="utf-8")
     assert _pack_root_identities({MEDIA_PACK: pack_root}) != captured
 
-    (pack_root / "runtime.py").unlink()
-    (pack_root / "runtime.py").symlink_to(moved_root / "runtime.py")
-    with pytest.raises(AuthorityDenied, match="contains a symlink"):
-        _pack_root_identities({MEDIA_PACK: pack_root})
+    bin_directory = pack_root / "webapp" / "node_modules" / ".bin"
+    bin_directory.mkdir(parents=True)
+    (bin_directory / "tool").symlink_to(moved_root / "runtime.py")
+    replacement_identity = _pack_root_identities({MEDIA_PACK: pack_root})
+
+    linked_root = tmp_path / "pack-link"
+    linked_root.symlink_to(pack_root, target_is_directory=True)
+    with pytest.raises(AuthorityDenied, match="root is unavailable"):
+        _pack_root_identities({MEDIA_PACK: linked_root})
+    assert replacement_identity == _pack_root_identities({MEDIA_PACK: pack_root})
+
+
+def test_media_dynamic_projection_stops_at_direct_signed_dependency() -> None:
+    """Transitive implementation closure must not acquire inferred callers."""
+
+    catalog = BundledCatalog.load(_bundle_root())
+    edges = dynamic_profile_edges(catalog, "defaults", (MEDIA_PACK,))
+
+    assert {
+        (
+            str(edge["caller_function_id"]),
+            str(edge["target_provider_id"]),
+            str(edge["contract_id"]),
+            str(edge["operation_id"]),
+        )
+        for edge in edges
+    } == {
+        (
+            "shell.tauri.default",
+            "rumi_media_inspect_service_pack.media-inspect.service",
+            MEDIA_CONTRACT,
+            MEDIA_OPERATION,
+        ),
+        (
+            "rumi_media_inspect_service_pack.media-inspect.service",
+            "rumi_file_inspect_pack.file-inspect.service",
+            FILE_CONTRACT,
+            FILE_OPERATION,
+        ),
+    }
 
 
 @pytest.mark.parametrize(

@@ -381,7 +381,7 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
     )
     monkeypatch.setattr(
         profile_capture,
-        "_resolve_candidate",
+        "_resolve_bootstrap_candidate",
         lambda **_kwargs: (successor, confirmation),
     )
 
@@ -1039,7 +1039,7 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
     monkeypatch.setattr(profile_capture, "_bundle_root", lambda _base=None: catalog.root)
     monkeypatch.setattr(
         profile_capture,
-        "_resolve_candidate",
+        "_resolve_bootstrap_candidate",
         lambda **_kwargs: (resolved, confirmation),
     )
 

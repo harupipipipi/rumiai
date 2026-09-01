@@ -140,6 +140,25 @@ def _render_profile_release(
     )
 
 
+def _render_staged_profile_release(rendered: Mapping[Path, bytes]) -> dict[Path, bytes]:
+    """Render Profile artifacts against the candidate bundle publication.
+
+    A newly added Pack cannot be resolved from the current bundle.  Build the
+    same candidate tree used by publication so ``--check`` compares the whole
+    prospective release rather than rejecting that valid transition early.
+    """
+
+    stage = _stage_candidate_bundle(rendered, prefix=".defaultspack-v4-check-")
+    try:
+        staged = _render_profile_release(stage, source_bundle_root=BUNDLE)
+        return {
+            BUNDLE / path.relative_to(stage): raw for path, raw in staged.items()
+        }
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+
+
 def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
     """Return the deterministic Host Extension catalog selection and closure."""
 
@@ -1080,14 +1099,12 @@ def _validate_catalog(catalog: BundledCatalog) -> None:
             raise ValueError(f"Profile contains duplicate requested edges: {profile_id}")
 
 
-def _publish(
-    rendered: dict[Path, bytes],
+def _stage_candidate_bundle(
+    rendered: Mapping[Path, bytes],
     *,
-    fault: Any | None = None,
-) -> None:
-    """Validate and publish the complete bundle as one rollback-safe transaction."""
-
-    from scripts import generate_profile_artifacts as profile_artifact_generator
+    prefix: str,
+) -> Path:
+    """Materialize a candidate bundle without following existing symlinks."""
 
     if BUNDLE.is_symlink() or not BUNDLE.is_dir():
         raise ValueError("defaultspack v4 bundle root must be a real directory")
@@ -1100,13 +1117,10 @@ def _publish(
         current = BUNDLE
         for part in relative.parts:
             current /= part
-            if current.exists() and current.is_symlink():
+            if current.is_symlink():
                 raise ValueError(f"rendered path contains a symlink: {relative}")
 
-    stage = Path(tempfile.mkdtemp(prefix=".defaultspack-v4-stage-", dir=BUNDLE.parent))
-    backup = Path(tempfile.mkdtemp(prefix=".defaultspack-v4-backup-", dir=BUNDLE.parent))
-    backup.rmdir()
-    moved_original = False
+    stage = Path(tempfile.mkdtemp(prefix=prefix, dir=BUNDLE.parent))
     try:
         for relative in PROFILE_ARTIFACT_COMPANIONS:
             source = BUNDLE / relative
@@ -1121,6 +1135,30 @@ def _publish(
             target = stage / path.relative_to(BUNDLE)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(raw)
+    except BaseException:
+        shutil.rmtree(stage)
+        raise
+    return stage
+
+
+def _publish(
+    rendered: dict[Path, bytes],
+    *,
+    fault: Any | None = None,
+) -> None:
+    """Validate and publish the complete bundle as one rollback-safe transaction."""
+
+    from scripts import generate_profile_artifacts as profile_artifact_generator
+
+    stage = _stage_candidate_bundle(rendered, prefix=".defaultspack-v4-stage-")
+    try:
+        backup = Path(tempfile.mkdtemp(prefix=".defaultspack-v4-backup-", dir=BUNDLE.parent))
+        backup.rmdir()
+    except BaseException:
+        shutil.rmtree(stage)
+        raise
+    moved_original = False
+    try:
         profile_release = _render_profile_release(
             stage,
             source_bundle_root=BUNDLE,
@@ -1171,12 +1209,18 @@ def main() -> int:
     parser.add_argument("--source-commit")
     args = parser.parse_args()
     rendered = _render(args.source_commit)
-    profile_release = _render_profile_release(BUNDLE, source_bundle_root=BUNDLE)
-    expected = {**rendered, **profile_release}
-    stale = [
-        path for path, raw in expected.items() if not path.exists() or path.read_bytes() != raw
-    ]
     if args.check:
+        # A normal publication renders Profile artifacts from a stage that
+        # already contains ``rendered``.  Do not resolve them from the current
+        # bundle here: a newly added Profile Pack is intentionally absent from
+        # that old bundle until the transaction is published.
+        profile_release = _render_staged_profile_release(rendered)
+        expected = {**rendered, **profile_release}
+        stale = [
+            path
+            for path, raw in expected.items()
+            if not path.exists() or path.read_bytes() != raw
+        ]
         if stale:
             for path in stale:
                 print(path.relative_to(ROOT))

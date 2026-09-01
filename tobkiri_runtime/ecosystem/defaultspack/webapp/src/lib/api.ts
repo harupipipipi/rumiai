@@ -397,6 +397,43 @@ export type AuthorityApprovalDecision = {
   related_approvals?: AuthorityApprovalDecision[];
 };
 
+/**
+ * The only approval state that the interactive-approval Pack may return to a
+ * web surface.  Authority material intentionally is not representable here:
+ * the Host consumes the one-shot grant itself when it resumes the effect.
+ */
+export type InteractiveApprovalRequest = {
+  request_id: string;
+  state: string;
+  expires_at: number;
+  typed_confirmation_required: boolean;
+  redacted_metadata: Record<string, string>;
+};
+
+/** A redacted list projection from the interactive-approval Pack. */
+export type InteractiveApprovalRequestsResponse = {
+  approvals: InteractiveApprovalRequest[];
+};
+
+/**
+ * The redacted client projection from the high-risk command Host adapter.
+ *
+ * ``invocation_id`` is an opaque client correlation value. In particular,
+ * effect identity, prepared plans, authority tokens, and command arguments
+ * are intentionally not representable after prepare.
+ */
+export type HighRiskCommandInvocation = {
+  invocation_id: string;
+  approval_request_id: string | null;
+  state: string;
+  expires_at: number | null;
+  redacted_metadata: Record<string, string>;
+};
+
+export type HighRiskCommandInvocationsResponse = {
+  invocations: HighRiskCommandInvocation[];
+};
+
 export type AuthorityUiOperator = {
   version: number;
   kind: "ui_operator";
@@ -3652,6 +3689,63 @@ export const api = {
     };
   },
 
+  prepareHighRiskCommand(payload: {
+    invocation_id: string;
+    command_ref: "terminal" | "commit" | "push" | "patch" | "restore";
+    arguments: Record<string, unknown>;
+    presentation: { title: string; summary: string };
+  }) {
+    return request<HighRiskCommandInvocation>(
+      defaultspackContractRoute("api/command-protocol/v1/high-risk"),
+      {
+        method: "POST",
+        body: JSON.stringify({ phase: "prepare", ...payload }),
+      },
+    );
+  },
+
+  listHighRiskCommands() {
+    return request<HighRiskCommandInvocationsResponse>(
+      defaultspackContractRoute("api/command-protocol/v1/high-risk"),
+      {
+        method: "POST",
+        body: JSON.stringify({ phase: "list_pending" }),
+        cache: "no-store",
+      },
+    );
+  },
+
+  highRiskCommandStatus(invocationId: string) {
+    return request<HighRiskCommandInvocation>(
+      defaultspackContractRoute("api/command-protocol/v1/high-risk"),
+      {
+        method: "POST",
+        body: JSON.stringify({ phase: "status", invocation_id: invocationId }),
+        cache: "no-store",
+      },
+    );
+  },
+
+  resumeHighRiskCommand(invocationId: string) {
+    return request<HighRiskCommandInvocation>(
+      defaultspackContractRoute("api/command-protocol/v1/high-risk"),
+      {
+        method: "POST",
+        body: JSON.stringify({ phase: "resume", invocation_id: invocationId }),
+      },
+    );
+  },
+
+  cancelHighRiskCommand(invocationId: string) {
+    return request<HighRiskCommandInvocation>(
+      defaultspackContractRoute("api/command-protocol/v1/high-risk"),
+      {
+        method: "POST",
+        body: JSON.stringify({ phase: "cancel", invocation_id: invocationId }),
+      },
+    );
+  },
+
   resumeResolvedUiCommand(payload: {
     command: string;
     approval_token?: string;
@@ -5142,6 +5236,60 @@ export const api = {
         ui_operator: options.ui_operator,
       }),
     });
+  },
+
+  listInteractiveApprovals() {
+    return request<InteractiveApprovalRequestsResponse>(
+      defaultspackContractRoute("api/interactive-approval/v1/list"),
+      { cache: "no-store" },
+    );
+  },
+
+  getInteractiveApproval(requestId: string) {
+    return request<InteractiveApprovalRequest>(
+      defaultspackContractRoute("api/interactive-approval/v1/get"),
+      {
+        method: "POST",
+        body: JSON.stringify({ request_id: requestId }),
+        cache: "no-store",
+      },
+    );
+  },
+
+  approveInteractiveApproval(
+    requestId: string,
+    options: {
+      confirmation_text: string;
+      ui_operator: AuthorityUiOperator;
+    },
+  ) {
+    return request<InteractiveApprovalRequest>(
+      defaultspackContractRoute("api/interactive-approval/v1/approve"),
+      {
+        method: "POST",
+        body: JSON.stringify({
+          request_id: requestId,
+          confirmation_text: options.confirmation_text,
+          ui_operator: options.ui_operator,
+        }),
+      },
+    );
+  },
+
+  denyInteractiveApproval(
+    requestId: string,
+    options: { ui_operator: AuthorityUiOperator },
+  ) {
+    return request<InteractiveApprovalRequest>(
+      defaultspackContractRoute("api/interactive-approval/v1/deny"),
+      {
+        method: "POST",
+        body: JSON.stringify({
+          request_id: requestId,
+          ui_operator: options.ui_operator,
+        }),
+      },
+    );
   },
 
   listCodingCheckpoints(options?: { workspace_id?: string | null; limit?: number }) {

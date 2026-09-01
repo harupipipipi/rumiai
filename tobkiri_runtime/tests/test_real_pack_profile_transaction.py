@@ -32,7 +32,6 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 )
 from tobkiri_protocol.canonical import canonical_digest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_PACK = "rumi_git_read_pack"
 BOOTSTRAP_SECRET = "isolated-host-owned-panel-bootstrap-secret"
@@ -232,7 +231,9 @@ def _spawn_child(
     except json.JSONDecodeError as error:
         process.terminate()
         process.communicate(timeout=10)
-        raise AssertionError(f"production child emitted invalid readiness: {line!r}") from error
+        raise AssertionError(
+            f"production child emitted invalid readiness: {line!r}"
+        ) from error
     assert isinstance(state, dict)
     return process, state
 
@@ -316,9 +317,9 @@ def _authenticate(port: int) -> dict[str, str]:
         headers={"Origin": origin},
     )
     assert status == 200, exchange
-    cookie = next(value for key, value in response_headers if key.lower() == "set-cookie").split(
-        ";", 1
-    )[0]
+    cookie = next(
+        value for key, value in response_headers if key.lower() == "set-cookie"
+    ).split(";", 1)[0]
     csrf = exchange.get("data", {}).get("csrf_token")
     assert isinstance(csrf, str) and csrf
     return {"cookie": cookie, "csrf": csrf, "origin": origin}
@@ -470,7 +471,9 @@ def _disk_profile_state(user_data: Path) -> dict[str, Any]:
     state_root = user_data / "workspaces" / "defaults" / "activation"
     pointer = json.loads((state_root / "active.json").read_text(encoding="utf-8"))
     envelope_name = pointer["envelope_path"]
-    envelope = json.loads((state_root / "activations" / envelope_name).read_text(encoding="utf-8"))
+    envelope = json.loads(
+        (state_root / "activations" / envelope_name).read_text(encoding="utf-8")
+    )
     profile = envelope["profile"]
     lock = envelope["lock"]
     plan = envelope["plan"]
@@ -535,7 +538,11 @@ def _exercise_real_pack_profile_transaction(
     env.update(
         {
             "PYTHONPATH": os.pathsep.join(
-                (str(ROOT), str(ROOT / "ecosystem" / "defaultspack"), env.get("PYTHONPATH", ""))
+                (
+                    str(ROOT),
+                    str(ROOT / "ecosystem" / "defaultspack"),
+                    env.get("PYTHONPATH", ""),
+                )
             ),
             "PYTHONDONTWRITEBYTECODE": "1",
             "RUMI_LOG_DIR": str(log_dir),
@@ -628,7 +635,11 @@ def _exercise_real_pack_profile_transaction(
         )
         assert enabled_pack["enabled"] is True
         approval_path = (
-            user_data / "pack_control" / "approvals" / "defaults" / f"{TARGET_PACK}.json"
+            user_data
+            / "pack_control"
+            / "approvals"
+            / "defaults"
+            / f"{TARGET_PACK}.json"
         )
         stable_pack_approval = approval_path.read_bytes()
         # Repeat the full UI-facing ceremony twice without changing the Pack
@@ -646,11 +657,15 @@ def _exercise_real_pack_profile_transaction(
             first_auth,
         )
         second_ceremony_disk = _disk_profile_state(user_data)
-        assert second_activation["activation_id"] == second_ceremony_disk["activation_id"]
-        assert second_ceremony_disk["activation_id"] != first_ceremony_disk["activation_id"]
         assert (
-            second_ceremony_disk["effective_pack_set"]
-            == (first_ceremony_disk["effective_pack_set"])
+            second_activation["activation_id"] == second_ceremony_disk["activation_id"]
+        )
+        assert (
+            second_ceremony_disk["activation_id"]
+            != first_ceremony_disk["activation_id"]
+        )
+        assert second_ceremony_disk["effective_pack_set"] == (
+            first_ceremony_disk["effective_pack_set"]
         )
         assert approval_path.read_bytes() == stable_pack_approval
         status, replay = _contract_request(
@@ -668,7 +683,9 @@ def _exercise_real_pack_profile_transaction(
         enabled_disk = second_ceremony_disk
         enabled_snapshots = _activation_snapshots(user_data)
 
-        operation_before_restart = _pack_status(int(first_state["port"]), first_auth, TARGET_PACK)
+        operation_before_restart = _pack_status(
+            int(first_state["port"]), first_auth, TARGET_PACK
+        )
         assert operation_before_restart["pack_id"] == TARGET_PACK
         assert operation_before_restart["enabled"] is True
         _assert_snapshots_immutable(initial_snapshots, user_data)
@@ -685,10 +702,14 @@ def _exercise_real_pack_profile_transaction(
         persisted_catalog = _catalog(int(second_state["port"]), second_auth)
         assert persisted_catalog["profile_revision"] == enabled_disk["profile_revision"]
         persisted_pack = next(
-            item for item in persisted_catalog["packs"] if item["pack_id"] == TARGET_PACK
+            item
+            for item in persisted_catalog["packs"]
+            if item["pack_id"] == TARGET_PACK
         )
         assert persisted_pack["enabled"] is True
-        operation_after_restart = _pack_status(int(second_state["port"]), second_auth, TARGET_PACK)
+        operation_after_restart = _pack_status(
+            int(second_state["port"]), second_auth, TARGET_PACK
+        )
         assert operation_after_restart["enabled"] is True
 
         approved_payload = approval_path.read_bytes()
@@ -714,7 +735,10 @@ def _exercise_real_pack_profile_transaction(
         assert disabled_pack["installed"] is True
         assert disabled_pack["approved"] is True
         assert disabled_pack["enabled"] is False
-        assert _pack_status(int(second_state["port"]), second_auth, TARGET_PACK)["enabled"] is False
+        assert (
+            _pack_status(int(second_state["port"]), second_auth, TARGET_PACK)["enabled"]
+            is False
+        )
         disabled_snapshots = _activation_snapshots(user_data)
 
         status, revoked = _contract_request(
@@ -778,11 +802,16 @@ def _exercise_real_pack_profile_transaction(
         assert third_state["effective_pack_set"] == disabled_disk["effective_pack_set"]
         third_auth = _authenticate(int(third_state["port"]))
         final_catalog = _catalog(int(third_state["port"]), third_auth)
-        final_pack = next(item for item in final_catalog["packs"] if item["pack_id"] == TARGET_PACK)
+        final_pack = next(
+            item for item in final_catalog["packs"] if item["pack_id"] == TARGET_PACK
+        )
         assert final_pack["enabled"] is False
         assert final_pack["approved"] is False
         assert final_pack["approval_reason"] == "approval_revoked"
-        assert _pack_status(int(third_state["port"]), third_auth, TARGET_PACK)["enabled"] is False
+        assert (
+            _pack_status(int(third_state["port"]), third_auth, TARGET_PACK)["enabled"]
+            is False
+        )
         status, final_enable = _contract_request(
             int(third_state["port"]),
             third_auth,
@@ -804,7 +833,9 @@ def _exercise_real_pack_profile_transaction(
             approvals = {
                 approval_id: authority.get_approval(approval_id)
                 for approval_id in {
-                    grant.approval_id for grant in grants if grant.approval_id is not None
+                    grant.approval_id
+                    for grant in grants
+                    if grant.approval_id is not None
                 }
             }
             all_domains = authority.list_domains()
@@ -814,9 +845,7 @@ def _exercise_real_pack_profile_transaction(
         provider_prefix = f"provider.{profile_id}.profile-pack-vm."
         approval_prefix = f"approval.{profile_id}.profile-pack-vm."
         dynamic_grants = [
-            grant
-            for grant in grants
-            if grant.grant_id.startswith(grant_prefix)
+            grant for grant in grants if grant.grant_id.startswith(grant_prefix)
         ]
         dynamic_providers = [
             provider
@@ -825,9 +854,9 @@ def _exercise_real_pack_profile_transaction(
         ]
         principals_by_operation: dict[str, set[str]] = {}
         for provider in dynamic_providers:
-            principals_by_operation.setdefault(provider.provider.operation_id, set()).add(
-                provider.provider.principal_id
-            )
+            principals_by_operation.setdefault(
+                provider.provider.operation_id, set()
+            ).add(provider.provider.principal_id)
         dynamic_approval_ids = {
             str(record["record_id"])
             for event in events
@@ -853,8 +882,7 @@ def _exercise_real_pack_profile_transaction(
             )
             assert principals_by_operation
             assert all(
-                len(principals) == 1
-                for principals in principals_by_operation.values()
+                len(principals) == 1 for principals in principals_by_operation.values()
             )
             assert len(dynamic_approval_ids) >= 3
             providers_by_id = {
@@ -874,9 +902,10 @@ def _exercise_real_pack_profile_transaction(
                 assert approval is not None
                 assert domain is not None
                 assert grant.profile_id == binding["profile_id"] == "defaults"
-                assert grant.profile_authority_digest == binding[
-                    "profile_authority_digest"
-                ]
+                assert (
+                    grant.profile_authority_digest
+                    == binding["profile_authority_digest"]
+                )
                 assert grant.security_epoch == binding["security_epoch"]
                 assert approval.profile_id == binding["profile_id"]
                 assert approval.security_epoch == binding["security_epoch"]
@@ -968,7 +997,12 @@ def _exercise_real_pack_profile_transaction(
             if process.poll() is None:
                 try:
                     _stop_child(process)
-                except (AssertionError, BrokenPipeError, OSError, subprocess.TimeoutExpired):
+                except (
+                    AssertionError,
+                    BrokenPipeError,
+                    OSError,
+                    subprocess.TimeoutExpired,
+                ):
                     if process.poll() is None:
                         process.terminate()
                         try:
@@ -1075,9 +1109,7 @@ def test_packvm_authority_binds_each_profile_activation_without_cross_talk() -> 
                 "activation_id": activation_id,
                 "created_at": f"2026-08-29T00:00:0{index}Z",
                 "plan_digest": digest(f"plan-{profile_id}"),
-                "profile_authority_snapshot_digest": digest(
-                    f"authority-{profile_id}"
-                ),
+                "profile_authority_snapshot_digest": digest(f"authority-{profile_id}"),
                 "security_epoch": index,
                 "fencing_token": index,
             },
@@ -1123,6 +1155,114 @@ def test_packvm_authority_binds_each_profile_activation_without_cross_talk() -> 
         assert f".{expected_profile}.profile-pack-vm." in provider.record_id
         assert f".{expected_profile}.profile-pack-vm." in grant.grant_id
         assert provider.execution_domain_id == f"domain.{expected_profile}"
+
+
+def test_interactive_only_plan_authority_mints_no_static_grant() -> None:
+    """An interactive edge commits reachability but no approval-derived Grant."""
+
+    class EmptyAuthorityStore:
+        @staticmethod
+        def get_host_extension_trust(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_approval(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_provider_authority(record_id: str) -> None:
+            return None
+
+        @staticmethod
+        def get_grant(record_id: str) -> None:
+            return None
+
+    class RecordingAuthorityControl:
+        def __init__(self) -> None:
+            self.provider_bundles: list[tuple[Any, Any]] = []
+
+        def commit_provider_authority_bundle(
+            self,
+            *,
+            host_extension_trust: Any,
+            provider_authorities: tuple[Any, ...],
+        ) -> None:
+            assert host_extension_trust is None
+            assert len(provider_authorities) == 1
+            self.provider_bundles.append(
+                (host_extension_trust, provider_authorities[0])
+            )
+
+        def commit_approval_bundle(self, *args: Any, **kwargs: Any) -> None:
+            pytest.fail("interactive-only edge must not create an approval bundle")
+
+    def digest(label: str) -> str:
+        return canonical_digest({"label": label})
+
+    caller = FunctionPrincipal(
+        parent_artifact_digest=digest("caller-artifact"),
+        function_implementation_digest=digest("caller-function"),
+        function_id="caller.function",
+        contract_revision_digest=digest("caller-contract"),
+        operation_id="caller.operation",
+    )
+    target = FunctionPrincipal(
+        parent_artifact_digest=digest("target-artifact"),
+        function_implementation_digest=digest("target-function"),
+        function_id="target.function",
+        contract_revision_digest=digest("target-contract"),
+        operation_id="target.operation",
+    )
+    active = ActiveDefaultProfile(
+        resolved=ResolvedDefaultProfile(
+            profile={"profile_id": "profile-interactive"}, lock={}, plan={}
+        ),
+        activation={
+            "activation_id": "activation.profile-interactive",
+            "created_at": "2026-08-29T00:00:00Z",
+            "plan_digest": digest("plan"),
+            "profile_authority_snapshot_digest": digest("authority"),
+            "security_epoch": 1,
+            "fencing_token": 1,
+        },
+    )
+    domain = ExecutionDomain(
+        domain_id="domain.profile-interactive",
+        profile_id="profile-interactive",
+        activation_id="activation.profile-interactive",
+        boot_epoch=1,
+        process_identity="process.profile-interactive",
+        authenticated_channel_digest=digest("channel"),
+        sandbox_profile_digest=digest("sandbox"),
+        resource_namespace="resource.profile-interactive",
+        principals=(target,),
+        boundary=DomainBoundary.DEDICATED_PROCESS,
+        security_epoch=1,
+        fencing_token=1,
+    )
+    control = RecordingAuthorityControl()
+
+    _commit_plan_authority(
+        active=active,
+        store=EmptyAuthorityStore(),
+        control=control,
+        caller=caller,
+        target=target,
+        contract_id="target.contract",
+        caller_publisher_lineage="publisher.caller",
+        target_publisher_lineage="publisher.target",
+        target_domain=domain,
+        scope=AuthorityScope(
+            capability="target.read",
+            semantics_digest=digest("target-semantics"),
+        ),
+        authority_mode="interactive_only",
+    )
+
+    assert len(control.provider_bundles) == 1
+    _, provider = control.provider_bundles[0]
+    assert provider.provider == target
+    assert provider.execution_domain_id == domain.domain_id
 
 
 @pytest.mark.skipif(

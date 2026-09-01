@@ -309,7 +309,8 @@ def _add_operation(
 def _v3_records(
     pack_root: Path,
     *,
-    overrides: Mapping[tuple[str, str], str],
+    operation_overrides: Mapping[tuple[str, str], str],
+    function_overrides: Mapping[tuple[str, str], str],
     repository_root: Path,
 ) -> dict[str, dict[str, Any]]:
     """Build Function records from one legacy v3 manifest and its bytes."""
@@ -365,8 +366,11 @@ def _v3_records(
             raise ExecutableSourceRegistryError(
                 f"legacy artifact digest is stale: {pack_root.name}:{relative_path}"
             )
-        function_id = _canonical_id(f"{pack_root.name}.{provider_instance}")
-        operation_id = overrides.get(
+        function_id = function_overrides.get(
+            (pack_root.name, entrypoint_id),
+            _canonical_id(f"{pack_root.name}.{provider_instance}"),
+        )
+        operation_id = operation_overrides.get(
             (pack_root.name, entrypoint_id),
             _canonical_id(f"{pack_root.name}.{entrypoint_id}"),
         )
@@ -437,8 +441,12 @@ def _fixture_records(
     fixture_path: Path,
     *,
     repository_root: Path,
-) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], str]]:
-    """Build explicit additions and operation-ID overrides from the fixture."""
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[tuple[str, str], str],
+    dict[tuple[str, str], str],
+]:
+    """Build explicit additions and legacy entrypoint overrides from the fixture."""
 
     fixture = _load_json(fixture_path)
     if (
@@ -462,6 +470,39 @@ def _fixture_records(
         if key in overrides:
             raise ExecutableSourceRegistryError(f"duplicate operation ID override: {key}")
         overrides[key] = operation_id
+
+    function_overrides_value = fixture.get("function_id_overrides", [])
+    if not isinstance(function_overrides_value, list):
+        raise ExecutableSourceRegistryError("function_id_overrides must be a list")
+    function_overrides: dict[tuple[str, str], str] = {}
+    for item in function_overrides_value:
+        if not isinstance(item, Mapping):
+            raise ExecutableSourceRegistryError("function ID override is not an object")
+        pack_id = item.get("pack_id")
+        entrypoint_id = item.get("entrypoint_id")
+        function_id = item.get("function_id")
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (pack_id, entrypoint_id, function_id)
+        ):
+            raise ExecutableSourceRegistryError("function ID override is incomplete")
+        assert isinstance(pack_id, str)
+        assert isinstance(entrypoint_id, str)
+        assert isinstance(function_id, str)
+        canonical_pack_id = _canonical_id(pack_id)
+        if (
+            function_id != _canonical_id(function_id)
+            or not function_id.startswith(f"{canonical_pack_id}.")
+        ):
+            raise ExecutableSourceRegistryError(
+                f"function ID override is not owned by Pack: {pack_id}:{function_id}"
+            )
+        key = (pack_id, entrypoint_id)
+        if key in function_overrides:
+            raise ExecutableSourceRegistryError(
+                f"duplicate function ID override: {key}"
+            )
+        function_overrides[key] = function_id
 
     packs_value = fixture.get("packs")
     if not isinstance(packs_value, Mapping):
@@ -516,7 +557,7 @@ def _fixture_records(
                         "entrypoint_id": operation_id,
                     },
                 )
-    return records, overrides
+    return records, overrides, function_overrides
 
 
 def _merge_records(
@@ -572,7 +613,7 @@ def build_registry(
 
     ecosystem_root = Path(ecosystem_root).resolve()
     repository_root = ecosystem_root.parent.parent
-    explicit, overrides = _fixture_records(
+    explicit, operation_overrides, function_overrides = _fixture_records(
         ecosystem_root,
         Path(fixture_path).resolve(),
         repository_root=repository_root,
@@ -587,13 +628,14 @@ def build_registry(
                 records,
                 _v3_records(
                     pack_root,
-                    overrides=overrides,
+                    operation_overrides=operation_overrides,
+                    function_overrides=function_overrides,
                     repository_root=repository_root,
                 ),
                 repository_root=repository_root,
             )
     _merge_records(records, explicit, repository_root=repository_root)
-    for (pack_id, entrypoint_id), operation_id in overrides.items():
+    for (pack_id, entrypoint_id), operation_id in operation_overrides.items():
         if not any(
             source.get("path") == _label(pack_id_path / "rumi.pack.v3.json", repository_root)
             and source.get("entrypoint_id") == entrypoint_id
@@ -606,6 +648,23 @@ def build_registry(
             )
         if not operation_id.strip():
             raise ExecutableSourceRegistryError(f"operation ID override is empty: {pack_id}:{entrypoint_id}")
+    for (pack_id, entrypoint_id), function_id in function_overrides.items():
+        if not any(
+            source.get("path")
+            == _label(pack_id_path / "rumi.pack.v3.json", repository_root)
+            and source.get("entrypoint_id") == entrypoint_id
+            for pack_id_path in (ecosystem_root / pack_id,)
+            for record in records.values()
+            for source in record.get("source", [])
+        ):
+            raise ExecutableSourceRegistryError(
+                "function ID override does not match a legacy entrypoint: "
+                f"{pack_id}:{entrypoint_id}"
+            )
+        if not function_id.strip():
+            raise ExecutableSourceRegistryError(
+                f"function ID override is empty: {pack_id}:{entrypoint_id}"
+            )
     fixture_resolved = Path(fixture_path).resolve()
     source_inputs: list[dict[str, str]] = []
     for path in v3_paths:
@@ -627,7 +686,6 @@ def build_registry(
     source_inputs.sort(key=lambda item: (item["kind"], item["path"]))
     for record in records.values():
         _normalize_record(record)
-    operation_count = sum(len(record["operations"]) for record in records.values())
     return {
         "schema": "io.tobkiri.executable-sources.v1",
         "source": {

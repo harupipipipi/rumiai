@@ -1,0 +1,122 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:6b5191414f6567ad5d73850fdd6e5b056aa9c4afa660cb85064892b57eccac59",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
+      "digest": "sha256:f1a18d8f9f92abd7bb6728bcc0f5b5010541e2bcaef88c73186510e2eda2230e",
+      "kind": "executable",
+      "path": "runtime/high_risk_adapter.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.service.command.high-risk.v1",
+      "operations": [
+        "high_risk_command.manage"
+      ],
+      "revision_digest": "sha256:036e4b61a2be06a5cfe321d9d15c2511bd0f2b7feb55ebdccca764b4685b732f"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:036e4b61a2be06a5cfe321d9d15c2511bd0f2b7feb55ebdccca764b4685b732f",
+      "id": "rumi_command_protocol_pack.high-risk-command.service",
+      "implementation_digest": "sha256:f1a18d8f9f92abd7bb6728bcc0f5b5010541e2bcaef88c73186510e2eda2230e",
+      "isolation": "dedicated_process",
+      "operations": [
+        "high_risk_command.manage"
+      ],
+      "role": "host_capability_provider"
+    }
+  ],
+  "integrity": {
+    "artifact_set_digest": "sha256:2afc62851cc576ac29d0bc2fa224b8d357c45766d773d95f0f1c7a1f553a7a18",
+    "contract_catalog_digest": "sha256:621694105f26f2d3bcb8ab8e2edf40b747b9ee18669c67ad47751285da2a55ec",
+    "source_identity": "sha256:ab3d3af317861316d7449f8d3b5b28eed017832887bc10b2a5076c4a8a38c95f"
+  },
+  "migration": {
+    "compatibility": "none",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_command_protocol_pack",
+      "rumi_command_protocol_pack"
+    ],
+    "removal_wave": 0,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "contract_reference": "tobkiri.service.command.high-risk.v1",
+      "effect_ceiling": [
+        "host:brokered-execution",
+        "capability:host.authority.consume"
+      ],
+      "operation_id": "high_risk_command.manage",
+      "owner": "rumi_command_protocol_pack",
+      "provider_id": "rumi_command_protocol_pack.high-risk-command.service",
+      "source_kind": "canonical_v4_contract"
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:2afc62851cc576ac29d0bc2fa224b8d357c45766d773d95f0f1c7a1f553a7a18",
+    "display_name": "Rumi Command Protocol",
+    "id": "rumi_command_protocol_pack",
+    "kind": "host_extension",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "evidence": [
+      {
+        "digest": "sha256:ab3d3af317861316d7449f8d3b5b28eed017832887bc10b2a5076c4a8a38c95f",
+        "path": "schemas/pack_v4_catalog.v1.json",
+        "rule_id": "canonical-pack-v4-source-record"
+      }
+    ],
+    "generator": "tobkiri.scripts.migrate_pack_artifacts_v4",
+    "generator_version": "1.0.0",
+    "normative": true,
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
+    "schema": "io.tobkiri.provenance.v1",
+    "source_digest": "sha256:ab3d3af317861316d7449f8d3b5b28eed017832887bc10b2a5076c4a8a38c95f",
+    "source_kind": "migration",
+    "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_command_protocol_pack"
+  },
+  "provider_catalog": [
+    {
+      "contract_reference": "tobkiri.service.command.high-risk.v1",
+      "operations": [
+        "high_risk_command.manage"
+      ],
+      "owner": "rumi_command_protocol_pack",
+      "provider_id": "rumi_command_protocol_pack.high-risk-command.service"
+    }
+  ],
+  "requirements": {
+    "approval_policy": "capability_gated",
+    "capabilities": [
+      "host.authority.consume"
+    ],
+    "contract_dependencies": [
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.service.interactive-effect.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      }
+    ],
+    "execution_boundary": "host_brokered",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {
+      "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+    },
+    "secrets": [],
+    "workspace_boundary": "host_brokered"
+  }
+}

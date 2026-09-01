@@ -195,6 +195,9 @@ def _check_artifact_index(
         runtime_paths.add(relative_path)
         artifact_kind = str(item.get("kind") or "")
         expected_role = {
+            "host_contract_contributions.v1.json": "host_contract_contribution",
+            "update_metadata.v1.json": "host_contract_update_metadata",
+        }.get(relative_path) or {
             "sidecar": "sidecar",
             "executable": "runtime",
         }.get(artifact_kind)

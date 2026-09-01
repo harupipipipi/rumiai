@@ -16,6 +16,8 @@ from core_runtime.bootstrap.profile_capture import (
     prepare_default_profile_confirmation,
 )
 from core_runtime.pack_boundary import load_pack_catalog
+from core_runtime.pack_artifact_integrity import write_host_install_record
+import core_runtime.pack_artifact_integrity as pack_integrity
 from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
     capture_pack_control_session,
@@ -157,17 +159,6 @@ def _signed_external_pack(
     _write_json(
         trust_store,
         {
-            "install_records": {
-                PACK_ID: {
-                    "signature_required": True,
-                    "publisher_id": "publisher.conformance",
-                    "key_id": signed["signature"]["key_id"],
-                    "installed_version": "1.0.0",
-                    "signed_manifest_path": ".tobkiri/signed-pack.json",
-                    "contract_versions": {CONTRACT_ID: "1.0.0"},
-                    "requested_capabilities": [],
-                }
-            },
             "publishers": {
                 "publisher.conformance": {
                     "public_key_pem": public_pem,
@@ -178,6 +169,20 @@ def _signed_external_pack(
         },
     )
     trust_store.chmod(0o600)
+    write_host_install_record(
+        trust_store,
+        pack_id=PACK_ID,
+        install_path=source,
+        record={
+            "signature_required": True,
+            "publisher_id": "publisher.conformance",
+            "key_id": signed["signature"]["key_id"],
+            "installed_version": "1.0.0",
+            "signed_manifest_path": ".tobkiri/signed-pack.json",
+            "contract_versions": {CONTRACT_ID: "1.0.0"},
+            "requested_capabilities": [],
+        },
+    )
     return source, trust_store
 
 
@@ -284,6 +289,27 @@ def test_unsigned_wrong_digest_and_symlink_sources_fail_closed(
         admit_signed_external_pack(source, trust_store_path=trust_store)
 
 
+@pytest.mark.parametrize("relocate", ["copy", "rename"])
+def test_host_install_record_rejects_relocated_signed_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relocate: str,
+) -> None:
+    """A valid publisher signature cannot authorize an unselected path."""
+
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
+    source, trust_store = _signed_external_pack(tmp_path)
+    relocated = tmp_path / "relocated" / PACK_ID
+    relocated.parent.mkdir()
+    if relocate == "copy":
+        shutil.copytree(source, relocated)
+    else:
+        source.rename(relocated)
+
+    with pytest.raises(ExternalPackCatalogDenied, match="Host install binding"):
+        admit_signed_external_pack(relocated, trust_store_path=trust_store)
+
+
 def test_signed_external_pack_cannot_claim_bundle_materialization_alias(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -349,6 +375,43 @@ def test_catalog_poison_cas_tamper_and_partial_transaction_are_invisible(
     catalog_path.chmod(0o600)
     with pytest.raises(ExternalPackCatalogDenied, match="authentication"):
         load_external_pack_catalog()
+
+
+def test_revocation_during_admission_cannot_commit_stale_trust(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admission rechecks the captured trust generation immediately before commit."""
+
+    user_data = tmp_path / "user-data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    source, trust_store = _signed_external_pack(tmp_path)
+    key_id = json.loads(
+        (source / ".tobkiri" / "signed-pack.json").read_text(encoding="utf-8")
+    )["signature"]["key_id"]
+
+    def revoke_after_promotion(point: str) -> None:
+        if point != "promoted":
+            return
+        policy = json.loads(trust_store.read_text(encoding="utf-8"))
+        policy["publishers"]["publisher.conformance"]["revoked_key_ids"] = [
+            key_id
+        ]
+        policy["policy_generation"] += 1
+        policy["policy_digest"] = pack_integrity._policy_digest(policy)
+        trust_store.write_text(json.dumps(policy), encoding="utf-8")
+        trust_store.chmod(0o600)
+
+    with pytest.raises(
+        ExternalPackCatalogDenied,
+        match="trust policy changed during admission",
+    ):
+        admit_signed_external_pack(
+            source,
+            trust_store_path=trust_store,
+            fault_injector=revoke_after_promotion,
+        )
+    assert PACK_ID not in load_external_pack_catalog().records
 
 
 def test_read_only_cas_rejects_pack_root_swap(

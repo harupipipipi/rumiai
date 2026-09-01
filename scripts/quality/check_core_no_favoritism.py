@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Reject selected Python-layer application ownership in ``core_runtime``.
+"""Reject selected application ownership in ``core_runtime`` assets.
 
 This structural gate has no baseline or exception file for the Python patterns
-it recognizes.  It is intentionally not presented as repository-wide proof:
-non-Python assets, ordinary adapter strings, and non-API route ownership remain
-covered by the broader Pack architecture debt scan until migrated.
+it recognizes. It scans Python and JSON configuration material but is not
+presented as repository-wide proof.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 from typing import Iterable
@@ -52,6 +52,20 @@ FORBIDDEN_CONTRACT_RE = re.compile(
 CONTRACT_SHAPE_RE = re.compile(r"^(?:io\.tobkiri|rumi|tobkiri|defaultspack)[.:]")
 PACK_SETUP_OPERATION_RE = re.compile(r"(?:^|[.:/_-])defaults\.activate(?:$|[.:/_-])")
 PACK_SETUP_ACTION_RE = re.compile(r"(?:^|[.:/_-])install_defaults_profile(?:$|[.:/_-])")
+NAMED_PACK_RE = re.compile(
+    r"(?:^|[.:/_-])(?:defaultspack|rumi_default_tools_pack)(?:$|[.:/_-])",
+    re.IGNORECASE,
+)
+PACK_ENV_RE = re.compile(r"^RUMI_(?:DEFAULTSPACK|DEFAULT_TOOLS)_", re.IGNORECASE)
+
+# These owners are intentionally excluded until their separately scheduled
+# authority/profile migrations land. Keeping this list exact makes new core
+# favoritism fail the scan rather than silently inheriting a broad exemption.
+LITERAL_ALLOWLIST: dict[str, str] = {
+    "tobkiri_runtime/core_runtime/legacy_profile_successor_v4.py": (
+        "Profile migration owns the historical successor compatibility text."
+    ),
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -149,6 +163,12 @@ def _literal_violation(value: str) -> str | None:
         return "application setup action identifier"
     if "frontend_contract_map" in normalized.lower():
         return "frontend contract-map literal"
+    if PACK_ENV_RE.match(normalized):
+        return "named Pack environment literal"
+    if normalized == "/chat" or normalized.startswith("/chat/"):
+        return "application chat route literal"
+    if NAMED_PACK_RE.search(normalized):
+        return "named Pack identifier, allowlist, or path literal"
     if normalized.startswith("/api/"):
         segments = {
             segment.lower().replace("-", "_")
@@ -161,6 +181,55 @@ def _literal_violation(value: str) -> str | None:
     if CONTRACT_SHAPE_RE.match(normalized) and FORBIDDEN_CONTRACT_RE.search(normalized):
         return "application contract identifier"
     return None
+
+
+def _named_pack_literal_violation(value: str) -> str | None:
+    normalized = value.strip()
+    if PACK_ENV_RE.match(normalized):
+        return "named Pack environment literal"
+    if normalized == "/chat" or normalized.startswith("/chat/"):
+        return "application chat route literal"
+    if NAMED_PACK_RE.search(normalized):
+        return "named Pack identifier, allowlist, or path literal"
+    return None
+
+
+def _add_literal_violation(
+    violations: set[Violation],
+    *,
+    relative: str,
+    line: int,
+    value: str,
+    named_pack_only: bool = False,
+) -> None:
+    if relative in LITERAL_ALLOWLIST:
+        return
+    detail = (
+        _named_pack_literal_violation(value)
+        if named_pack_only
+        else _literal_violation(value)
+    )
+    if detail is not None:
+        violations.add(
+            Violation(relative, line, "forbidden_application_literal", detail)
+        )
+
+
+def _json_strings(value: object) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield str(key)
+            yield from _json_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _json_strings(item)
+
+
+def _json_line(source: str, value: str) -> int:
+    offset = source.find(value)
+    return source[:offset].count("\n") + 1 if offset >= 0 else 1
 
 
 def scan_core(repo_root: Path) -> list[Violation]:
@@ -232,11 +301,30 @@ def scan_core(repo_root: Path) -> list[Violation]:
                             )
                         )
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                detail = _literal_violation(node.value)
-                if detail is not None:
-                    violations.add(
-                        Violation(relative, node.lineno, "forbidden_application_literal", detail)
-                    )
+                _add_literal_violation(
+                    violations,
+                    relative=relative,
+                    line=node.lineno,
+                    value=node.value,
+                )
+    for path in sorted(core_root.rglob("*.json")):
+        relative = path.relative_to(repo_root).as_posix()
+        try:
+            source = path.read_text(encoding="utf-8")
+            parsed = json.loads(source)
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            violations.add(
+                Violation(relative, 1, "core_json_unreadable", type(error).__name__)
+            )
+            continue
+        for value in _json_strings(parsed):
+            _add_literal_violation(
+                violations,
+                relative=relative,
+                line=_json_line(source, value),
+                value=value,
+                named_pack_only=True,
+            )
     return sorted(violations)
 
 
@@ -249,11 +337,11 @@ def main() -> int:
         for item in violations:
             print(f"{item.path}:{item.line}: {item.rule}: {item.detail}")
         print(
-            "core No Favoritism Python structural check failed: "
+            "core No Favoritism structural check failed: "
             f"{len(violations)} violation(s)"
         )
         return 1
-    print("core No Favoritism Python structural check passed")
+    print("core No Favoritism structural check passed")
     return 0
 
 

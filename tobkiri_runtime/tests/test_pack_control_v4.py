@@ -32,7 +32,7 @@ from core_runtime.bootstrap.profile_capture import (
 import core_runtime.pack_control_v4 as pack_control
 
 
-TARGET_PACK = "rumi_git_read_pack"
+TARGET_PACK = "rumi_model_evals_pack"
 REQUIRED_PACK = "rumi_file_inspect_pack"
 
 
@@ -98,7 +98,7 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, user_data = captured_session
     initial = _invoke(session, "catalog.read")
-    assert initial["count"] == 139
+    assert initial["count"] == 140
     target = _catalog_pack(initial, TARGET_PACK)
     assert target["installed"] is False
     assert target["enabled"] is False

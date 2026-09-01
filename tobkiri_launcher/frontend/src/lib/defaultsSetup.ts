@@ -4,6 +4,7 @@ import {
   DEFAULTS_BINDING_DOMAIN_KINDS,
   DEFAULTS_BINDING_EXECUTION_KINDS,
   DEFAULTS_BINDING_KEYS,
+  DEFAULTS_BINDING_OPTIONAL_KEYS,
   DEFAULTS_CONFIRMATION_KEYS,
   DEFAULTS_CONFIRMED_SHELL_KEYS,
   DEFAULTS_FUNCTION_PRINCIPAL_KEYS,
@@ -28,6 +29,7 @@ export type DefaultsBinding = {
   readonly runtime_abi: string;
   readonly backend: string;
   readonly execution_kind: string;
+  readonly authority_mode?: 'profile_grant' | 'interactive_only';
   readonly caller_function_id: string;
   readonly authority_reference: string;
   readonly requested_scope_digest: string;
@@ -117,10 +119,15 @@ function exactString(value: unknown, expected: string, label: string): void {
   if (value !== expected) throw new Error(`${label} is unsupported`);
 }
 
-function exactKeys(value: Record<string, unknown>, keys: readonly string[], label: string): void {
+function exactKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+  label: string,
+  optionalKeys: readonly string[] = [],
+): void {
   const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+  const allowed = new Set([...keys, ...optionalKeys]);
+  if (keys.some((key) => !actual.includes(key)) || actual.some((key) => !allowed.has(key))) {
     throw new Error(`${label} has unknown or missing fields`);
   }
 }
@@ -237,7 +244,12 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   const bindingIdentities = new Set<string>();
   const conversation = bindings.filter((item) => {
     const binding = object(item, 'Defaults binding');
-    exactKeys(binding, DEFAULTS_BINDING_KEYS, 'Defaults binding');
+    exactKeys(
+      binding,
+      DEFAULTS_BINDING_KEYS,
+      'Defaults binding',
+      DEFAULTS_BINDING_OPTIONAL_KEYS,
+    );
     for (const field of [
       'pack_id', 'contract_id', 'operation_id', 'caller_function_id',
       'variant_id', 'platform', 'architecture', 'runtime_abi', 'backend',
@@ -252,6 +264,13 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
       DEFAULTS_BINDING_EXECUTION_KINDS,
       'Defaults binding execution kind',
     );
+    if (binding.authority_mode !== undefined) {
+      enumString(
+        binding.authority_mode,
+        ['profile_grant', 'interactive_only'],
+        'Defaults binding authority mode',
+      );
+    }
     if (
       typeof binding.authority_reference !== 'string'
       || !/^authority-ref:[0-9a-f]{64}$/.test(binding.authority_reference)

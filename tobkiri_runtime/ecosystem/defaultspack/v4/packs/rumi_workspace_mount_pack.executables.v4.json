@@ -1,13 +1,13 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
   "pack_id": "rumi_workspace_mount_pack",
-  "source_identity": "sha256:c8aa387c53b1b8203dc6b50f9476b73d37da8c6a70d83de5f5f8dcb02830024c",
+  "source_identity": "sha256:78b610e9995e0d5a2858270f4be9ef2c3d2f2cfc98fac04cb255269b788c1e66",
   "variants": [
     {
       "variant_id": "rumi_workspace_mount_pack.workspace-mount.manage.python",
       "function_id": "rumi_workspace_mount_pack.workspace-mount.manage",
       "implementation_path": "runtime/mounts.py",
-      "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b",
+      "implementation_digest": "sha256:925115f6cf67373e5c445929799fbe63cfb6ee67ae5784ee6c1f28190e77cad1",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -41,7 +41,7 @@
       "variant_id": "rumi_workspace_mount_pack.workspace-mount.resource.python",
       "function_id": "rumi_workspace_mount_pack.workspace-mount.resource",
       "implementation_path": "runtime/mounts.py",
-      "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b",
+      "implementation_digest": "sha256:925115f6cf67373e5c445929799fbe63cfb6ee67ae5784ee6c1f28190e77cad1",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -72,6 +72,6 @@
       ]
     }
   ],
-  "materialization_catalog_digest": "sha256:9532b9a5ac1d8bb24c677f7e467c70a831f4810c6b8a302e324d1bf2a27168e4",
-  "catalog_digest": "sha256:830a207287cc7f84dcdc6510c6746f52d06b7700f0db75ef302a32180dab4cb1"
+  "materialization_catalog_digest": "sha256:5515806c8f7829ea0bdb155336a5119ff7192bfc09a8a7369627296be6fe0f73",
+  "catalog_digest": "sha256:8c118a6987bb001e2844f696be4e444aedcce53a00cc2eab5835264f790ef0a9"
 }

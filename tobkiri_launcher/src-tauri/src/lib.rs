@@ -14,6 +14,7 @@ mod host_audit;
 mod host_broker;
 mod host_broker_types;
 mod host_contract;
+mod host_contract_contributions;
 mod kernel_manager;
 mod presentation;
 mod process_utils;

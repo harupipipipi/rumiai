@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import heapq
 import hmac
+import json
 import logging
 import os
 import re
@@ -74,6 +75,7 @@ class HTTPRuntimeErrorCode(str, Enum):
     INVALID_REQUEST = "INVALID_REQUEST"
     API_FAILURE = "API_FAILURE"
 
+
 _PUBLIC_ERROR_MESSAGES: Mapping[str, str] = {
     HTTPRuntimeErrorCode.INVALID_REQUEST.value: "The request is invalid",
     HTTPRuntimeErrorCode.PROFILE_NOT_ACTIVE.value: "The active Profile is unavailable",
@@ -124,9 +126,7 @@ def _public_error_code(value: object) -> str:
     candidate = str(value or "").strip()
     if candidate in _PUBLIC_ERROR_STATUS:
         return candidate
-    return _ERROR_CODE_ALIASES.get(
-        candidate.lower(), HTTPRuntimeErrorCode.API_FAILURE.value
-    )
+    return _ERROR_CODE_ALIASES.get(candidate.lower(), HTTPRuntimeErrorCode.API_FAILURE.value)
 
 
 def _public_error_result(code: object) -> dict[str, object]:
@@ -174,9 +174,7 @@ def _exception_error_code(error: BaseException) -> str:
                 "backend_unavailable": HTTPRuntimeErrorCode.API_FAILURE.value,
                 "timed_out": HTTPRuntimeErrorCode.TIMEOUT.value,
             }
-            return authority_codes.get(
-                str(current.code), HTTPRuntimeErrorCode.UNAPPROVED.value
-            )
+            return authority_codes.get(str(current.code), HTTPRuntimeErrorCode.UNAPPROVED.value)
         if isinstance(current, HostCoreError):
             candidate = str(current.code)
             if candidate in _ERROR_CODE_ALIASES:
@@ -240,6 +238,7 @@ _RETIRED_API_ROOTS = frozenset(
         "webhooks",
     }
 )
+
 
 class DispatchSession(Protocol):
     """Captured Broker session exposed to the HTTP adapter."""
@@ -498,9 +497,7 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
 
     def process_request(self, request: Any, client_address: Any) -> None:
         with self._request_condition:
-            accepted = self._accepting_requests and self._request_slots.acquire(
-                blocking=False
-            )
+            accepted = self._accepting_requests and self._request_slots.acquire(blocking=False)
             if accepted:
                 self._active_requests += 1
         if not accepted:
@@ -532,9 +529,7 @@ class _PackThreadingHTTPServer(ThreadingHTTPServer):
             b"HTTP/1.1 503 Service Unavailable\r\n"
             b"Content-Type: application/json; charset=utf-8\r\n"
             b"Cache-Control: no-store\r\n"
-            b"Connection: close\r\n"
-            + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
-            + body
+            b"Connection: close\r\n" + f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body
         )
         try:
             request.sendall(response)
@@ -735,9 +730,7 @@ class PackAPIHandler(
         panel_auth_manager: PanelAuthManager,
         dispatch_session: DispatchSession | None,
         app_lifecycle_manager: LifecyclePort | None,
-        contract_routes: (
-            Mapping[tuple[str, str], HTTPContractBinding] | None
-        ) = None,
+        contract_routes: (Mapping[tuple[str, str], HTTPContractBinding] | None) = None,
         capability_snapshot_factory: CapabilitySnapshotFactory | None = None,
         application_presentation: HTTPApplicationPresentation | None = None,
         replay_guard: _RequestReplayGuard | None = None,
@@ -768,8 +761,7 @@ class PackAPIHandler(
                 expected_identity=(
                     bound_dispatch
                     if bound_dispatch is not None
-                    and getattr(bound_dispatch, "session_kind", None)
-                    != "host_profile_control"
+                    and getattr(bound_dispatch, "session_kind", None) != "host_profile_control"
                     else None
                 ),
             )
@@ -794,9 +786,7 @@ class PackAPIHandler(
             _host_contract_snapshot = bound_host_contract
             _instance_web_mounts = bound_web_mounts
             _runtime_refresh = (
-                staticmethod(bound_runtime_refresh)
-                if bound_runtime_refresh is not None
-                else None
+                staticmethod(bound_runtime_refresh) if bound_runtime_refresh is not None else None
             )
             _workspace_binding_resolver = (
                 staticmethod(bound_workspace_binding_resolver)
@@ -984,9 +974,7 @@ class PackAPIHandler(
             return True
         panel_session = self._panel_session
         raw_session_id = panel_session.get("session_id") if panel_session else None
-        session_id: str | None = (
-            raw_session_id if isinstance(raw_session_id, str) else None
-        )
+        session_id: str | None = raw_session_id if isinstance(raw_session_id, str) else None
         session_ttl_seconds = self._panel_session_ttl_seconds(panel_session)
         request_id = self.headers.get("X-Tobkiri-Request-ID", "").strip().lower()
         replay_guard = self._contract_replay_guard
@@ -1129,9 +1117,7 @@ class PackAPIHandler(
         else:
             if operation_journal is None:
                 self._send_response(
-                    APIResponse(
-                        False, error="Control operation journal is unavailable"
-                    ),
+                    APIResponse(False, error="Control operation journal is unavailable"),
                     503,
                 )
                 return True
@@ -1181,9 +1167,7 @@ class PackAPIHandler(
             if operation_record is not None:
                 state = str(operation_record["state"])
                 prior_result = operation_record.get("result")
-                if state in {"succeeded", "failed"} and isinstance(
-                    prior_result, Mapping
-                ):
+                if state in {"succeeded", "failed"} and isinstance(prior_result, Mapping):
                     self._send_contract_outcome(route_binding, prior_result)
                     return True
             try:
@@ -1295,9 +1279,7 @@ class PackAPIHandler(
             if not created:
                 state = str(operation_record["state"])
                 prior_result = operation_record.get("result")
-                if state in {"succeeded", "failed"} and isinstance(
-                    prior_result, Mapping
-                ):
+                if state in {"succeeded", "failed"} and isinstance(prior_result, Mapping):
                     self._send_contract_outcome(route_binding, prior_result)
                 else:
                     self._send_response(
@@ -1317,9 +1299,7 @@ class PackAPIHandler(
                 operation_journal.finish_operation(
                     request_id,
                     session_id=session_id,
-                    state=(
-                        "failed" if safe_result.get("state") == "error" else "succeeded"
-                    ),
+                    state=("failed" if safe_result.get("state") == "error" else "succeeded"),
                     result=safe_result,
                     record_refs=_result_record_refs(safe_result),
                     safe_error_code=(
@@ -1349,9 +1329,7 @@ class PackAPIHandler(
                     )
                 except ControlReconciliationError as reconciliation_error:
                     journal_error = reconciliation_error
-                    public_result = _public_error_result(
-                        HTTPRuntimeErrorCode.API_FAILURE
-                    )
+                    public_result = _public_error_result(HTTPRuntimeErrorCode.API_FAILURE)
             self._send_contract_outcome(route_binding, public_result)
             # Write the bounded, sanitized response before diagnostic logging.
             # Logging a provider traceback can contend with suite-wide capture or
@@ -1390,11 +1368,7 @@ class PackAPIHandler(
     @staticmethod
     def _panel_session_ttl_seconds(session: Mapping[str, object] | None) -> float:
         value = session.get("expires_in") if session else None
-        if (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and value > 0
-        ):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
             return min(float(value), PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
         return float(PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)
 
@@ -1488,9 +1462,7 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return True
         panel_session = self._panel_session
-        raw_packvm_session_id = (
-            panel_session.get("session_id") if panel_session else None
-        )
+        raw_packvm_session_id = panel_session.get("session_id") if panel_session else None
         packvm_session_id: str | None = (
             raw_packvm_session_id if isinstance(raw_packvm_session_id, str) else None
         )
@@ -1504,9 +1476,7 @@ class PackAPIHandler(
                     and guard.consume(
                         packvm_session_id,
                         request_id,
-                        session_ttl_seconds=self._panel_session_ttl_seconds(
-                            panel_session
-                        ),
+                        session_ttl_seconds=self._panel_session_ttl_seconds(panel_session),
                     )
                 )
             except _RequestReplayCapacityError:
@@ -1516,9 +1486,7 @@ class PackAPIHandler(
             if not fresh_request:
                 self._discard_request_body()
                 self._send_response(
-                    APIResponse(
-                        False, error="Canonical request identity is missing or replayed"
-                    ),
+                    APIResponse(False, error="Canonical request identity is missing or replayed"),
                     409,
                 )
                 return True
@@ -1530,9 +1498,7 @@ class PackAPIHandler(
             payload = {}
         lifecycle = self._packvm_lifecycle
         if lifecycle is None:
-            self._send_response(
-                APIResponse(False, error="PackVM lifecycle is unavailable"), 503
-            )
+            self._send_response(APIResponse(False, error="PackVM lifecycle is unavailable"), 503)
             return True
         try:
             if operation == "prepare":
@@ -1546,25 +1512,17 @@ class PackAPIHandler(
             elif operation == "doctor":
                 result = lifecycle.doctor()
             elif operation == "progress":
-                operation_values = parse_qs(urlparse(self.path).query).get(
-                    "operation_id", []
-                )
+                operation_values = parse_qs(urlparse(self.path).query).get("operation_id", [])
                 if len(operation_values) != 1:
                     raise ValueError("PackVM progress requires one operation_id")
-                result = lifecycle.progress(
-                    operation_values[0], session_id=packvm_session_id
-                )
+                result = lifecycle.progress(operation_values[0], session_id=packvm_session_id)
             elif operation == "cancel":
                 result = lifecycle.cancel(payload, session_id=packvm_session_id)
             elif operation == "stop":
                 result = lifecycle.stop(payload)
             else:
                 result = lifecycle.cleanup(payload, session_id=packvm_session_id)
-            if (
-                operation == "doctor"
-                and result.get("ready") is True
-                and self._runtime_refresh
-            ):
+            if operation == "doctor" and result.get("ready") is True and self._runtime_refresh:
                 self._runtime_refresh(None)
             elif operation == "stop" and self._runtime_refresh:
                 self._runtime_refresh(None)
@@ -1693,9 +1651,7 @@ class PackAPIHandler(
         parsed: object = self._parse_body()
         if parsed is None:
             return None
-        if not isinstance(parsed, dict) or any(
-            not isinstance(key, str) for key in parsed
-        ):
+        if not isinstance(parsed, dict) or any(not isinstance(key, str) for key in parsed):
             self._send_response(
                 APIResponse(False, error="Request body must be a JSON object"),
                 400,
@@ -1842,16 +1798,11 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         self._discard_request_body()
-        self._send_response(
-            APIResponse(True, data=manager.issue_login_code(binding))
-        )
+        self._send_response(APIResponse(True, data=manager.issue_login_code(binding)))
 
     def _handle_panel_exchange(self, body: Mapping[str, object]) -> None:
         manager = self._panel_auth_manager
-        if (
-            not self._is_loopback_client(self.client_address)
-            or not self._check_panel_origin()
-        ):
+        if not self._is_loopback_client(self.client_address) or not self._check_panel_origin():
             self._send_response(APIResponse(False, error="Forbidden origin"), 403)
             return
         code_value = body.get("code")
@@ -1863,9 +1814,7 @@ class PackAPIHandler(
             else None
         )
         if exchange is None:
-            self._send_response(
-                APIResponse(False, error="Invalid or expired code"), 401
-            )
+            self._send_response(APIResponse(False, error="Invalid or expired code"), 401)
             return
         cookie = self._build_set_cookie(
             "rumi_panel_session",
@@ -1907,33 +1856,20 @@ class PackAPIHandler(
         )
         self._send_response(APIResponse(True, data=state))
 
-    def _serve_panel_bootstrap_page(self) -> None:
-        document = b"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
-<script>
-document.addEventListener('DOMContentLoaded',()=>{
-const code=new URL(location.href).searchParams.get('code');
-if(!code){document.body.textContent='Tobkiri Launcher authentication required';}
-else fetch('/api/panel/auth/exchange',{method:'POST',credentials:'same-origin',
-headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})
-.then(r=>{if(!r.ok)throw new Error('authentication failed');return r.json()})
-.then(v=>{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('/panel/')})
-.catch(()=>{document.body.textContent='Tobkiri Launcher authentication failed';});
-});
-</script>"""
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(document)))
-            self.end_headers()
-            self.wfile.write(document)
-        except self._CLIENT_DISCONNECT_EXCEPTIONS:
-            self.close_connection = True
-
-    def _serve_mount_bootstrap_page(self, target: str) -> None:
+    def _serve_mount_bootstrap_page(
+        self,
+        target: str,
+        mount: WebMountEntry,
+    ) -> None:
         """Exchange a one-time desktop code before serving an authenticated mount."""
 
-        safe_target = target if target in {"/chat", "/panel/"} else "/panel/"
+        prefix = mount["path_prefix"]
+        index_path = f"{prefix}/{mount['index_file']}"
+        allowed_targets = {prefix, f"{prefix}/", index_path}
+        safe_target = target if target in allowed_targets else f"{prefix}/"
+        if safe_target == index_path:
+            safe_target = f"{prefix}/"
+        target_literal = json.dumps(safe_target)
         document = f"""<!doctype html><meta charset=\"utf-8\"><title>Tobkiri</title>
 <script>
 document.addEventListener('DOMContentLoaded',()=>{{
@@ -1942,7 +1878,7 @@ if(!code){{document.body.textContent='Tobkiri Launcher authentication required';
 else fetch('/api/panel/auth/exchange',{{method:'POST',credentials:'same-origin',
 headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
 .then(r=>{{if(!r.ok)throw new Error('authentication failed');return r.json()}})
-.then(v=>{{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace('{safe_target}')}})
+.then(v=>{{sessionStorage.setItem('rumi-panel-csrf',v.data.csrf_token);location.replace({target_literal})}})
 .catch(()=>{{document.body.textContent='Tobkiri Launcher authentication failed';}});
 }});
 </script>""".encode("utf-8")
@@ -1986,9 +1922,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             "profile_registry_api_version": "io.tobkiri.profile-registry.v4",
             "generation": int(state["generation"]),
             "active_profile_id": active.profile_id if active is not None else None,
-            "active_profile_revision": (
-                active.profile_revision if active is not None else None
-            ),
+            "active_profile_revision": (active.profile_revision if active is not None else None),
             "profiles": store.list_profile_payloads(),
         }
 
@@ -2095,9 +2029,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                     expected_store_generation=expected_generation,
                 )
             else:
-                active = ActiveProfileStore(runtime_user_data_root()).load(
-                    verify_snapshot=True
-                )
+                active = ActiveProfileStore(runtime_user_data_root()).load(verify_snapshot=True)
                 if active is not None and active.profile_id == profile_id:
                     self._send_mapping_result(
                         {
@@ -2116,9 +2048,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             result["action"] = action
             self._send_mapping_result(result)
         except ProfileDefinitionNotFound:
-            self._send_mapping_result(
-                {"error": "Named Profile was not found", "status_code": 404}
-            )
+            self._send_mapping_result({"error": "Named Profile was not found", "status_code": 404})
         except ProfileDefinitionStoreConflict:
             self._send_mapping_result(
                 {"error": "Named Profile revision is stale", "status_code": 409}
@@ -2193,14 +2123,10 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
         mount = self._match_web_mount(path)
         if mount is not None:
             if mount["auth_required"] and not self._check_auth("GET", path):
-                if mount["path_prefix"] == "/chat" and path in {"/chat", "/chat/"}:
-                    self._serve_mount_bootstrap_page("/chat")
-                elif mount["path_prefix"] == "/panel" and path in {
-                    "/panel",
-                    "/panel/",
-                    "/panel/index.html",
-                }:
-                    self._serve_panel_bootstrap_page()
+                prefix = mount["path_prefix"]
+                root_paths = {prefix, f"{prefix}/", f"{prefix}/{mount['index_file']}"}
+                if mount.get("auth_bootstrap", False) and path in root_paths:
+                    self._serve_mount_bootstrap_page(path, mount)
                 else:
                     self._send_response(APIResponse(False, error="Unauthorized"), 401)
                 return
@@ -2232,9 +2158,7 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
                 self._handle_panel_exchange(body)
             return
         if path == "/api/setup/packs/install":
-            if not self._setup_pre_auth_allowed() and not self._check_auth(
-                "POST", path
-            ):
+            if not self._setup_pre_auth_allowed() and not self._check_auth("POST", path):
                 self._discard_request_body()
                 self._send_response(APIResponse(False, error="Unauthorized"), 401)
                 return
@@ -2347,9 +2271,7 @@ class PackAPIServer:
         self._web_mounts = web_mounts
         self._workspace_binding_resolver = workspace_binding_resolver
         self._host_contract_snapshot = (
-            validate_host_contract(host_contract)
-            if host_contract is not None
-            else None
+            validate_host_contract(host_contract) if host_contract is not None else None
         )
         self._packvm_lifecycle = packvm_lifecycle
         self._replay_guard = _RequestReplayGuard()
@@ -2397,9 +2319,7 @@ class PackAPIServer:
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
-                    runtime_refresh=self._runtime_refresh_callback(
-                        lifecycle_generation
-                    ),
+                    runtime_refresh=self._runtime_refresh_callback(lifecycle_generation),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
                     host_contract=self._host_contract_snapshot,
@@ -2441,10 +2361,7 @@ class PackAPIServer:
         refresh_method = self._refresh_runtime_capture
 
         def refresh(session: DispatchSession | None = None) -> None:
-            if (
-                getattr(refresh_method, "__func__", None)
-                is PackAPIServer._refresh_runtime_capture
-            ):
+            if getattr(refresh_method, "__func__", None) is PackAPIServer._refresh_runtime_capture:
                 refresh_method(
                     session,
                     lifecycle_generation=lifecycle_generation,
@@ -2456,9 +2373,7 @@ class PackAPIServer:
                     or lifecycle_generation != self._lifecycle_generation
                 ):
                     return
-            override_refresh = cast(
-                Callable[[DispatchSession | None], None], refresh_method
-            )
+            override_refresh = cast(Callable[[DispatchSession | None], None], refresh_method)
             override_refresh(session)
 
         return refresh
@@ -2505,12 +2420,8 @@ class PackAPIServer:
         if session is None:
             raise RuntimeError("frontend contracts require a captured v4 session")
         session.assert_current()
-        host_profile_control = (
-            getattr(session, "session_kind", None) == "host_profile_control"
-        )
-        expected_identity: DispatchSession | None = (
-            None if host_profile_control else session
-        )
+        host_profile_control = getattr(session, "session_kind", None) == "host_profile_control"
+        expected_identity: DispatchSession | None = None if host_profile_control else session
         try:
             if snapshot is None and not host_profile_control:
                 snapshot = capture_host_contract(expected_identity=expected_identity)
@@ -2556,17 +2467,14 @@ class PackAPIServer:
                         or (
                             not host_profile_control
                             and provider.get("profile_id") == session.profile_id
-                            and provider.get("profile_revision")
-                            == session.profile_revision
+                            and provider.get("profile_revision") == session.profile_revision
                             and provider.get("activation_id") == session.activation_id
                             and provider.get("plan_digest") == session.plan_digest
                         )
                     )
                 )
                 if len(exact) != 1 or target.function_id != target.provider_id:
-                    raise RuntimeError(
-                        "frontend contract Provider identity is unavailable"
-                    )
+                    raise RuntimeError("frontend contract Provider identity is unavailable")
                 presentation = self._application_presentation
                 if presentation is None or presentation.requires_operation_ready(target):
                     session.assert_operation_ready(
@@ -2614,15 +2522,11 @@ class PackAPIServer:
         try:
             factory = self._runtime_capture_factory
             if factory is None:
-                raise RuntimeError(
-                    "application runtime capture composition is unavailable"
-                )
+                raise RuntimeError("application runtime capture composition is unavailable")
             if session is None:
                 active = capture_active_profile()
                 inputs = factory(active)
-                authority = AuthorityStore(
-                    runtime_user_data_root() / "authority" / "v4.sqlite3"
-                )
+                authority = AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3")
                 try:
                     session = capture_production_dispatch(
                         active,
@@ -2651,17 +2555,10 @@ class PackAPIServer:
             routes = contract_binding_map(inputs.contract_bindings)
             if routes:
                 host_profile_control = (
-                    getattr(session, "session_kind", None)
-                    == "host_profile_control"
+                    getattr(session, "session_kind", None) == "host_profile_control"
                 )
-                expected_identity = (
-                    None
-                    if host_profile_control
-                    else session
-                )
-                if not host_profile_control and os.getenv(
-                    "TOBKIRI_HOST_CONTRACT_PATH", ""
-                ).strip():
+                expected_identity = None if host_profile_control else session
+                if not host_profile_control and os.getenv("TOBKIRI_HOST_CONTRACT_PATH", "").strip():
                     # A lifecycle refresh is an explicit authority boundary:
                     # capture the Launcher-published replacement once, then
                     # bind the resulting snapshot to the new handler.
@@ -2706,9 +2603,7 @@ class PackAPIServer:
                     replay_guard=self._replay_guard,
                     operation_journal=self._operation_journal,
                     web_mounts=self._web_mounts,
-                    runtime_refresh=self._runtime_refresh_callback(
-                        published_generation
-                    ),
+                    runtime_refresh=self._runtime_refresh_callback(published_generation),
                     workspace_binding_resolver=self._workspace_binding_resolver,
                     packvm_lifecycle=self._packvm_lifecycle,
                     host_contract=host_contract,
@@ -2798,9 +2693,7 @@ class PackAPIServer:
             "serving_thread_alive": serving_thread_alive,
         }
         if server is not None:
-            drained = server.wait_for_request_drain(
-                max(0.0, deadline - time.monotonic())
-            )
+            drained = server.wait_for_request_drain(max(0.0, deadline - time.monotonic()))
             diagnostics.update(server.teardown_snapshot())
 
         with self._lifecycle_lock:
@@ -2841,11 +2734,7 @@ class PackAPIServer:
     def is_running(self) -> bool:
         """Return whether the serving thread is alive."""
 
-        return (
-            self.server is not None
-            and self.thread is not None
-            and self.thread.is_alive()
-        )
+        return self.server is not None and self.thread is not None and self.thread.is_alive()
 
 
 _api_server: PackAPIServer | None = None

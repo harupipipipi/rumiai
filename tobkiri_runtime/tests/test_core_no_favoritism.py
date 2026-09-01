@@ -30,6 +30,13 @@ def _scan_fixture(tmp_path: Path, name: str, source: str):
     return _scanner().scan_core(tmp_path)
 
 
+def _scan_json_fixture(tmp_path: Path, name: str, source: str):
+    core_root = tmp_path / "tobkiri_runtime" / "core_runtime"
+    core_root.mkdir(parents=True)
+    (core_root / name).write_text(source, encoding="utf-8")
+    return _scanner().scan_core(tmp_path)
+
+
 def test_current_core_has_no_application_domain_ownership() -> None:
     assert _scanner().scan_core(REPO_ROOT) == []
 
@@ -125,3 +132,37 @@ def test_static_dynamic_and_sys_path_pack_imports_are_rejected(tmp_path: Path, s
 def test_named_application_routes_and_contracts_are_rejected(tmp_path: Path, literal: str) -> None:
     violations = _scan_fixture(tmp_path, "runtime.py", f"VALUE = {literal!r}\n")
     assert any(item.rule == "forbidden_application_literal" for item in violations)
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "defaultspack",
+        "rumi_default_tools_pack",
+        "ecosystem/defaultspack/ui",
+        "RUMI_DEFAULTSPACK_LOCAL_TOKEN",
+        "/chat",
+    ],
+)
+def test_named_pack_literals_are_rejected_in_python(tmp_path: Path, literal: str) -> None:
+    violations = _scan_fixture(tmp_path, "runtime.py", f"VALUE = {literal!r}\n")
+
+    assert any(item.rule == "forbidden_application_literal" for item in violations)
+
+
+def test_named_pack_literals_are_rejected_in_json(tmp_path: Path) -> None:
+    violations = _scan_json_fixture(
+        tmp_path,
+        "runtime.json",
+        '{"adapter": "defaultspack", "path": "/chat", '
+        '"env": "RUMI_DEFAULTSPACK_LOCAL_TOKEN"}',
+    )
+
+    assert [item.rule for item in violations].count("forbidden_application_literal") == 3
+
+
+def test_literal_allowlist_requires_an_explicit_rationale() -> None:
+    scanner = _scanner()
+
+    assert scanner.LITERAL_ALLOWLIST
+    assert all(reason.strip() for reason in scanner.LITERAL_ALLOWLIST.values())

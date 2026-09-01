@@ -103,8 +103,36 @@ def test_source_registry_is_complete_without_v4_catalog_inputs() -> None:
     assert payload["source"]["input_paths"] == [
         item["path"] for item in payload["source"]["inputs"]
     ]
-    assert len(records) == 162
-    assert sum(len(record["operations"]) for record in records.values()) == 221
+    assert len(records) == 172
+    assert sum(len(record["operations"]) for record in records.values()) == 234
+    git_write = records["rumi_git_write_pack.git-commit.service"]
+    assert [operation["operation_id"] for operation in git_write["operations"]] == [
+        "rumi_git_write_pack.git-commit"
+    ]
+    assert git_write["source"] == [
+        {
+            "entrypoint_id": "git-write",
+            "kind": "legacy-v3-entrypoint",
+            "module": "ecosystem.rumi_git_write_pack.runtime.write",
+            "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/rumi.pack.v3.json",
+            "symbol": "create_git_write_operation",
+        }
+    ]
+    assert "rumi_git_write_pack.git-write.service" not in records
+    git_publish = records["rumi_git_publish_pack.git-publish.service"]
+    assert [operation["operation_id"] for operation in git_publish["operations"]] == [
+        "rumi_git_publish_pack.git-push"
+    ]
+    assert "rumi_git_publish_pack.git-publish" not in {
+        operation["operation_id"] for operation in git_publish["operations"]
+    }
+    command = records["rumi_command_protocol_pack.high-risk-command.service"]
+    assert command["pack_id"] == "rumi_command_protocol_pack"
+    assert command["contract_id"] == "tobkiri.service.command.high-risk.v1"
+    assert command["implementation_path"] == "runtime/high_risk_adapter.py"
+    assert [operation["operation_id"] for operation in command["operations"]] == [
+        "high_risk_command.manage"
+    ]
     assert all(
         not path.endswith(("pack.v4.json", "contracts.v4.json", "executables.v4.json"))
         for path in payload["source"]["input_paths"]
@@ -129,6 +157,44 @@ def test_source_registry_rejects_unsafe_explicit_implementation_path(
     fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
 
     with pytest.raises(ExecutableSourceRegistryError, match="escapes"):
+        build_registry(ECOSYSTEM, fixture_path=fixture_path)
+
+
+def test_source_registry_rejects_duplicate_function_id_override(
+    tmp_path: Path,
+) -> None:
+    """One legacy entrypoint cannot receive two competing Function identities."""
+    fixture_path = tmp_path / "legacy-executable-sources.json"
+    fixture = json.loads(
+        Path("tests/fixtures/legacy_executable_sources.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    fixture["function_id_overrides"].append(
+        dict(fixture["function_id_overrides"][0])
+    )
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    with pytest.raises(ExecutableSourceRegistryError, match="duplicate function ID override"):
+        build_registry(ECOSYSTEM, fixture_path=fixture_path)
+
+
+def test_source_registry_rejects_cross_pack_function_id_override(
+    tmp_path: Path,
+) -> None:
+    """A legacy entrypoint remains owned by the Pack that declares it."""
+    fixture_path = tmp_path / "legacy-executable-sources.json"
+    fixture = json.loads(
+        Path("tests/fixtures/legacy_executable_sources.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    fixture["function_id_overrides"][0]["function_id"] = (
+        "another_pack.git-commit.service"
+    )
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    with pytest.raises(ExecutableSourceRegistryError, match="not owned by Pack"):
         build_registry(ECOSYSTEM, fixture_path=fixture_path)
 
 
@@ -201,7 +267,8 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
     identity = profile_proof["identity_proof"]
     transaction = profile_proof["transaction"]
 
-    assert len(proof["packs"]) == 139
+    assert len(proof["packs"]) == 140
+    assert proof["packs"]["rumi_command_protocol_pack"]["status"] == "generated-draft"
     assert identity["all_ids_distinct"] is True
     assert identity["defaults_collapsed"] is False
     assert identity["profile_ids"] == ["profile-aoi", "profile-bora", "profile-cleo"]
@@ -212,11 +279,11 @@ def test_independent_proof_preserves_named_identity_and_transactional_receipt() 
         status: sum(entry["status"] == status for entry in proof["packs"].values())
         for status in ("semantically-reviewed", "generated-draft")
     }
-    assert statuses == {"semantically-reviewed": 45, "generated-draft": 94}
+    assert statuses == {"semantically-reviewed": 41, "generated-draft": 99}
     assert source["migration_status_counts"] == {
-        "generated-draft": 94,
+        "generated-draft": 99,
         "release-verified": 0,
-        "semantically-reviewed": 45,
+        "semantically-reviewed": 41,
     }
 
 

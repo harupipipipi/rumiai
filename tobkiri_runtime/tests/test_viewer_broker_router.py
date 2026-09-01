@@ -869,11 +869,29 @@ def test_computer_host_helper_accepts_workspace_artifact_root(monkeypatch, tmp_p
 
     chat_store_path = tmp_path / "chat" / "conversations.json"
     artifact_root = chat_store_path.parent / "conversations" / "conv-1" / "workspace" / "tools" / "computer"
-    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(chat_store_path))
+    monkeypatch.setattr(
+        computer_host_helper,
+        "host_contract_value",
+        lambda name: str(chat_store_path.parent / "conversations")
+        if name == "computer_artifact_destination_root"
+        else "",
+    )
 
     result = computer_host_helper._validated_artifact_root(str(artifact_root))
 
     assert result == artifact_root.resolve()
+
+
+def test_computer_host_helper_rejects_legacy_pack_environment_root(monkeypatch, tmp_path):
+    from core_runtime.host_broker import computer_host_helper
+
+    chat_store_path = tmp_path / "chat" / "conversations.json"
+    artifact_root = chat_store_path.parent / "conversations" / "conv-1" / "workspace" / "tools" / "computer"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(chat_store_path))
+    monkeypatch.setattr(computer_host_helper, "host_contract_value", lambda name: "")
+
+    with pytest.raises(ValueError, match="outside the allowed"):
+        computer_host_helper._validated_artifact_root(str(artifact_root))
 
 
 def test_computer_host_helper_rejects_non_workspace_artifact_root(tmp_path):

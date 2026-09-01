@@ -26,6 +26,8 @@ def _copy_v4_pack(tmp_path: Path) -> Path:
         "contracts.v4.json",
         "artifact-index.v4.json",
         "executables.v4.json",
+        "host_contract_contributions.v1.json",
+        "update_metadata.v1.json",
     ):
         shutil.copy2(DEFAULTSPACK_ROOT / filename, pack_root / filename)
     shutil.copytree(DEFAULTSPACK_ROOT / "runtime", pack_root / "runtime")

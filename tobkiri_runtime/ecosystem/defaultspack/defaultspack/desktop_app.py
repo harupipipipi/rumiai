@@ -719,26 +719,12 @@ def main(argv: list[str] | None = None) -> int:
         load_integration_secrets_into_env()
     except Exception as exc:
         _write_launch_event("secrets_load_skipped", error=repr(exc), port=port, url=url)
-    from core_runtime.api.web_mounts import WebMountEntry
     from core_runtime.pack_api_server import PackAPIServer
-
-    ui_root = _pack_root() / "ui"
-    web_mounts: tuple[WebMountEntry, ...] = (
-        {
-            "path_prefix": "/chat",
-            "web_root": ui_root,
-            "spa_fallback": True,
-            "index_file": "shell.html",
-            "auth_required": True,
-        },
-        {
-            "path_prefix": "/static",
-            "web_root": ui_root,
-            "spa_fallback": False,
-            "index_file": "shell.html",
-            "auth_required": True,
-        },
+    from ecosystem.defaultspack.defaultspack.surface_contributions import (
+        defaultspack_web_mounts,
     )
+
+    web_mounts = defaultspack_web_mounts(_pack_root())
     auth = _require_host_panel_auth_manager(host_contract)
     server = PackAPIServer(
         host="127.0.0.1",

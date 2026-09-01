@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "e8ec8d99de52abafc2304813ea628f0285fda95917626d4780587f36666bf1a0",
+    "digest": "fc46f8ce2eef2cd415ab8fa0f7c818263c810e9d689021476a5051ac39a67aae",
     "entries": [
       {
         "path": "index.html",
@@ -15,8 +15,8 @@
       },
       {
         "path": "package.json",
-        "size": 5472,
-        "sha256": "fd39aba72deb7069521c154759a1e5f42676598aa705e8b2aeea89f84b4f2d40"
+        "size": 5450,
+        "sha256": "dcaa36d1027df8533991db27eace0e7ea47005358b43f6d8d95ebd3fe1649ba9"
       },
       {
         "path": "public/assets/tobkiri-startup-blade-cut.svg",
@@ -115,8 +115,8 @@
       },
       {
         "path": "src/App.tsx",
-        "size": 340052,
-        "sha256": "1529c4349429da1ced99275ed3ebb7bc2add26deb900711adde7cb26f7f098ba"
+        "size": 351804,
+        "sha256": "a95788a8db5cf3dd644edab5cd6042f5394de4223670960b0fd1d9f4341253e8"
       },
       {
         "path": "src/adaptive/ActivityCenter.tsx",
@@ -215,8 +215,8 @@
       },
       {
         "path": "src/ambient/ambientApprovalBoundary.test.ts",
-        "size": 20952,
-        "sha256": "d34c5116bc7ba63c1324454206a7438fca63c3f124345cc033cf46fc798d3a3f"
+        "size": 21012,
+        "sha256": "b73c30bce82f6897e3df35209661ab8511ba97e84497f1dc3607ae5c337c898e"
       },
       {
         "path": "src/ambient/ambientConversationCompletion.ts",
@@ -365,8 +365,8 @@
       },
       {
         "path": "src/components/AuthorityApprovalWindow.tsx",
-        "size": 49549,
-        "sha256": "9bd1f0f2afba23b8227c4055a26d21788477f671070cdc93783510f4e1adeb84"
+        "size": 23817,
+        "sha256": "37ee92561e42e50f47397d261f5305e4d8801c6d218632503069b19b8fc9d3fb"
       },
       {
         "path": "src/components/ConversationSpotlight.tsx",
@@ -780,8 +780,8 @@
       },
       {
         "path": "src/features/chat/resources/authorityApprovalResources.ts",
-        "size": 1409,
-        "sha256": "8e791b0ec69f4e26410d29a8a94aa02855a28c4c7d899bfe2b3d1bec8a07d84d"
+        "size": 1084,
+        "sha256": "1a72b80cd3fdc153182707e3cb0073172d36f3ce5d71ef670a1db1a6e47b412e"
       },
       {
         "path": "src/features/chat/resources/chatComposerResources.ts",
@@ -1100,13 +1100,13 @@
       },
       {
         "path": "src/lib/api.test.ts",
-        "size": 106048,
-        "sha256": "4a63dee144c1fa3524f76626946de9804f4347c450545067e8bf7bcddda512e4"
+        "size": 110733,
+        "sha256": "3c21663970f600bfdc89bfee73282b9f5c56165c501721072166da7b604908e7"
       },
       {
         "path": "src/lib/api.ts",
-        "size": 168142,
-        "sha256": "1fa3c03a595dc451937688accb7e15d261895d394e6d73bdf3ade1bb38d0d2e3"
+        "size": 172418,
+        "sha256": "2090e7e4b094823fe40f14b1b2b5f5c21690e4ec49323d0b953b737566aec19f"
       },
       {
         "path": "src/lib/approvalPresentation.ts",
@@ -1125,8 +1125,8 @@
       },
       {
         "path": "src/lib/authorityApproval.test.ts",
-        "size": 22917,
-        "sha256": "3ff33ea54214804d8841dab627ff0af826455affa9e1068afc63c29e5f664cc4"
+        "size": 24630,
+        "sha256": "6d048ada247bb03d4cb9f50d7bab918b09f60a50caac4f3a8de184b042062fb7"
       },
       {
         "path": "src/lib/authorityApproval.ts",
@@ -1362,6 +1362,16 @@
         "path": "src/lib/focusModality.ts",
         "size": 993,
         "sha256": "221d4f85726aad59763759faf639bc26ca25264974d3b41428f8b5d1458a680a"
+      },
+      {
+        "path": "src/lib/highRiskCommand.test.ts",
+        "size": 4706,
+        "sha256": "7874457ddd302722271668766e57d559c9af818968c46242f73ddb7315ea210e"
+      },
+      {
+        "path": "src/lib/highRiskCommand.ts",
+        "size": 3566,
+        "sha256": "9bd9a5ebefed2999f6cfcd09e0366a9222b3291c1e2001554a2fc1a8a0d255b4"
       },
       {
         "path": "src/lib/historyComposer.ts",
@@ -1851,12 +1861,12 @@
     ]
   },
   "bundle": {
-    "digest": "1ec5918178510ad599d3e9d1c9bf30c1abcd8be05e4685fbc8c1856a15eccc8f",
+    "digest": "dcfe8281ad0514c9f0b40bccaa0f888dfa7a969bedf647865e5b0050692946a6",
     "entries": [
       {
         "path": "shell-app.css",
-        "size": 233535,
-        "sha256": "caa33736df4d884e02be3248fe28431e7071d81da7e2ab7118ae6a505aafff91"
+        "size": 232644,
+        "sha256": "2c63c208e76300663e84ec9e30ae16c70cb619db6bcadc9de42708a8bafd7471"
       },
       {
         "path": "shell-app.js",
@@ -1865,8 +1875,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2208068,
-        "sha256": "3ebb1666ccf5ea40cdb7105b68dbfa5b8a7222cef3cd8d5b570da61f8b67ec25"
+        "size": 2199451,
+        "sha256": "3d3f42bfe24fb0d7f344cff0530b2e42c556a11d3f7c28cce436a50eb8b89241"
       },
       {
         "path": "shell-rolldown-runtime.js",

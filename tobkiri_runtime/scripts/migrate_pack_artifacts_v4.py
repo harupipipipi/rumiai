@@ -46,6 +46,35 @@ GENERATOR_VERSION = "1.0.0"
 START_COMMIT = "1329f300cd2a8e15170edb1accce8d7c3167882b"
 EMPTY_SCHEMA: dict[str, Any] = {"type": "object"}
 VERSION_SUFFIX = re.compile(r"\.v[1-9][0-9]*$")
+IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
+SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+# An artifact-index role classifies an already sealed byte stream.  It is not
+# an authority grant: consumers must still choose which sealed roles they
+# understand, and validate the content under their own policy.
+ARTIFACT_INDEX_ROLES: frozenset[str] = frozenset(
+    {
+        "canonical_manifest",
+        "contract_catalog",
+        "runtime",
+        "asset",
+        "schema",
+        "sidecar",
+        "host_contract_contribution",
+        "host_contract_update_metadata",
+    }
+)
+RUNTIME_ARTIFACT_KINDS: frozenset[str] = frozenset(
+    {"executable", "schema", "asset", "variant", "sidecar"}
+)
+EXPLICIT_FUNCTION_FIELDS: frozenset[str] = frozenset(
+    {
+        "function_id",
+        "contract_id",
+        "operation_ids",
+        "implementation_digest",
+    }
+)
 
 
 class PackV4MigrationError(ValueError):
@@ -618,20 +647,35 @@ def _contract_document(
         record["secrets"],
         host_execution=record["execution_boundary"] == "host_brokered",
     )
-    operations = [
-        {
-            "operation_id": item["id"],
-            "input_schema_digest": _digest(input_schema),
-            "output_schema_digest": _digest(output_schema),
-            "error_schema_digest": _digest(error_schema),
-            "effect_ceiling": effects,
-            "scope_semantics": (
-                "host_broker" if record["execution_boundary"] == "host_brokered" else "declarative"
-            ),
-            "idempotency": {"mode": "none"},
-        }
-        for item in source["operations"]
-    ]
+    operations = []
+    for item in source["operations"]:
+        operation_effects = item.get("effect_ceiling", effects)
+        if (
+            not isinstance(operation_effects, list)
+            or any(
+                not isinstance(effect, str) or not effect or effect not in effects
+                for effect in operation_effects
+            )
+            or len(operation_effects) != len(set(operation_effects))
+        ):
+            raise PackV4MigrationError(
+                f"Contract Operation effect ceiling is invalid: {source['contract_id']}/{item['id']}"
+            )
+        operations.append(
+            {
+                "operation_id": item["id"],
+                "input_schema_digest": _digest(input_schema),
+                "output_schema_digest": _digest(output_schema),
+                "error_schema_digest": _digest(error_schema),
+                "effect_ceiling": operation_effects,
+                "scope_semantics": (
+                    "host_broker"
+                    if record["execution_boundary"] == "host_brokered"
+                    else "declarative"
+                ),
+                "idempotency": {"mode": "none"},
+            }
+        )
     semantics = {
         key: copy.deepcopy(source[key])
         for key in (
@@ -668,6 +712,192 @@ def _contract_document(
     }
 
 
+def _is_identifier(value: Any) -> bool:
+    """Return whether ``value`` is an artifact-schema identifier."""
+
+    return isinstance(value, str) and bool(IDENTIFIER.fullmatch(value))
+
+
+def _is_digest(value: Any) -> bool:
+    """Return whether ``value`` is a canonical SHA-256 digest string."""
+
+    return isinstance(value, str) and bool(SHA256_DIGEST.fullmatch(value))
+
+
+def _is_relative_artifact_path(value: Any) -> bool:
+    """Return whether ``value`` is a non-escaping normalized artifact path."""
+
+    if not isinstance(value, str) or not value:
+        return False
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts and str(path) != "."
+
+
+def _validated_runtime_artifacts(record: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Index sealed runtime artifacts and reject ambiguous classifications."""
+
+    artifacts = record.get("runtime_artifacts")
+    if not isinstance(artifacts, list):
+        raise PackV4MigrationError("canonical runtime artifacts must be a list")
+    by_path: dict[str, Mapping[str, Any]] = {}
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping):
+            raise PackV4MigrationError("canonical runtime artifact is malformed")
+        path = artifact.get("path")
+        digest = artifact.get("digest")
+        kind = artifact.get("kind")
+        role = artifact.get("index_role", "runtime")
+        if (
+            not _is_relative_artifact_path(path)
+            or not _is_digest(digest)
+            or kind not in RUNTIME_ARTIFACT_KINDS
+            or role not in ARTIFACT_INDEX_ROLES
+            or str(path) in by_path
+        ):
+            raise PackV4MigrationError("canonical runtime artifact is invalid")
+        by_path[str(path)] = artifact
+    return by_path
+
+
+def _provided_contract_sources(
+    record: Mapping[str, Any],
+) -> dict[str, Mapping[str, Any]]:
+    """Index canonical Contract sources and their finite Operations."""
+
+    provided = record.get("provided_contracts")
+    if not isinstance(provided, list):
+        raise PackV4MigrationError("canonical provided Contracts must be a list")
+    contracts: dict[str, Mapping[str, Any]] = {}
+    for contract in provided:
+        if not isinstance(contract, Mapping):
+            raise PackV4MigrationError("canonical provided Contract is malformed")
+        contract_id = contract.get("contract_id")
+        operations = contract.get("operations")
+        if not _is_identifier(contract_id) or not VERSION_SUFFIX.search(str(contract_id)):
+            raise PackV4MigrationError("canonical provided Contract ID is invalid")
+        if str(contract_id) in contracts or not isinstance(operations, list) or not operations:
+            raise PackV4MigrationError("canonical provided Contract operations are invalid")
+        operation_ids: set[str] = set()
+        for operation in operations:
+            operation_id = operation.get("id") if isinstance(operation, Mapping) else None
+            if not _is_identifier(operation_id) or str(operation_id) in operation_ids:
+                raise PackV4MigrationError("canonical provided Contract has duplicate Operations")
+            operation_ids.add(str(operation_id))
+        contracts[str(contract_id)] = contract
+    return contracts
+
+
+def _explicit_function_sources(record: Mapping[str, Any]) -> list[Mapping[str, Any]] | None:
+    """Validate the optional multi-Function source form for one Pack record.
+
+    The legacy record form intentionally remains valid and retains its exact
+    output.  When the optional ``functions`` field is present it becomes the
+    sole Function authority: every provided Contract Operation must be bound
+    exactly once to one explicit implementation digest.  That digest must
+    resolve to exactly one runtime executable artifact; its Python variant is
+    the deterministic ``<function_id>.python`` projection.
+    """
+
+    if "functions" not in record:
+        return None
+    raw_functions = record.get("functions")
+    if not isinstance(raw_functions, list):
+        raise PackV4MigrationError("explicit Functions must be a list")
+    contracts = _provided_contract_sources(record)
+    runtime_artifacts = _validated_runtime_artifacts(record)
+    if not raw_functions and contracts:
+        raise PackV4MigrationError("provided Contracts require explicit Functions")
+
+    seen_functions: set[str] = set()
+    assigned_operations: dict[str, set[str]] = {contract_id: set() for contract_id in contracts}
+    for function in raw_functions:
+        if not isinstance(function, Mapping) or set(function) != EXPLICIT_FUNCTION_FIELDS:
+            raise PackV4MigrationError("explicit Function fields are invalid")
+        function_id = function.get("function_id")
+        contract_id = function.get("contract_id")
+        operation_ids = function.get("operation_ids")
+        implementation_digest = function.get("implementation_digest")
+        if (
+            not _is_identifier(function_id)
+            or str(function_id) in seen_functions
+            or not isinstance(contract_id, str)
+            or contract_id not in contracts
+            or not isinstance(operation_ids, list)
+            or not operation_ids
+            or any(not _is_identifier(operation_id) for operation_id in operation_ids)
+            or len(operation_ids) != len(set(operation_ids))
+            or not _is_digest(implementation_digest)
+        ):
+            raise PackV4MigrationError("explicit Function identity is invalid")
+        seen_functions.add(str(function_id))
+
+        implementation_artifacts = [
+            artifact
+            for artifact in runtime_artifacts.values()
+            if artifact.get("digest") == implementation_digest
+            and artifact.get("kind") == "executable"
+            and artifact.get("index_role", "runtime") == "runtime"
+        ]
+        if len(implementation_artifacts) != 1:
+            raise PackV4MigrationError("explicit Function implementation artifact is invalid")
+
+        contract = contracts[str(contract_id)]
+        declared_operations = {
+            str(operation["id"])
+            for operation in contract["operations"]
+            if isinstance(operation, Mapping)
+        }
+        function_operations = {str(operation_id) for operation_id in operation_ids}
+        if not function_operations.issubset(declared_operations):
+            raise PackV4MigrationError("explicit Function references a Contract-external Operation")
+        if assigned_operations[str(contract_id)] & function_operations:
+            raise PackV4MigrationError("explicit Function Operation is duplicated")
+        for operation in contract["operations"]:
+            if (
+                isinstance(operation, Mapping)
+                and operation.get("id") in function_operations
+                and operation.get("implementation_digest") != implementation_digest
+            ):
+                raise PackV4MigrationError(
+                    "explicit Function implementation digest is inconsistent"
+                )
+        assigned_operations[str(contract_id)].update(function_operations)
+
+    for contract_id, contract in contracts.items():
+        declared_operations = {
+            str(operation["id"])
+            for operation in contract["operations"]
+            if isinstance(operation, Mapping)
+        }
+        if assigned_operations[contract_id] != declared_operations:
+            raise PackV4MigrationError("explicit Functions do not cover Contract Operations")
+    return list(raw_functions)
+
+
+def _function_sources(record: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return explicit Function bindings or the preserved legacy projection."""
+
+    explicit = _explicit_function_sources(record)
+    if explicit is not None:
+        return sorted(explicit, key=lambda item: str(item["function_id"]))
+    return [
+        {
+            "function_id": source["provider_id"],
+            "contract_id": source["contract_id"],
+            "operation_ids": [item["id"] for item in source["operations"]],
+            "implementation_digest": next(
+                (
+                    item["implementation_digest"]
+                    for item in source["operations"]
+                    if item.get("implementation_digest")
+                ),
+                None,
+            ),
+        }
+        for source in record["provided_contracts"]
+    ]
+
+
 def _artifact_set_digest(artifacts: list[Mapping[str, Any]]) -> str:
     return _digest(artifacts)
 
@@ -697,17 +927,15 @@ def _manifest_document(
     functions = []
     operation_catalog = []
     provider_catalog = []
-    for source in record["provided_contracts"]:
-        contract = contract_by_id[source["contract_id"]]
-        operations = [item["id"] for item in source["operations"]]
-        implementation = next(
-            (
-                item["implementation_digest"]
-                for item in source["operations"]
-                if item.get("implementation_digest")
-            ),
-            artifact_set_digest,
-        )
+    contract_source_by_id = {
+        str(source["contract_id"]): source for source in record["provided_contracts"]
+    }
+    for function_source in _function_sources(record):
+        contract_id = str(function_source["contract_id"])
+        source = contract_source_by_id[contract_id]
+        contract = contract_by_id[contract_id]
+        operations = list(function_source["operation_ids"])
+        implementation = function_source.get("implementation_digest") or artifact_set_digest
         isolation = source["isolation"]
         role = (
             "host_capability_provider"
@@ -716,7 +944,7 @@ def _manifest_document(
         )
         functions.append(
             {
-                "id": source["provider_id"],
+                "id": function_source["function_id"],
                 "implementation_digest": implementation,
                 "contract_revision_digest": contract["revision_digest"],
                 "operations": operations,
@@ -731,21 +959,24 @@ def _manifest_document(
         )
         provider_catalog.append(
             {
-                "provider_id": source["provider_id"],
+                "provider_id": function_source["function_id"],
                 "owner": record["pack_id"],
-                "contract_reference": source["contract_id"],
+                "contract_reference": contract_id,
                 "operations": operations,
             }
         )
-        effects = next(iter(contract["operations"]), {}).get("effect_ceiling", [])
+        effects_by_operation = {
+            str(operation["operation_id"]): operation["effect_ceiling"]
+            for operation in contract["operations"]
+        }
         operation_catalog.extend(
             {
                 "operation_id": operation,
                 "owner": record["pack_id"],
-                "contract_reference": source["contract_id"],
-                "provider_id": source["provider_id"],
+                "contract_reference": contract_id,
+                "provider_id": function_source["function_id"],
                 "source_kind": "canonical_v4_contract",
-                "effect_ceiling": effects,
+                "effect_ceiling": effects_by_operation[operation],
             }
             for operation in operations
         )
@@ -964,6 +1195,18 @@ def verify_rendered_artifacts(files: Mapping[str, str]) -> None:
     }
     if executable["catalog_digest"] != _digest(unsigned_executable):
         raise PackV4MigrationError("executable catalog digest is stale")
+    functions = manifest["functions"]
+    variants = executable["variants"]
+    expected_variants = {
+        (str(function["id"]), f"{function['id']}.python") for function in functions
+    }
+    actual_variants = {
+        (str(variant.get("function_id")), str(variant.get("variant_id")))
+        for variant in variants
+        if isinstance(variant, Mapping)
+    }
+    if len(actual_variants) != len(variants) or actual_variants != expected_variants:
+        raise PackV4MigrationError("executable variants do not match explicit Functions")
     unsigned = {key: value for key, value in index.items() if key != "integrity_seal"}
     if index["integrity_seal"]["signed_digest"] != _digest(unsigned):
         raise PackV4MigrationError("artifact index integrity seal is invalid")
@@ -1030,6 +1273,7 @@ def _verify_function_operation_principals(manifest: Mapping[str, Any]) -> None:
     }
     expected_operations: set[tuple[str, str, str]] = set()
     expected_providers: set[tuple[str, str, tuple[str, ...]]] = set()
+    assigned_operation_ids: set[str] = set()
     for function in functions:
         if not isinstance(function, Mapping):
             raise PackV4MigrationError(f"malformed Function principal in Pack: {pack_id}")
@@ -1055,6 +1299,11 @@ def _verify_function_operation_principals(manifest: Mapping[str, Any]) -> None:
             raise PackV4MigrationError(
                 f"Function references an unknown Operation: {pack_id}/{function_id}"
             )
+        if assigned_operation_ids.intersection(operations):
+            raise PackV4MigrationError(
+                f"Operation belongs to more than one Function: {pack_id}/{function_id}"
+            )
+        assigned_operation_ids.update(str(operation) for operation in operations)
         implementation_digest = function.get("implementation_digest")
         artifact_digests = {
             item.get("digest")
@@ -1174,6 +1423,9 @@ def _validate_catalog_payload(payload: Mapping[str, Any]) -> list[Mapping[str, A
                     "canonical Contract ownership must be explicit: "
                     f"{record['pack_id']}"
                 )
+        _validated_runtime_artifacts(record)
+        _provided_contract_sources(record)
+        _explicit_function_sources(record)
     return records
 
 

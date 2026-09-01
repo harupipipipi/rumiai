@@ -278,7 +278,9 @@ def test_exact_authority_flow_reserves_dispatches_and_commits_audit(
     assert isinstance(harness.kernel, AuthorityKernelProtocol)
 
     result = harness.kernel.authorize(harness.context(), harness.scope)
-    token_payload = base64.urlsafe_b64decode(result.lease_token.split(".", 1)[0].encode("ascii"))
+    token_payload = base64.urlsafe_b64decode(
+        result.lease_token.split(".", 1)[0].encode("ascii")
+    )
     assert b"grant" not in token_payload
     assert b"provider" not in token_payload
     lease = harness.kernel.dispatch(
@@ -793,7 +795,9 @@ def test_approval_record_alone_is_never_runtime_authority(tmp_path: Path) -> Non
     harness.store.put_record(approval)
 
     with pytest.raises(AuthorityDenied, match="Grant"):
-        harness.kernel.authorize(harness.context(caller_session_id="session-second"), harness.scope)
+        harness.kernel.authorize(
+            harness.context(caller_session_id="session-second"), harness.scope
+        )
 
 
 def test_co_location_rejects_implicit_same_pack_authority_sharing() -> None:
@@ -887,6 +891,81 @@ def test_opaque_semantics_are_exact_request_one_shot_only() -> None:
             issued_at=1,
             max_uses=1,
         )
+
+
+def test_provider_only_bundle_does_not_authorize_a_direct_effect(
+    tmp_path: Path,
+) -> None:
+    """Provider reachability alone cannot replace an interactive one-shot Grant."""
+
+    harness = _Harness(tmp_path)
+    interactive_target = _principal("interactive")
+    interactive_domain = _domain(
+        "interactive-target",
+        interactive_target,
+        boundary=DomainBoundary.DEDICATED_PROCESS,
+    )
+    harness.kernel.register_execution_domain(
+        interactive_domain,
+        session_id="session-interactive-target",
+        channel_digest=interactive_domain.authenticated_channel_digest,
+        principal=interactive_target,
+    )
+    trust = HostExtensionTrustRecord(
+        trust_id="extension-interactive",
+        parent_artifact_digest=interactive_target.parent_artifact_digest,
+        publisher_lineage="publisher.interactive",
+        provider_principal_ids=(interactive_target.principal_id,),
+        trust_provenance_digest=_digest("interactive-trust"),
+        security_epoch=1,
+        valid_from=harness.clock(),
+    )
+    provider = ProviderAuthorityRecord(
+        record_id="provider-authority-interactive",
+        provider=interactive_target,
+        execution_domain_id=interactive_domain.domain_id,
+        execution_domain_identity_digest=interactive_domain.identity_digest,
+        scope=harness.scope,
+        authority_mode=AuthorityMode.LEASE_ONLY,
+        security_epoch=1,
+        trust_provenance_digest=trust.trust_provenance_digest,
+        publisher_lineage=trust.publisher_lineage,
+        host_extension_id=trust.trust_id,
+        valid_from=harness.clock(),
+        host_broker_binding="broker.interactive.v1",
+    )
+
+    harness.kernel.commit_provider_authority_bundle(
+        host_extension_trust=trust,
+        provider_authorities=(provider,),
+    )
+
+    assert harness.store.get_provider_authority(provider.record_id) == provider
+    assert harness.store.get_host_extension_trust(trust.trust_id) == trust
+    assert all(
+        item.target != interactive_target for item in harness.store.list_grants()
+    )
+    with pytest.raises(AuthorityDenied, match="caller Grant"):
+        harness.kernel.authorize(
+            harness.context(
+                target=interactive_target,
+                target_domain_id=interactive_domain.domain_id,
+                target_boot_epoch=interactive_domain.boot_epoch,
+            ),
+            harness.scope,
+        )
+
+
+def test_nonopaque_exact_scope_still_requires_the_current_request_digest(
+    tmp_path: Path,
+) -> None:
+    """Exact request binding is enforced even when scope semantics are visible."""
+
+    scope = _scope(request_digest=_digest("approved-effect"), opaque=False)
+    harness = _Harness(tmp_path, scope=scope)
+
+    with pytest.raises(AuthorityDenied, match="exact scope"):
+        harness.kernel.authorize(harness.context(), scope)
 
 
 def test_crash_recovery_marks_dispatched_effect_ambiguous(tmp_path: Path) -> None:
@@ -1043,7 +1122,9 @@ def test_successor_authority_requires_every_non_expansion_proof(tmp_path: Path) 
         successor_grant,
         host_extension_trust=successor_trust,
     )
-    assert harness.store.get_provider_authority(successor_provider.record_id) is not None
+    assert (
+        harness.store.get_provider_authority(successor_provider.record_id) is not None
+    )
     assert harness.store.get_grant(successor_grant.grant_id) is not None
 
     expanded = replace(evidence, entitlement_non_expanding=False)

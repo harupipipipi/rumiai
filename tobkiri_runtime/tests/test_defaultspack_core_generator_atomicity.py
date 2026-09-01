@@ -131,6 +131,28 @@ def test_checked_in_bundle_matches_canonical_render() -> None:
     assert _snapshot(generator.BUNDLE) == expected
 
 
+def test_core_generator_publishes_candidate_before_profile_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new Profile Pack is only resolvable from the publication stage."""
+
+    generator = _load_generator()
+    rendered = {generator.BUNDLE / "bundle.lock.json": b"candidate\n"}
+    published: list[dict[Path, bytes]] = []
+
+    monkeypatch.setattr(sys, "argv", [str(GENERATOR)])
+    monkeypatch.setattr(generator, "_render", lambda source_commit: rendered)
+    monkeypatch.setattr(
+        generator,
+        "_render_profile_release",
+        lambda *args, **kwargs: pytest.fail("normal publication resolved the old bundle"),
+    )
+    monkeypatch.setattr(generator, "_publish", lambda candidate: published.append(candidate))
+
+    assert generator.main() == 0
+    assert published == [rendered]
+
+
 def test_canonical_pack_projections_are_generator_owned_derivatives() -> None:
     """Each canonical Pack input has one source-bound bundle derivative."""
 
@@ -142,7 +164,11 @@ def test_canonical_pack_projections_are_generator_owned_derivatives() -> None:
         if output != source
     ]
 
-    assert len(projections) == 64
+    assert len(projections) == 65
+    assert any(
+        source.parent.name == "rumi_command_protocol_pack"
+        for _, source in projections
+    )
     for output, source in projections:
         canonical_raw = source.read_bytes()
         canonical = validate_document(canonical_raw, "pack")
@@ -206,7 +232,6 @@ def test_core_generator_transaction_rejects_destination_symlink(
     copied = tmp_path / "v4"
     shutil.copytree(BUNDLE, copied)
     outside = tmp_path / "outside.json"
-    outside.write_text("outside", encoding="utf-8")
     target = copied / "packs" / "defaults-basepack.pack.v4.json"
     target.unlink()
     target.symlink_to(outside)
@@ -216,6 +241,32 @@ def test_core_generator_transaction_rejects_destination_symlink(
         generator._publish(
             {
                 target: b"{}\n",
+                copied / "bundle.lock.json": (copied / "bundle.lock.json").read_bytes(),
+            }
+        )
+
+    assert not outside.exists()
+
+
+def test_core_generator_check_stage_rejects_destination_symlink(
+    tmp_path: Path,
+) -> None:
+    """Check-only staging must not follow a bundle child symlink."""
+
+    generator = _load_generator()
+    copied = tmp_path / "v4"
+    shutil.copytree(BUNDLE, copied)
+    outside = tmp_path / "outside.json"
+    outside.write_text("outside", encoding="utf-8")
+    target = copied / "packs" / "defaults-basepack.pack.v4.json"
+    target.unlink()
+    target.symlink_to(outside)
+    generator.BUNDLE = copied
+
+    with pytest.raises(ValueError, match="rendered path contains a symlink"):
+        generator._render_staged_profile_release(
+            {
+                target: b"candidate\n",
                 copied / "bundle.lock.json": (copied / "bundle.lock.json").read_bytes(),
             }
         )

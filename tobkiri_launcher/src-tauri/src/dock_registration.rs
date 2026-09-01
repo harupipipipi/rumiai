@@ -67,6 +67,7 @@ pub(crate) struct DefaultspackDesktopMetadata {
     shell_artifact_id: String,
     shell_artifact_digest: String,
     shell_entrypoint_digest: String,
+    host_contract_contributions: crate::host_contract_contributions::HostContractContributionValues,
 }
 
 impl DefaultspackDesktopMetadata {
@@ -581,6 +582,20 @@ fn ensure_defaultspack_desktop_ready(
         [
             ("desktop_api_token", api_token.clone()),
             ("panel_bootstrap_secret", panel_bootstrap_secret.clone()),
+            (
+                "system_pack_descriptors",
+                metadata
+                    .host_contract_contributions
+                    .system_pack_descriptors
+                    .clone(),
+            ),
+            (
+                "update_target_descriptors",
+                metadata
+                    .host_contract_contributions
+                    .update_target_descriptors
+                    .clone(),
+            ),
         ],
     )?;
 
@@ -852,6 +867,8 @@ fn read_defaultspack_desktop_metadata(
 ) -> AnyResult<DefaultspackDesktopMetadata> {
     let authority = crate::defaultspack_authority::resolve(config)?;
     let execution_identity = authority.execution_identity()?;
+    let host_contract_contributions =
+        crate::host_contract_contributions::collect_for_verified_application(&authority)?;
     let app_working_dir = authority.pack_root;
     let mut env_vars = vec![
         (
@@ -895,6 +912,7 @@ fn read_defaultspack_desktop_metadata(
         shell_artifact_id: authority.launch.artifact_id,
         shell_artifact_digest,
         shell_entrypoint_digest: authority.launch.entrypoint_digest,
+        host_contract_contributions,
         function_id: authority.launch.function_id,
         provider_id: authority.launch.provider_id,
         contract_namespace: authority.launch.contract_namespace,
@@ -1040,6 +1058,20 @@ pub(crate) fn spawn_defaultspack_local_server(
         [
             ("desktop_api_token", api_token.clone()),
             ("panel_bootstrap_secret", panel_bootstrap_secret),
+            (
+                "system_pack_descriptors",
+                metadata
+                    .host_contract_contributions
+                    .system_pack_descriptors
+                    .clone(),
+            ),
+            (
+                "update_target_descriptors",
+                metadata
+                    .host_contract_contributions
+                    .update_target_descriptors
+                    .clone(),
+            ),
         ],
     )?;
     let path = append_path_prefix(&venv_bin_dir(&config.venv_dir), std::env::var_os("PATH"))?;

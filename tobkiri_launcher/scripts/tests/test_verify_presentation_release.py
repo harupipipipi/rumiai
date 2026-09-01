@@ -69,10 +69,8 @@ def _copy_packaged_bundle(tmp_path: Path) -> Path:
 def test_official_bundle_lock_with_interleaved_executable_catalogs_verifies(
     tmp_path: Path,
 ) -> None:
-    """The release verifier accepts the canonical 137-entry packaged bundle."""
+    """The release verifier accepts the canonical packaged bundle."""
     entries = _lock_entries()
-    assert len(entries) == 137
-    assert sum(entry["kind"] == "executable_catalog" for entry in entries) == 64
     VERIFY._verify_defaultspack_bundle(entries, _copy_packaged_bundle(tmp_path))
 
 

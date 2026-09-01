@@ -10,6 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from core_runtime.authority.principal import (
+    UNATTRIBUTED_PRINCIPAL_ID,
+    build_principal_id,
+    principal_scope_candidates,
+)
 from core_runtime.pack_artifact_integrity import (
     verify_declared_artifacts,
     write_host_install_record,
@@ -33,6 +38,13 @@ from ecosystem.rumi_host_authority_bridge_pack.runtime import bridge
 from tobkiri_host.broker import RequestEnvelope
 from tobkiri_host.models import OpaqueAuthorityRef, RequestContext
 from tobkiri_host.ports import OpaqueInvocationLease
+
+
+def test_missing_legacy_principal_is_neutral_instead_of_defaultspack() -> None:
+    principal_id = build_principal_id()
+
+    assert principal_id == UNATTRIBUTED_PRINCIPAL_ID
+    assert "defaultspack" not in principal_scope_candidates("")
 
 
 def _authenticated_host_context() -> SimpleNamespace:
@@ -100,6 +112,7 @@ def test_unsigned_nonbuiltin_requires_explicit_host_developer_record(
     write_host_install_record(
         trust_store,
         pack_id="third_party",
+        install_path=pack_root,
         record={
             "signature_required": False,
             "developer_mode": True,

@@ -27,6 +27,7 @@
     "rumi_code_ide_pack": "v4-authoritative",
     "rumi_code_migration_pack": "v4-authoritative",
     "rumi_coding_sandbox_service_pack": "v4-authoritative",
+    "rumi_command_protocol_pack": "v4-authoritative",
     "rumi_company_agent_adapter_pack": "v4-authoritative",
     "rumi_company_coordinator_pack": "v4-authoritative",
     "rumi_company_state_store_pack": "v4-authoritative",

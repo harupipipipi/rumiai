@@ -18,8 +18,15 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_all_canonical_executable_catalogs_compile_without_exclusion() -> None:
     pack_roots = sorted(path.parent for path in (ROOT / "ecosystem").glob("*/pack.v4.json"))
     compiled = [compile_pack_root(path) for path in pack_roots]
-    assert len(compiled) == 139
+    assert len(compiled) == 140
     assert {item.artifact.pack_id for item in compiled} == {path.name for path in pack_roots}
+
+    command = next(
+        item for item in compiled if item.artifact.pack_id == "rumi_command_protocol_pack"
+    )
+    assert set(command.routes) == {
+        ("tobkiri.service.command.high-risk.v1", "high_risk_command.manage")
+    }
 
     conversation = next(item for item in compiled if item.artifact.pack_id == "defaultspack")
     inspect = next(item for item in compiled if item.artifact.pack_id == "rumi_file_inspect_pack")

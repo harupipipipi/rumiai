@@ -29,6 +29,7 @@ from .external_pack_catalog_v4 import (
     resolve_admitted_pack_root as resolve_pack_root,
 )
 from .profile_runtime_port import require_profile_runtime
+
 HOST_PROFILE_CONTROL_OPERATIONS = frozenset(
     {
         "profile.catalog.read",
@@ -235,6 +236,7 @@ class HostProfileControlSession:
         from .bootstrap.profile_capture import host_profile_catalog
         from .bootstrap.profile_capture import runtime_user_data_root
         from .profile_catalog_v4 import profile_catalog_digest
+
         self._bundle_root = bundle_root
         self._user_data_root = (
             Path(user_data_root).resolve()
@@ -243,9 +245,7 @@ class HostProfileControlSession:
         )
         from .authority.v4 import AuthorityStore
 
-        with AuthorityStore(
-            self._user_data_root / "authority" / "v4.sqlite3"
-        ) as authority:
+        with AuthorityStore(self._user_data_root / "authority" / "v4.sqlite3") as authority:
             self._security_epoch = authority.security_epoch
 
         def load_catalog() -> Any:
@@ -307,14 +307,9 @@ class HostProfileControlSession:
         from .authority.v4 import AuthorityStore
         from .profile_catalog_v4 import profile_catalog_digest
 
-        if (
-            ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
-            is not None
-        ):
+        if ActiveProfileStore(self._user_data_root).load(verify_snapshot=True) is not None:
             raise PackControlStaleRevision("Host active Profile is no longer empty")
-        with AuthorityStore(
-            self._user_data_root / "authority" / "v4.sqlite3"
-        ) as authority:
+        with AuthorityStore(self._user_data_root / "authority" / "v4.sqlite3") as authority:
             if authority.security_epoch != self._security_epoch:
                 raise PackControlStaleRevision("Host Authority epoch changed")
         if not hmac.compare_digest(
@@ -325,13 +320,8 @@ class HostProfileControlSession:
     def assert_operation_ready(self, contract_id: str, operation_id: str) -> None:
         """Reject every operation outside the bootstrap-safe Host surface."""
 
-        if (
-            contract_id != CONTROL_PRESENTATION_CONTRACT
-            or operation_id not in self._OPERATIONS
-        ):
-            raise PackControlUnapproved(
-                "operation is unavailable before Profile activation"
-            )
+        if contract_id != CONTROL_PRESENTATION_CONTRACT or operation_id not in self._OPERATIONS:
+            raise PackControlUnapproved("operation is unavailable before Profile activation")
 
     def provider_metadata(self, contract_id: str) -> tuple[Mapping[str, Any], ...]:
         if contract_id != CONTROL_PRESENTATION_CONTRACT:
@@ -373,9 +363,7 @@ class HostProfileControlSession:
                     selected_profile_id=str(selected) if selected is not None else None,
                 )
             if operation_id == "operation.status.read":
-                request_id = _required(
-                    arguments.pop("request_id", None), "request identity"
-                )
+                request_id = _required(arguments.pop("request_id", None), "request identity")
                 _require_empty(arguments)
                 from .control_reconciliation_v4 import ControlReconciliationStore
 
@@ -411,8 +399,7 @@ class HostProfileControlSession:
             self._user_data_root / "control" / "reconciliation-v4.sqlite3"
         ).profile_candidates(session_id=session_id)
         candidate_map = {
-            str(record["review"]["profile"]["profile_id"]): record
-            for record in candidates
+            str(record["review"]["profile"]["profile_id"]): record for record in candidates
         }
         return {
             "host_operation_api_version": "io.tobkiri.host.operation.v1",
@@ -552,13 +539,9 @@ class CapturedPackControlSession:
             with profile_capture_scope():
                 return self._invoke_control_presentation(operation_id, payload)
         if contract_id != PACK_CONTROL_CONTRACT:
-            raise PackControlUnapproved(
-                "contract is absent from the captured Host session"
-            )
+            raise PackControlUnapproved("contract is absent from the captured Host session")
         if operation_id not in PACK_CONTROL_OPERATIONS:
-            raise PackControlUnapproved(
-                "operation is absent from the captured Host session"
-            )
+            raise PackControlUnapproved("operation is absent from the captured Host session")
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         self._reject_identity_override(arguments)
@@ -634,9 +617,7 @@ class CapturedPackControlSession:
         """Serve declared Launcher surfaces only through the captured Broker."""
 
         if operation_id not in CONTROL_PRESENTATION_OPERATIONS:
-            raise PackControlUnapproved(
-                "control presentation operation is not declared"
-            )
+            raise PackControlUnapproved("control presentation operation is not declared")
         arguments = dict(payload)
         session_id = _required(arguments.pop("_session_id", None), "session binding")
         selected_profile_id = arguments.pop("selected_profile_id", None)
@@ -646,9 +627,7 @@ class CapturedPackControlSession:
             "profile.change.resolve",
             "settings.read",
         }
-        allow_selected_profile = allow_selected_profile or operation_id.startswith(
-            "topology."
-        )
+        allow_selected_profile = allow_selected_profile or operation_id.startswith("topology.")
         self._reject_identity_override(
             arguments,
             allow_selected_profile=allow_selected_profile,
@@ -660,19 +639,13 @@ class CapturedPackControlSession:
                 requested_profile_id = arguments.pop("profile_id", None)
                 if selected_profile_id is not None and requested_profile_id is not None:
                     if str(selected_profile_id) != str(requested_profile_id):
-                        raise PackControlInvalidRequest(
-                            "browsing Profile selectors disagree"
-                        )
+                        raise PackControlInvalidRequest("browsing Profile selectors disagree")
                 requested_profile_id = (
-                    selected_profile_id
-                    if selected_profile_id is not None
-                    else requested_profile_id
+                    selected_profile_id if selected_profile_id is not None else requested_profile_id
                 )
                 profile_result = self._runtime_surface.read_profile(
                     profile_id=(
-                        str(requested_profile_id)
-                        if requested_profile_id is not None
-                        else None
+                        str(requested_profile_id) if requested_profile_id is not None else None
                     ),
                     expected_profile_revision=_optional_string(
                         arguments.pop("expected_profile_revision", None)
@@ -686,21 +659,15 @@ class CapturedPackControlSession:
                 requested_profile_id = arguments.pop("profile_id", None)
                 if selected_profile_id is not None and requested_profile_id is not None:
                     if str(selected_profile_id) != str(requested_profile_id):
-                        raise PackControlInvalidRequest(
-                            "browsing Profile selectors disagree"
-                        )
+                        raise PackControlInvalidRequest("browsing Profile selectors disagree")
                 requested_profile_id = (
-                    selected_profile_id
-                    if selected_profile_id is not None
-                    else requested_profile_id
+                    selected_profile_id if selected_profile_id is not None else requested_profile_id
                 )
                 _require_empty(arguments)
                 return self._runtime_surface.read_profile_catalog(
                     session_id=_panel_session_root(session_id),
                     profile_id=(
-                        str(requested_profile_id)
-                        if requested_profile_id is not None
-                        else None
+                        str(requested_profile_id) if requested_profile_id is not None else None
                     ),
                 )
             if operation_id == "operation.status.read":
@@ -719,9 +686,7 @@ class CapturedPackControlSession:
 
                 try:
                     return ControlReconciliationStore(
-                        runtime_user_data_root()
-                        / "control"
-                        / "reconciliation-v4.sqlite3"
+                        runtime_user_data_root() / "control" / "reconciliation-v4.sqlite3"
                     ).operation_status(
                         request_id,
                         session_id=_panel_session_root(session_id),
@@ -734,27 +699,19 @@ class CapturedPackControlSession:
                     ControlReconciliationUnavailableError,
                     ControlReconciliationError,
                 ) as error:
-                    raise PackControlUnavailable(
-                        "operation status is unavailable"
-                    ) from error
+                    raise PackControlUnavailable("operation status is unavailable") from error
             if operation_id == "settings.read":
                 requested_profile_id = arguments.pop("profile_id", None)
                 if selected_profile_id is not None and requested_profile_id is not None:
                     if str(selected_profile_id) != str(requested_profile_id):
-                        raise PackControlInvalidRequest(
-                            "browsing Profile selectors disagree"
-                        )
+                        raise PackControlInvalidRequest("browsing Profile selectors disagree")
                 requested_profile_id = (
-                    selected_profile_id
-                    if selected_profile_id is not None
-                    else requested_profile_id
+                    selected_profile_id if selected_profile_id is not None else requested_profile_id
                 )
                 _require_empty(arguments)
                 return self._runtime_surface.read_settings(
                     profile_id=(
-                        str(requested_profile_id)
-                        if requested_profile_id is not None
-                        else None
+                        str(requested_profile_id) if requested_profile_id is not None else None
                     )
                 )
             if operation_id.startswith("topology."):
@@ -765,42 +722,27 @@ class CapturedPackControlSession:
                     and requested_profile_id is not None
                     and str(selected_profile_id) != str(requested_profile_id)
                 ):
-                    raise PackControlInvalidRequest(
-                        "browsing Profile selectors disagree"
-                    )
+                    raise PackControlInvalidRequest("browsing Profile selectors disagree")
                 requested_profile_id = (
-                    selected_profile_id
-                    if selected_profile_id is not None
-                    else requested_profile_id
+                    selected_profile_id if selected_profile_id is not None else requested_profile_id
                 )
-                revision = _optional_string(
-                    arguments.pop("expected_profile_revision", None)
-                )
-                plan_digest = _optional_string(
-                    arguments.pop("expected_plan_digest", None)
-                )
+                revision = _optional_string(arguments.pop("expected_profile_revision", None))
+                plan_digest = _optional_string(arguments.pop("expected_plan_digest", None))
                 _require_empty(arguments)
                 return self._runtime_surface.read_advanced(
                     view,
                     expected_profile_revision=revision,
                     expected_plan_digest=plan_digest,
                     profile_id=(
-                        str(requested_profile_id)
-                        if requested_profile_id is not None
-                        else None
+                        str(requested_profile_id) if requested_profile_id is not None else None
                     ),
                 )
-            if (
-                operation_id == "profile.change.resolve"
-                and selected_profile_id is not None
-            ):
+            if operation_id == "profile.change.resolve" and selected_profile_id is not None:
                 requested_profile_id = arguments.get("profile_id")
-                if requested_profile_id is not None and str(
-                    requested_profile_id
-                ) != str(selected_profile_id):
-                    raise PackControlInvalidRequest(
-                        "browsing Profile selectors disagree"
-                    )
+                if requested_profile_id is not None and str(requested_profile_id) != str(
+                    selected_profile_id
+                ):
+                    raise PackControlInvalidRequest("browsing Profile selectors disagree")
                 arguments["profile_id"] = str(selected_profile_id)
             action = operation_id.removeprefix("profile.change.")
             handler = getattr(self._profile_changes, action)
@@ -837,9 +779,7 @@ class CapturedPackControlSession:
             supplied = arguments.get(key)
             if supplied is not None and not hmac.compare_digest(str(supplied), value):
                 if key == "profile_revision":
-                    raise PackControlStaleRevision(
-                        "captured profile_revision does not match"
-                    )
+                    raise PackControlStaleRevision("captured profile_revision does not match")
                 raise PackControlDigestMismatch(f"captured {key} does not match")
 
     def _capture_current_binding(self) -> tuple[_Binding, Any]:
@@ -899,9 +839,7 @@ class CapturedPackControlSession:
         _write_control_state(self._binding.profile_id, state)
         return {"pack_id": pack_id, "installed": True, **self._binding_payload()}
 
-    def _approval_candidate(
-        self, arguments: Mapping[str, Any], session_id: str
-    ) -> dict[str, Any]:
+    def _approval_candidate(self, arguments: Mapping[str, Any], session_id: str) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
         snapshot_digest = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
         candidate_id = secrets.token_urlsafe(32)
@@ -936,14 +874,10 @@ class CapturedPackControlSession:
             or candidate.profile_revision != self._binding.profile_revision
             or candidate.catalog_revision != self._binding.catalog_revision
         ):
-            raise PackControlStaleRevision(
-                "approval candidate binding is invalid or stale"
-            )
+            raise PackControlStaleRevision("approval candidate binding is invalid or stale")
         current_digest = _pack_snapshot(pack_id, resolve_pack_root(pack_id))
         if not hmac.compare_digest(current_digest, candidate.snapshot_digest):
-            raise PackControlDigestMismatch(
-                "Pack contents changed after approval was requested"
-            )
+            raise PackControlDigestMismatch("Pack contents changed after approval was requested")
         _persist_approval(
             pack_id,
             current_digest,
@@ -968,9 +902,7 @@ class CapturedPackControlSession:
         state, profile = _active_profile()
         active_pack_ids = [str(item) for item in profile.get("packs") or []]
         if pack_id == str(profile.get("base_pack") or ""):
-            raise PackControlUnapproved(
-                "the active Base Pack approval cannot be revoked"
-            )
+            raise PackControlUnapproved("the active Base Pack approval cannot be revoked")
         artifact_digest = _pack_manifest_artifact_digest(pack_id)
         from .authority.v4 import AuthorityStore
 
@@ -986,9 +918,7 @@ class CapturedPackControlSession:
                     reason=f"Pack approval revoked: {pack_id}",
                 )
         except Exception as error:
-            raise PackControlUnavailable(
-                "Pack approval revocation was not committed"
-            ) from error
+            raise PackControlUnavailable("Pack approval revocation was not committed") from error
 
         if pack_id in active_pack_ids:
             active_pack_ids.remove(pack_id)
@@ -1017,13 +947,9 @@ class CapturedPackControlSession:
             **self._binding_payload(),
         }
 
-    def _set_enabled(
-        self, arguments: Mapping[str, Any], enabled: bool
-    ) -> dict[str, Any]:
+    def _set_enabled(self, arguments: Mapping[str, Any], enabled: bool) -> dict[str, Any]:
         pack_id = _installed_pack(arguments, self._binding)
-        if not enabled and pack_id in _required_profile_pack_ids(
-            self._binding.profile_id
-        ):
+        if not enabled and pack_id in _required_profile_pack_ids(self._binding.profile_id):
             raise PackControlUnapproved("required Pack cannot be disabled")
         record = load_pack_catalog()[pack_id]
         approved, reason = _approval_status(pack_id, record, self._binding)
@@ -1055,13 +981,9 @@ class CapturedPackControlSession:
         catalog = self._catalog_payload(active_snapshot=active_snapshot)
         if not pack_id:
             return catalog
-        match = next(
-            (item for item in catalog["packs"] if item["pack_id"] == pack_id), None
-        )
+        match = next((item for item in catalog["packs"] if item["pack_id"] == pack_id), None)
         if match is None:
-            raise PackControlInvalidRequest(
-                "Pack is absent from the canonical v4 catalog"
-            )
+            raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
         return match
 
     def _dashboard(
@@ -1115,14 +1037,10 @@ def capture_pack_control_session(
     )
 
 
-def capture_pack_control_catalog(
-    *, active: Any | None = None
-) -> Mapping[str, Any]:
+def capture_pack_control_catalog(*, active: Any | None = None) -> Mapping[str, Any]:
     """Capture the authoritative lifecycle projection for the active Profile."""
 
-    binding = (
-        _capture_binding() if active is None else _binding_for_resolved(active.resolved)
-    )
+    binding = _capture_binding() if active is None else _binding_for_resolved(active.resolved)
     return _catalog_payload(binding, active_snapshot=active)
 
 
@@ -1223,10 +1141,8 @@ def _catalog_payload(
             if (
                 pack_id in active
                 and approved
-                and (operation["contract_id"], operation["operation_id"])
-                in plan_bindings
-                and (operation["contract_id"], operation["operation_id"])
-                in active_grant_bindings
+                and (operation["contract_id"], operation["operation_id"]) in plan_bindings
+                and (operation["contract_id"], operation["operation_id"]) in active_grant_bindings
             )
         }
         operations = [
@@ -1255,9 +1171,7 @@ def _catalog_payload(
                 "approval_issues": [] if approved else [reason or "approval_required"],
                 "artifact_digest": _record_digest(record),
                 "capabilities": _capability_projection(record),
-                "flows": [
-                    str(operation["operation_id"]) for operation in declared_operations
-                ],
+                "flows": [str(operation["operation_id"]) for operation in declared_operations],
                 "dependencies": sorted(
                     str(dependency) for dependency in (record.get("dependencies") or {})
                 ),
@@ -1284,9 +1198,7 @@ def _required_profile_pack_ids(
     if active_snapshot is not None:
         active_profile_id = str(active_snapshot.resolved.profile["profile_id"])
         if active_profile_id != profile_id:
-            raise PackControlDigestMismatch(
-                "active Profile does not match the lifecycle binding"
-            )
+            raise PackControlDigestMismatch("active Profile does not match the lifecycle binding")
     from .bootstrap.profile_capture import host_profile_catalog
 
     catalog = host_profile_catalog()
@@ -1299,9 +1211,7 @@ def _required_profile_pack_ids(
         current_id = pending.pop(0)
         manifest = catalog.packs.get(current_id)
         if manifest is None:
-            raise PackControlDigestMismatch(
-                "selected Profile dependency is unavailable"
-            )
+            raise PackControlDigestMismatch("selected Profile dependency is unavailable")
         for dependency_id in manifest["requirements"]["pack_dependencies"]:
             dependency = str(dependency_id)
             if dependency not in selected:
@@ -1329,9 +1239,7 @@ def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:
 
     plan_bindings: set[tuple[str, str, str]] = set()
     for item in state.get("resolved_plan", {}).get("bindings") or []:
-        if not isinstance(item, Mapping) or not isinstance(
-            item.get("function_principal"), Mapping
-        ):
+        if not isinstance(item, Mapping) or not isinstance(item.get("function_principal"), Mapping):
             continue
         try:
             principal = FunctionPrincipal.from_dict(item["function_principal"])
@@ -1344,18 +1252,12 @@ def _active_grant_bindings(state: Mapping[str, Any]) -> set[tuple[str, str]]:
                 principal.principal_id,
             )
         )
-    if (
-        not expected_activation
-        or not expected_profile
-        or not isinstance(expected_epoch, int)
-    ):
+    if not expected_activation or not expected_profile or not isinstance(expected_epoch, int):
         return set()
     from .authority.v4 import AuthorityStore
 
     try:
-        with AuthorityStore(
-            _user_data_root() / "authority" / "v4.sqlite3"
-        ) as authority:
+        with AuthorityStore(_user_data_root() / "authority" / "v4.sqlite3") as authority:
             result: set[tuple[str, str]] = set()
             for grant in authority.list_grants():
                 if (
@@ -1390,9 +1292,7 @@ def _capability_projection(record: Mapping[str, Any]) -> list[dict[str, str]]:
             "name": capability,
             "description": f"Pack-declared capability: {capability}.",
         }
-        for capability in sorted(
-            {str(item).strip() for item in capabilities if str(item).strip()}
-        )
+        for capability in sorted({str(item).strip() for item in capabilities if str(item).strip()})
     ]
 
 
@@ -1448,9 +1348,7 @@ def _capture_binding(active: Any | None = None) -> _Binding:
     catalog = load_pack_catalog()
     selected = tuple(str(item or "").strip() for item in profile.get("packs") or [])
     if not selected or len(selected) != len(set(selected)):
-        raise PackControlDigestMismatch(
-            "active v4 Profile effective set is empty or duplicated"
-        )
+        raise PackControlDigestMismatch("active v4 Profile effective set is empty or duplicated")
     if any(pack_id not in catalog for pack_id in selected):
         raise PackControlDigestMismatch("active v4 Profile contains an unknown Pack")
     for pack_id in selected:
@@ -1501,8 +1399,7 @@ def _active_profile(
         "packs": [
             str(item["pack_id"])
             for item in resolved["packs"]
-            if item.get("role") != "application"
-            and str(item["pack_id"]) in installable_pack_ids
+            if item.get("role") != "application" and str(item["pack_id"]) in installable_pack_ids
         ],
     }
     _safe_identity(profile.get("profile_id"), "Profile ID")
@@ -1542,11 +1439,7 @@ def resolve_profile_pack_set(
         host_profile_catalog,
     )
 
-    user_data = (
-        Path(user_data_root).resolve()
-        if user_data_root is not None
-        else _user_data_root()
-    )
+    user_data = Path(user_data_root).resolve() if user_data_root is not None else _user_data_root()
     trusted_active_resolution = profile_id is None
     if profile_id is None:
         from .bootstrap.profile_capture import capture_active_profile
@@ -1565,9 +1458,7 @@ def resolve_profile_pack_set(
         expected_bundle_lock_digest,
     )
     if any(value is not None for value in authoritative_bindings):
-        if not all(
-            isinstance(value, str) and value for value in authoritative_bindings
-        ):
+        if not all(isinstance(value, str) and value for value in authoritative_bindings):
             raise PackControlDigestMismatch("Profile catalog binding is incomplete")
         try:
             require_profile_catalog_binding(
@@ -1594,9 +1485,7 @@ def resolve_profile_pack_set(
         if manifest is None:
             record = load_pack_catalog().get(pack_id)
             if record is None:
-                raise PackControlInvalidRequest(
-                    "Pack is absent from the canonical v4 catalog"
-                )
+                raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
             root = resolve_pack_root(pack_id)
             manifest_path = root / "pack.v4.json"
             if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -1604,29 +1493,20 @@ def resolve_profile_pack_set(
             try:
                 manifest = validate_document(manifest_path.read_bytes(), "pack")
             except Exception as error:
-                raise PackControlDigestMismatch(
-                    "Pack v4 manifest is invalid"
-                ) from error
-            external_normal = (
-                record.get("authority") == "host-signed-external-normal-v4"
-            )
+                raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
+            external_normal = record.get("authority") == "host-signed-external-normal-v4"
             if manifest["pack"]["id"] != pack_id or (
                 external_normal
                 and (
                     manifest["pack"]["kind"] != "normal_sandbox"
-                    or manifest["pack"]["artifact_digest"]
-                    != record.get("artifact_digest")
+                    or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
                 )
             ):
-                raise PackControlDigestMismatch(
-                    "Pack v4 manifest identity is inconsistent"
-                )
+                raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
             external_packs[pack_id] = manifest
         dependencies = set(manifest["requirements"]["pack_dependencies"])
         pending.extend(
-            dependency
-            for dependency in sorted(dependencies)
-            if dependency not in requested_closure
+            dependency for dependency in sorted(dependencies) if dependency not in requested_closure
         )
     runtime = require_profile_runtime()
     catalog = runtime.catalog_with_packs(catalog, external_packs)
@@ -1635,13 +1515,9 @@ def resolve_profile_pack_set(
         raise PackControlInvalidRequest("selected Profile is unavailable")
     if all(value is not None for value in authoritative_bindings):
         definition_pack_ids = {
-            str(item["pack_id"])
-            for item in source["packs"]
-            if item.get("role") != "application"
+            str(item["pack_id"]) for item in source["packs"] if item.get("role") != "application"
         }
-        if set(pack_ids) != definition_pack_ids or len(pack_ids) != len(
-            definition_pack_ids
-        ):
+        if set(pack_ids) != definition_pack_ids or len(pack_ids) != len(definition_pack_ids):
             raise PackControlDigestMismatch(
                 "selected Profile Pack set does not match its canonical definition"
             )
@@ -1657,9 +1533,7 @@ def resolve_profile_pack_set(
         effective_bundle_root = Path(catalog.root)
         bundle_lock_digest = (
             "sha256:"
-            + hashlib.sha256(
-                (effective_bundle_root / "bundle.lock.json").read_bytes()
-            ).hexdigest()
+            + hashlib.sha256((effective_bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
         )
         snapshot_digest = _authority_snapshot_digest(authority, bundle_lock_digest)
         bindings = {
@@ -1667,8 +1541,7 @@ def resolve_profile_pack_set(
             for edge in source["requested_edges"]
         }
         verified_digests = {
-            str(manifest["pack"]["artifact_digest"])
-            for manifest in catalog.packs.values()
+            str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()
         }
         baseline = runtime.resolve_profile(
             catalog,
@@ -1686,23 +1559,31 @@ def resolve_profile_pack_set(
         if all(value is not None for value in authoritative_bindings):
             requested = tuple(dict.fromkeys((*requested, *sorted(mandatory))))
         if not mandatory.issubset(requested):
-            raise PackControlUnapproved(
-                "the selected Profile Pack set omits a mandatory Pack"
-            )
+            raise PackControlUnapproved("the selected Profile Pack set omits a mandatory Pack")
+        optional_pack_ids = tuple(pack_id for pack_id in requested if pack_id not in mandatory)
+        optional_dependencies = {
+            str(dependency_id)
+            for pack_id in optional_pack_ids
+            for dependency_id in catalog.packs[pack_id]["requirements"]["pack_dependencies"]
+            if str(dependency_id) in optional_pack_ids
+        }
+        # A resolved Profile persists its complete effective Pack closure.
+        # Only closure roots were selected by the user; projecting every
+        # dependency again as a Shell-owned optional Pack would give the same
+        # Pack conflicting callers and broader authority than its signed
+        # parent dependency permits.
         additional_pack_ids = tuple(
-            pack_id for pack_id in requested if pack_id not in mandatory
+            pack_id for pack_id in optional_pack_ids if pack_id not in optional_dependencies
         )
+        if optional_pack_ids and not additional_pack_ids:
+            raise PackControlUnapproved("optional Pack dependency closure has no root")
         # Optional Pack operations are part of the immutable resolved Profile,
         # so mint the exact authority references before resolving the plan.
         # The resolver derives only the selected Pack/dependency closure and
         # binds every operation to the selected Shell caller.
-        for edge in runtime.dynamic_profile_edges(
-            catalog, profile_id, additional_pack_ids
-        ):
+        for edge in runtime.dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
-        approved_digests = {
-            str(item["artifact_digest"]) for item in baseline.lock["effective_set"]
-        }
+        approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
         installed = _read_control_state(profile_id)
         binding = _binding_for_resolved(baseline)
         selected_optional = requested_closure - mandatory
@@ -1754,11 +1635,7 @@ def activate_resolved_profile_pack_set(
         ActiveProfileStoreConflict,
     )
 
-    user_data = (
-        Path(user_data_root).resolve()
-        if user_data_root is not None
-        else _user_data_root()
-    )
+    user_data = Path(user_data_root).resolve() if user_data_root is not None else _user_data_root()
     profile_id = str(resolved.profile["profile_id"])
     workspace = _ensure_profile_workspace(user_data, profile_id)
     pointers = ActiveProfileStore(user_data)
@@ -1777,9 +1654,7 @@ def activate_resolved_profile_pack_set(
     candidate_lock_digest = str(resolved.lock["lock_digest"])
     pointer_is_candidate = predecessor is not None and (
         predecessor.profile_id == profile_id
-        and hmac.compare_digest(
-            predecessor.profile_revision, candidate_profile_revision
-        )
+        and hmac.compare_digest(predecessor.profile_revision, candidate_profile_revision)
         and hmac.compare_digest(predecessor.plan_digest, candidate_plan_digest)
         and hmac.compare_digest(predecessor.lock_digest, candidate_lock_digest)
         and hmac.compare_digest(predecessor.activation_id, activation_id)
@@ -1789,18 +1664,12 @@ def activate_resolved_profile_pack_set(
         and hmac.compare_digest(predecessor.plan_digest, expected_plan_digest)
         and hmac.compare_digest(predecessor.activation_id, expected_activation_id)
     )
-    if (
-        not expects_no_active
-        and not predecessor_is_expected
-        and not pointer_is_candidate
-    ):
+    if not expects_no_active and not predecessor_is_expected and not pointer_is_candidate:
         if predecessor is None:
             raise PackControlStaleRevision("reviewed Profile predecessor is absent")
         if (
             predecessor.profile_id == profile_id
-            and hmac.compare_digest(
-                predecessor.profile_revision, candidate_profile_revision
-            )
+            and hmac.compare_digest(predecessor.profile_revision, candidate_profile_revision)
             and hmac.compare_digest(predecessor.plan_digest, candidate_plan_digest)
         ):
             raise require_profile_runtime().denied("activation predecessor is stale")
@@ -1824,27 +1693,21 @@ def activate_resolved_profile_pack_set(
             active = store.load_active_snapshot()
             if pointer_is_candidate:
                 if (
-                    not hmac.compare_digest(
-                        str(active.activation["activation_id"]), activation_id
-                    )
+                    not hmac.compare_digest(str(active.activation["activation_id"]), activation_id)
                     or active.resolved != resolved
                 ):
                     raise PackControlConflict(
                         "Host active pointer is bound to another Profile activation"
                     )
                 activation = dict(active.activation)
-            elif hmac.compare_digest(
-                str(active.activation["activation_id"]), activation_id
-            ):
+            elif hmac.compare_digest(str(active.activation["activation_id"]), activation_id):
                 if active.resolved != resolved:
                     raise PackControlConflict(
                         "activation identity is bound to another resolved Profile"
                     )
                 activation = dict(active.activation)
             else:
-                created_at = (
-                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                )
+                created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 activation = store.activate(
                     resolved,
                     activation_id=activation_id,
@@ -1852,12 +1715,8 @@ def activate_resolved_profile_pack_set(
                     expected_predecessor_profile_revision=str(
                         active.resolved.plan["profile_revision"]
                     ),
-                    expected_predecessor_plan_digest=str(
-                        active.resolved.plan["plan_digest"]
-                    ),
-                    expected_predecessor_activation_id=str(
-                        active.activation["activation_id"]
-                    ),
+                    expected_predecessor_plan_digest=str(active.resolved.plan["plan_digest"]),
+                    expected_predecessor_activation_id=str(active.activation["activation_id"]),
                 )
         else:
             if pointer_is_candidate:
@@ -1879,17 +1738,13 @@ def activate_resolved_profile_pack_set(
     try:
         envelope = json.loads(envelope_path.read_bytes())
     except (OSError, json.JSONDecodeError) as error:
-        raise PackControlConflict(
-            "activated Profile envelope is unavailable"
-        ) from error
+        raise PackControlConflict("activated Profile envelope is unavailable") from error
     if not pointer_is_candidate:
         try:
             pointers.commit_activation(
                 activation,
                 activation_snapshot=envelope,
-                activation_snapshot_path=envelope_path.relative_to(
-                    user_data
-                ).as_posix(),
+                activation_snapshot_path=envelope_path.relative_to(user_data).as_posix(),
                 expected=predecessor,
                 catalog_revision=str(resolved.plan["catalog_revision"]),
             )
@@ -1901,9 +1756,7 @@ def activate_resolved_profile_pack_set(
             current = pointers.require(verify_snapshot=True)
             if not (
                 current.profile_id == profile_id
-                and hmac.compare_digest(
-                    current.profile_revision, candidate_profile_revision
-                )
+                and hmac.compare_digest(current.profile_revision, candidate_profile_revision)
                 and hmac.compare_digest(current.plan_digest, candidate_plan_digest)
                 and hmac.compare_digest(current.lock_digest, candidate_lock_digest)
                 and hmac.compare_digest(current.activation_id, activation_id)
@@ -1937,9 +1790,7 @@ def _activate_pack_set(state: Mapping[str, Any], pack_ids: list[str]) -> None:
         ),
         expected_profile_revision=str(plan.get("profile_revision") or ""),
         expected_plan_digest=str(plan.get("plan_digest") or ""),
-        expected_activation_id=str(
-            state.get("activation", {}).get("activation_id") or ""
-        ),
+        expected_activation_id=str(state.get("activation", {}).get("activation_id") or ""),
     )
 
 
@@ -1958,9 +1809,7 @@ def _persistence_store() -> SecureDirectory:
             try:
                 store = SecureDirectory(root, create=True)
             except (OSError, SecurePersistenceError) as error:
-                raise PackControlUnavailable(
-                    "Pack control persistence is unavailable"
-                ) from error
+                raise PackControlUnavailable("Pack control persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
         return store
 
@@ -1976,9 +1825,7 @@ def _approval_store(profile_id: str) -> SecureDirectory:
             try:
                 store = SecureDirectory(root, create=True)
             except (OSError, SecurePersistenceError) as error:
-                raise PackControlUnavailable(
-                    "Pack approval persistence is unavailable"
-                ) from error
+                raise PackControlUnavailable("Pack approval persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
         return store
 
@@ -2024,16 +1871,12 @@ def _read_control_envelope(profile_id: str) -> dict[str, Any]:
         value = json.loads(store.read_bytes(relative))
     except (OSError, SecurePersistenceError, json.JSONDecodeError) as error:
         raise PackControlUnavailable("Pack control state is unreadable") from error
-    if not isinstance(value, Mapping) or not isinstance(
-        value.get("installed"), Mapping
-    ):
+    if not isinstance(value, Mapping) or not isinstance(value.get("installed"), Mapping):
         raise PackControlDigestMismatch("Pack control state is invalid")
     return dict(value)
 
 
-def _migrate_control_envelope(
-    profile_id: str, envelope: Mapping[str, Any]
-) -> dict[str, Any]:
+def _migrate_control_envelope(profile_id: str, envelope: Mapping[str, Any]) -> dict[str, Any]:
     """Commit the legacy Pack-state migration as one atomic replacement."""
 
     from .profile_definition_store_v4 import ProfileDefinitionStore
@@ -2058,9 +1901,9 @@ def _migrate_control_envelope(
             store = _approval_store(profile_id)
             relative = _approval_relative(profile_id, legacy_id)
             if store.exists(relative):
-                approval_digests[legacy_id] = "sha256:" + hashlib.sha256(
-                    store.read_bytes(relative)
-                ).hexdigest()
+                approval_digests[legacy_id] = (
+                    "sha256:" + hashlib.sha256(store.read_bytes(relative)).hexdigest()
+                )
         except (OSError, SecurePersistenceError):
             continue
     migrated, receipt = migrate_pack_control_envelope(
@@ -2106,9 +1949,7 @@ def _atomic_json(
     try:
         (store or _persistence_store()).write_bytes_atomic(path, data)
     except (OSError, SecurePersistenceError) as error:
-        raise PackControlUnavailable(
-            "Pack control persistence is unavailable"
-        ) from error
+        raise PackControlUnavailable("Pack control persistence is unavailable") from error
 
 
 def _pack(arguments: Mapping[str, Any]) -> tuple[str, Mapping[str, Any], Path]:
@@ -2155,21 +1996,13 @@ def _require_install_binding(
         or entry.get("pack_artifact_digest") != pack_artifact_digest
         or entry.get("content_digest") != content_digest
     ):
-        raise PackControlDigestMismatch(
-            f"installed Pack binding is stale or tampered: {pack_id}"
-        )
+        raise PackControlDigestMismatch(f"installed Pack binding is stale or tampered: {pack_id}")
 
 
 def _approval_path(profile_id: str, pack_id: str) -> Path:
     _safe_identity(profile_id, "Profile ID")
     _safe_identity(pack_id, "Pack ID")
-    return (
-        _user_data_root()
-        / "pack_control"
-        / "approvals"
-        / profile_id
-        / f"{pack_id}.json"
-    )
+    return _user_data_root() / "pack_control" / "approvals" / profile_id / f"{pack_id}.json"
 
 
 def _approval_relative(profile_id: str, pack_id: str) -> Path:
@@ -2181,9 +2014,7 @@ def _approval_relative(profile_id: str, pack_id: str) -> Path:
 def _authority_key() -> bytes:
     from .hmac_key_manager import generate_or_load_signing_key
 
-    return generate_or_load_signing_key(
-        _user_data_root() / "pack_control" / ".authority_key"
-    )
+    return generate_or_load_signing_key(_user_data_root() / "pack_control" / ".authority_key")
 
 
 def _user_data_root() -> Path:
@@ -2313,9 +2144,7 @@ def _approval_status(
     from .authority.v4 import AuthorityStore
 
     try:
-        with AuthorityStore(
-            _user_data_root() / "authority" / "v4.sqlite3"
-        ) as authority:
+        with AuthorityStore(_user_data_root() / "authority" / "v4.sqlite3") as authority:
             if authority.is_revoked("approval", revision):
                 return False, "approval_revoked"
     except Exception:
@@ -2425,9 +2254,7 @@ def _pack_snapshot(pack_id: str, root: Path) -> str:
                 continue
             resolved = path.resolve(strict=True)
             if not resolved.is_relative_to(resolved_root):
-                raise PackControlDigestMismatch(
-                    "cataloged Pack path escapes its boundary"
-                )
+                raise PackControlDigestMismatch("cataloged Pack path escapes its boundary")
             relative = path.relative_to(root).as_posix()
             if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
                 continue
@@ -2464,17 +2291,13 @@ def _optional_string(value: object) -> str | None:
 
 def _require_empty(value: Mapping[str, Any]) -> dict[str, Any]:
     if value:
-        raise PackControlInvalidRequest(
-            "control presentation payload has unknown fields"
-        )
+        raise PackControlInvalidRequest("control presentation payload has unknown fields")
     return {}
 
 
 def _safe_identity(value: object, label: str) -> str:
     normalized = _required(value, label)
-    allowed = frozenset(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-    )
+    allowed = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
     if (
         len(normalized) > 128
         or normalized in {".", ".."}

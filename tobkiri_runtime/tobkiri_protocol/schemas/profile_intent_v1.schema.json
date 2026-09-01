@@ -73,7 +73,8 @@
           "target_provider_id": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/id"},
           "contract_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"},
           "operation_id": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/common.v1.schema.json#/$defs/id"},
-          "requested_scope_template": {"$ref": "#/$defs/requestedScopeIntent"}
+          "requested_scope_template": {"$ref": "#/$defs/requestedScopeIntent"},
+          "authority_mode": {"enum": ["profile_grant", "interactive_only"]}
         }
       }
     },

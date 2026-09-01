@@ -1,13 +1,13 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
   "pack_id": "rumi_shell_execute_pack",
-  "source_identity": "sha256:d89b484115a0bf3754e366f2b44cd87f793d6a9f059c800a57d96b5d46f57cae",
+  "source_identity": "sha256:04a76ce1e9c96579702a6c1f7a19f85d76cb45e65d57b4582432eba72281b459",
   "variants": [
     {
       "variant_id": "rumi_shell_execute_pack.shell-execute.service.python",
       "function_id": "rumi_shell_execute_pack.shell-execute.service",
       "implementation_path": "runtime/execute.py",
-      "implementation_digest": "sha256:2563a8f79d25909e701dd3662c623319a28eda0308ea4e5d1ccbfd45bb4be7ad",
+      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -19,9 +19,111 @@
         {
           "contract_id": "tobkiri.service.shell.execute.v1",
           "contract_version": "1.0.0",
-          "revision_digest": "sha256:137dfb5853ef4b6a9077ab8ca01055a9fa83a374e2119236c3e368df6a4a5b8d",
+          "revision_digest": "sha256:fff0c0fa594d2dbfa06859e2f6c14748978cbb75dff4ec133d390f5001e1eab9",
           "operation_id": "rumi_shell_execute_pack.shell-execute",
           "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "arguments": {
+                "type": "object"
+              },
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "env": {
+                "type": "object"
+              },
+              "plan_digest": {
+                "type": "string"
+              },
+              "redacted_plan": {
+                "type": "object"
+              },
+              "shell": {
+                "type": "boolean"
+              },
+              "timeout": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "output_schema": {
+            "type": "object"
+          },
+          "error_schema": {
+            "type": "object"
+          },
+          "effect_class": "privileged",
+          "timeout_default_ms": 30000,
+          "timeout_hard_max_ms": 300000,
+          "idempotency": "none"
+        }
+      ]
+    },
+    {
+      "variant_id": "rumi_shell_execute_pack.shell-prepare.service.python",
+      "function_id": "rumi_shell_execute_pack.shell-prepare.service",
+      "implementation_path": "runtime/execute.py",
+      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+      "execution_kind": "host_extension",
+      "platform": "any",
+      "architecture": "any",
+      "runtime_abi": "python3.13",
+      "backend": "tobkiri.python-host-v4",
+      "materialization_mode": "on_demand",
+      "execution_domain_profile": "host.extension.default.v1",
+      "operations": [
+        {
+          "contract_id": "tobkiri.service.shell.execute.v1",
+          "contract_version": "1.0.0",
+          "revision_digest": "sha256:fff0c0fa594d2dbfa06859e2f6c14748978cbb75dff4ec133d390f5001e1eab9",
+          "operation_id": "rumi_shell_execute_pack.shell-prepare",
+          "input_schema": {
+            "additionalProperties": false,
+            "properties": {
+              "arguments": {
+                "type": "object"
+              },
+              "command": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "env": {
+                "type": "object"
+              },
+              "plan_digest": {
+                "type": "string"
+              },
+              "redacted_plan": {
+                "type": "object"
+              },
+              "shell": {
+                "type": "boolean"
+              },
+              "timeout": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "workspace_id": {
+                "type": "string"
+              }
+            },
             "type": "object"
           },
           "output_schema": {
@@ -38,6 +140,6 @@
       ]
     }
   ],
-  "materialization_catalog_digest": "sha256:00863fe42ab68be83dcb3b5ef29a22787906c9c251d52747ff1fbc9a0bc1a915",
-  "catalog_digest": "sha256:b7ba4aaa4e9d5bcd923cfdd7ed0df53a6c2058b82e223464d7beff5ea11bd8b9"
+  "materialization_catalog_digest": "sha256:f031db77c4a11e446e2e652c8ce8af5b308c039320a8d7611567815ff262f62b",
+  "catalog_digest": "sha256:5ddffccdb487449d57e822d61ccdecc844044974a4f6abeb4e3c2e099223e527"
 }

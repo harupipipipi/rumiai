@@ -62,7 +62,7 @@ def test_connector_gateway_setup_pack_discoverable_and_overlap_scoped() -> None:
     assert candidate.overlap_policy["connector_execution"] == "do_not_override_installed_connector_tools"
     assert candidate.overlap_policy["mcp_gateway"] == "mcp_servers_use_defaultspack_mcp_registry"
     assert candidate.overlap_policy["workflow_delivery"] == "handoff_schedules_to_defaultspack_scheduler"
-    assert candidate.defaultspack_promotion["eligible"] is False
+    assert candidate.base_pack_promotion["eligible"] is False
 
 
 def test_connector_gateway_docs_no_secrets_and_boundary_notes() -> None:

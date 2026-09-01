@@ -12,6 +12,17 @@ from urllib.parse import unquote
 
 
 _COMMAND_NAMESPACE = "/api/command-protocol/v1"
+_HIGH_RISK_ROUTE = f"{_COMMAND_NAMESPACE}/high-risk"
+_HIGH_RISK_TARGET = {
+    "contribution_id": "defaults.command-protocol.high-risk",
+    "contract_id": "tobkiri.service.command.high-risk.v1",
+    "operation_id": "high_risk_command.manage",
+    "provider_id": "rumi_command_protocol_pack.high-risk-command.service",
+    "function_id": "rumi_command_protocol_pack.high-risk-command.service",
+}
+_HIGH_RISK_PAYLOAD_KEYS = frozenset(
+    {"phase", "invocation_id", "command_ref", "arguments", "presentation"}
+)
 
 # These aliases are conservative test policy, not production URL rewriting.
 COMMAND_PROTOCOL_HTTP_CASES = (
@@ -45,9 +56,7 @@ def is_conservative_command_protocol_alias(path: object) -> bool:
             break
         normalized = decoded
     normalized = re.sub(r"/+", "/", normalized.replace("\\", "/")).casefold()
-    return normalized == _COMMAND_NAMESPACE or normalized.startswith(
-        f"{_COMMAND_NAMESPACE}/"
-    )
+    return normalized == _COMMAND_NAMESPACE or normalized.startswith(f"{_COMMAND_NAMESPACE}/")
 
 
 def route_pattern_exposes_command_protocol(pattern: object) -> bool:
@@ -63,8 +72,7 @@ def route_pattern_exposes_command_protocol(pattern: object) -> bool:
     except re.error:
         return True
     return any(
-        compiled.fullmatch(path) is not None
-        for _method, path, _body in COMMAND_PROTOCOL_HTTP_CASES
+        compiled.fullmatch(path) is not None for _method, path, _body in COMMAND_PROTOCOL_HTTP_CASES
     )
 
 
@@ -152,10 +160,7 @@ def _assert_only_selected_route_map(
         schema = document.get("schema") if isinstance(document, dict) else None
         is_route_map = isinstance(document, dict) and (
             isinstance(document.get("routes"), list)
-            or (
-                isinstance(schema, str)
-                and schema.startswith("io.tobkiri.frontend-contract-map.")
-            )
+            or (isinstance(schema, str) and schema.startswith("io.tobkiri.frontend-contract-map."))
         )
         if not is_route_map:
             continue
@@ -171,20 +176,35 @@ def _assert_only_selected_route_map(
 def command_protocol_binding_findings(
     bindings: tuple[Any, ...],
 ) -> list[dict[str, object]]:
-    """Return exact signed binding paths that expose Command Protocol."""
+    """Return Command Protocol bindings outside the captured V4 adapter."""
 
     findings: list[dict[str, object]] = []
     for binding in bindings:
         path = getattr(binding, "path", None)
-        if route_pattern_exposes_command_protocol(path):
-            findings.append(
-                {
-                    "method": getattr(binding, "method", None),
-                    "route": path,
-                    "artifact_path": getattr(binding, "artifact_path", None),
-                    "artifact_digest": getattr(binding, "artifact_digest", None),
-                }
+        if not route_pattern_exposes_command_protocol(path):
+            continue
+        targets = tuple(getattr(binding, "targets", ()))
+        exact_high_risk = (
+            getattr(binding, "method", "").upper() == "POST"
+            and path == _HIGH_RISK_ROUTE
+            and getattr(binding, "presentation", None) == "broker_result"
+            and len(targets) == 1
+            and all(
+                getattr(targets[0], field, None) == expected
+                for field, expected in _HIGH_RISK_TARGET.items()
             )
+            and getattr(targets[0], "allowed_payload_keys", None) == _HIGH_RISK_PAYLOAD_KEYS
+        )
+        if exact_high_risk:
+            continue
+        findings.append(
+            {
+                "method": getattr(binding, "method", None),
+                "route": path,
+                "artifact_path": getattr(binding, "artifact_path", None),
+                "artifact_digest": getattr(binding, "artifact_digest", None),
+            }
+        )
     return findings
 
 
