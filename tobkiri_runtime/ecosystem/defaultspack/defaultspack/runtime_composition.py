@@ -47,6 +47,7 @@ def defaultspack_runtime_capture_inputs(
     active: object | None = None,
     *,
     packvm_provisioner: object | None = None,
+    bundle_root: Path | None = None,
 ) -> RuntimeCaptureInputs:
     """Select one signed Defaultspack application map for a runtime refresh."""
 
@@ -67,7 +68,7 @@ def defaultspack_runtime_capture_inputs(
     )
 
     runtime_root = Path(__file__).resolve().parents[3]
-    bundle_root = defaultspack_profile_bundle_root()
+    bundle_root = bundle_root or defaultspack_profile_bundle_root()
     catalog = BundledCatalog.load(bundle_root)
     application_id = _application_id(active, catalog.packs)
     application = catalog.packs.get(application_id)
@@ -131,7 +132,7 @@ def defaultspack_packvm_backend_factory(
     return build
 
 
-def create_defaultspack_kernel() -> Kernel:
+def create_defaultspack_kernel(*, bundle_root: Path | None = None) -> Kernel:
     """Compose the generic Host bootstrap with Defaultspack-owned services."""
 
     from core_runtime.bootstrap.runtime import Kernel
@@ -168,6 +169,7 @@ def create_defaultspack_kernel() -> Kernel:
         runtime_capture_factory=partial(
             defaultspack_runtime_capture_inputs,
             packvm_provisioner=lifecycle,
+            bundle_root=bundle_root,
         ),
         capability_snapshot_factory=defaultspack_capability_snapshot,
         application_presentation=DefaultspackHTTPPresentation(),

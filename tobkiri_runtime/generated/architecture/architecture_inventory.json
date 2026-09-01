@@ -10113,7 +10113,7 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:0c57ae1d2c3c852b93dea55fe00d2a7e8959524aa64d805440ced67a34df8e42",
+        "evidence_digest": "sha256:ef21f77a47cbd9f95943b888f64f938441ca2eaf7d9d47150800747080730c73",
         "line": 10,
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/runtime_composition.py",
         "rule_id": "legacy_direct_pack_route"
@@ -18403,7 +18403,7 @@
     ]
   },
   "repository": {
-    "commit": "32ac1859e32144298539ace66cd7d3eda9b23a3e",
+    "commit": "823f5cadae46a20de5f0041294173b63534435b4",
     "tree_digest": "6425c52efd0d6c588020a512111ac199356fb0992680ceec483ed97f83e03333"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

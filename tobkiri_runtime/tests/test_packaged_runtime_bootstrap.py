@@ -42,7 +42,9 @@ def _free_port() -> int:
 def _kernel() -> Kernel:
     """Build the application-composed Host rather than an unconfigured core."""
 
-    return create_defaultspack_kernel()
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    return create_defaultspack_kernel(bundle_root=packaged_profile_bundle_root())
 
 
 def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(

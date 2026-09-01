@@ -96,8 +96,8 @@
     {
       "path": "ecosystem/defaultspack/defaultspack/runtime_composition.py",
       "type": "regular-file",
-      "size": 8780,
-      "sha256": "0c57ae1d2c3c852b93dea55fe00d2a7e8959524aa64d805440ced67a34df8e42",
+      "size": 8903,
+      "sha256": "ef21f77a47cbd9f95943b888f64f938441ca2eaf7d9d47150800747080730c73",
       "executable": false
     },
     {
@@ -1280,7 +1280,7 @@
       "path": "scripts/quality/evidence/pack_migration_proof.v1.json",
       "type": "regular-file",
       "size": 847745,
-      "sha256": "ff4d80666b293ea845835cdab48d3ae7de995a39a92a160911b46e9cc2fd4545",
+      "sha256": "d27d31bccd4a2565c3a23cd92abbd7642d6572f2442c92d6fbc22640436fd5fc",
       "executable": false
     },
     {
