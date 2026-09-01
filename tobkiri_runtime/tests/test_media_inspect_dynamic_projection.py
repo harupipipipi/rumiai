@@ -25,6 +25,12 @@ from core_runtime.bootstrap.profile_capture import (
 from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
     load_frontend_contract_bindings,
 )
+from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+    defaultspack_capability_snapshot,
+)
+from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+    DefaultspackHTTPPresentation,
+)
 from ecosystem.defaultspack.defaultspack.runtime_composition import (
     defaultspack_activation_snapshot_loader,
 )
@@ -416,6 +422,8 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         panel_auth_manager=PanelAuthManager(bootstrap_secret="media-test-secret"),
         dispatch_session=session,
         contract_bindings=bindings,
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
         host_contract=host_contract_for_session(session),
         workspace_binding_resolver=lambda profile_id: capture_selected_workspace_binding(
             profile_id,
