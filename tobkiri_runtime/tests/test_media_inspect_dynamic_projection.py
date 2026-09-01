@@ -94,6 +94,23 @@ def _capture_control_session(**kwargs):
         runtime_surface_factory=create_runtime_surface_services,
         **kwargs,
     )
+
+
+def _capture_defaultspack_dispatch(active: object, **kwargs: object):
+    """Compose production dispatch with Defaultspack-owned dependencies."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_production_dispatch(
+        active,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 CONVERSATION_CALLER = "defaultspack.conversation"
 MEDIA_CALLER = "rumi_media_inspect_service_pack.media-inspect.service"
 WORKSPACE_CONTRACT = "tobkiri.resource.workspace.v1"
@@ -307,13 +324,12 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     authority_setup = AuthorityStore(authority_path)
     binding = _workspace_binding(store)
     backend = _MediaBackend(store, binding)
-    authority_session = capture_production_dispatch(
+    authority_session = _capture_defaultspack_dispatch(
         active,
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority_setup,
         backends=BackendRegistry((backend,)),
-        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
     )
     for contract_id, operation_id in (
         (MEDIA_CONTRACT, MEDIA_OPERATION),
@@ -334,12 +350,11 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     authority_session.close()
 
     authority = AuthorityStore(authority_path)
-    session = capture_production_dispatch(
+    session = _capture_defaultspack_dispatch(
         active,
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
-        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
     )
 
     catalog = BundledCatalog.load(_bundle_root())

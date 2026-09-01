@@ -49,6 +49,24 @@ def _capture_control_session(**kwargs):
     )
 
 
+def _capture_defaultspack_dispatch(active: object, **kwargs: object):
+    """Compose production dispatch with Defaultspack-owned dependencies."""
+
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_activation_snapshot_loader,
+    )
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_production_dispatch(
+        active,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 def _invoke(session, contract: str, operation: str, payload: dict | None = None):
     return session.invoke(
         contract,
@@ -158,7 +176,7 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
     authority = AuthorityStore(
         tmp_path / "user-data" / "authority" / "v4.sqlite3"
     )
-    restarted = capture_production_dispatch(
+    restarted = _capture_defaultspack_dispatch(
         restarted_active,
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
@@ -302,7 +320,7 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
     finally:
         restarted.close()
 
-    restarted_again = capture_production_dispatch(
+    restarted_again = _capture_defaultspack_dispatch(
         capture_default_profile(),
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
