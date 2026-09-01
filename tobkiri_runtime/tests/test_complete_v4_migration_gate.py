@@ -3112,6 +3112,11 @@ import traceback
 
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+    install_defaultspack_profile_runtime,
+)
+
+install_defaultspack_profile_runtime()
 
 observed = []
 server = None

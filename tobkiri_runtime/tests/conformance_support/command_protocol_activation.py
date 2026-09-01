@@ -71,9 +71,15 @@ def route_pattern_exposes_command_protocol(pattern: object) -> bool:
 def load_current_signed_application_bindings() -> tuple[Any, ...]:
     """Use the production capture loader for the verified bundled Application."""
 
-    from core_runtime.pack_api_server import _load_production_capture_inputs
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_runtime_capture_inputs,
+    )
+    from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
 
-    runtime_root, _bundle_root, catalog, bindings = _load_production_capture_inputs()
+    runtime_root = Path(__file__).resolve().parents[2]
+    capture = defaultspack_runtime_capture_inputs()
+    catalog = BundledCatalog.load(capture.bundle_root)
+    bindings = tuple(capture.contract_bindings)
     application_ids = {binding.application_id for binding in bindings}
     if len(application_ids) != 1:
         raise RuntimeError("production Application route identity is ambiguous")
