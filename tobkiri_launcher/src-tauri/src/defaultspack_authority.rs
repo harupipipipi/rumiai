@@ -2129,9 +2129,7 @@ fn verify_pack_artifact_index(
     let bundle_lock = verify_bundle_lock(bundle_root)?;
     let bundled_pack_path = bundle_pack_path(bundle_root, &bundle_lock, expected_pack_id)?;
     let bundled_pack = read_regular_file(&bundled_pack_path, "locked selected Pack")?;
-    if root_pack != bundled_pack {
-        bail!("materialized root Pack differs from the locked Profile Pack");
-    }
+    verify_materialized_root_pack_binding(&root_pack, &bundled_pack)?;
     let pack: Value =
         serde_json::from_slice(&root_pack).context("Defaultspack Pack v4 is malformed")?;
     let artifact_set_digest = value_str(&index, "/artifact_set_digest");
@@ -2140,6 +2138,40 @@ fn verify_pack_artifact_index(
         || value_str(&index, "/source_identity") != value_str(&pack, "/integrity/source_identity")
     {
         bail!("selected Pack artifact index is stale for its Pack v4 authority");
+    }
+    Ok(())
+}
+
+/// Bind the materialized Pack source to the Profile-locked Pack authority.
+///
+/// Older bundles carried the materialized Pack bytes directly.  Current Pack
+/// v4 bundles carry a generated, source-bound projection instead, because the
+/// projection pins generated sidecars without mutating the canonical Pack in
+/// the materialized runtime tree.  Both forms are safe, but a projection must
+/// prove that its immutable source digest is the exact materialized bytes.
+fn verify_materialized_root_pack_binding(root_pack: &[u8], bundled_pack: &[u8]) -> Result<()> {
+    if root_pack == bundled_pack {
+        return Ok(());
+    }
+    let root: Value = serde_json::from_slice(root_pack)
+        .context("materialized root Pack is malformed while binding its Profile projection")?;
+    let bundled: Value = serde_json::from_slice(bundled_pack)
+        .context("locked Profile Pack is malformed while binding its materialized source")?;
+    let root_pack_id = value_str(&root, "/pack/id").context(
+        "materialized root Pack identity is missing while binding its Profile projection",
+    )?;
+    let root_digest = sha256(root_pack);
+    let projection_is_bound = value_str(&bundled, "/pack/id") == Some(root_pack_id)
+        && value_str(&bundled, "/provenance/schema") == Some("io.tobkiri.provenance.v2")
+        && value_str(&bundled, "/provenance/source_kind") == Some("generated")
+        && bundled
+            .pointer("/provenance/normative")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && value_str(&bundled, "/provenance/source_digest") == Some(root_digest.as_str())
+        && value_str(&bundled, "/integrity/source_identity") == Some(root_digest.as_str());
+    if !projection_is_bound {
+        bail!("materialized root Pack differs from the locked Profile Pack");
     }
     Ok(())
 }
@@ -3606,6 +3638,46 @@ mod tests {
         let root = minimal_projected_sidecar_bundle("projection-pin-valid");
         assert!(verify_bundle_lock(&root).is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn materialized_root_pack_must_bind_its_locked_projection_to_exact_bytes() {
+        let root_pack = serde_json::to_vec(&serde_json::json!({
+            "pack": {"id": "test_pack"},
+        }))
+        .unwrap();
+        let root_digest = sha256(&root_pack);
+        let projection = serde_json::to_vec(&serde_json::json!({
+            "pack": {"id": "test_pack"},
+            "integrity": {"source_identity": root_digest},
+            "provenance": {
+                "schema": "io.tobkiri.provenance.v2",
+                "source_kind": "generated",
+                "source_digest": root_digest,
+                "normative": true,
+            },
+        }))
+        .unwrap();
+        assert!(verify_materialized_root_pack_binding(&root_pack, &projection).is_ok());
+
+        let forged_projection = serde_json::to_vec(&serde_json::json!({
+            "pack": {"id": "test_pack"},
+            "integrity": {"source_identity": format!("sha256:{}", "0".repeat(64))},
+            "provenance": {
+                "schema": "io.tobkiri.provenance.v2",
+                "source_kind": "generated",
+                "source_digest": format!("sha256:{}", "0".repeat(64)),
+                "normative": true,
+            },
+        }))
+        .unwrap();
+        let error = verify_materialized_root_pack_binding(&root_pack, &forged_projection)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("materialized root Pack differs from the locked Profile Pack"),
+            "{error}"
+        );
     }
 
     #[test]
