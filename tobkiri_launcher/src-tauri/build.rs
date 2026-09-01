@@ -7923,9 +7923,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn source_only_profile_artifact_removal_rejects_symlink_and_special_file() {
+    fn source_only_profile_artifact_removal_rejects_symlink_and_directory() {
         use std::os::unix::fs::symlink;
-        use std::os::unix::net::UnixListener;
 
         let tree = TestTree::new("source-only-profile-artifact-types");
         let bundle = tree.path().join("staged/ecosystem/defaultspack/v4");
@@ -7945,10 +7944,10 @@ mod tests {
 
         fs::remove_file(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[0]))
             .expect("fixture symlink should be removable");
-        let _socket = UnixListener::bind(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[1]))
-            .expect("source-only special-file fixture should be creatable");
+        fs::create_dir(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[1]))
+            .expect("source-only directory fixture should be creatable");
         let error = remove_source_only_profile_artifacts(&bundle)
-            .expect_err("source-only Profile special file must fail closed");
+            .expect_err("source-only Profile directory must fail closed");
         assert!(error.to_string().contains("absent or regular"));
     }
 
