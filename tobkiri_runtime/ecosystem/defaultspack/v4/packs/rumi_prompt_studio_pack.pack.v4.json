@@ -6,7 +6,7 @@
       "path": "catalog/prompt_studio_prompt_library.yaml"
     },
     {
-      "digest": "sha256:1edec1ff041ec05c4351bb41ad0b87aac4e89c349ce8a4d1f1d454a2357f6947",
+      "digest": "sha256:ff580bbfa7e8acd04bdc22080e93879473d2704e4d43863982975e268b661801",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -142,7 +142,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:67f9ecac845fa1ebc4540c410bc0a6fd671fa1b99726342507a45efc5638b022",
-    "artifact_set_digest": "sha256:e565f74e05c1533dc51288bc46b0058ba24f72748105de0dea1dbe8d2352564a",
+    "artifact_set_digest": "sha256:8558b8d0270c4699118f89723d85acfdc6eafd806207e2be3af9e8099f26fe61",
     "contract_catalog_digest": "sha256:af1171f7f70d0f9852c240c5160bbc741d57ca329d66fbd53d184c6a31592a92"
   },
   "migration": {
@@ -216,18 +216,18 @@
     "source_digest": "sha256:67f9ecac845fa1ebc4540c410bc0a6fd671fa1b99726342507a45efc5638b022",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:7ffa9b0b640f5865fe4286f0cccd0b0572305c71f1a5f401094927f611512669",
+    "content_root_digest": "sha256:954b39a520f58322f5ef0dbfcc0da4073ae34f768942c6fc700bc843deced962",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:fc5241d21d50850ca866515b119932e867581dc2cc312862f0be51f0d0a5f179",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/rumi_prompt_studio_pack/pack.v4.json",

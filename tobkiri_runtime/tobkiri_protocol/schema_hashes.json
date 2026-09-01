@@ -9,7 +9,7 @@
     "contract_v4.schema.json": "sha256:88762c00128d0aa861cae38cc5d6f686ac5e5c73b9d8a0ea790f8b3e529c14c8",
     "defaults_setup_v4.schema.json": "sha256:c3a7c3b591000397e9bcb87f5c83d629e246e703e32bb6bb0df67e80f53a14e0",
     "distribution_v1.schema.json": "sha256:be0fac251168c9454defda8a28f95a4920343db9b08a3255971fdd77b469e6da",
-    "executable_catalog_v4.schema.json": "sha256:80daa4c77f30e7d5865a72d708492bfbe08eb2ef9325d020e998173bf279c01d",
+    "executable_catalog_v4.schema.json": "sha256:3763381140943e668ffeb977504389a9fcf109c3207a930d285cd7dab781b710",
     "external_normal_pack_catalog_v4.schema.json": "sha256:e5787b92c70d644f04a7a6b80ed466f5e76dcc2756d39c223c925ff953378c6b",
     "function_principal_v1.schema.json": "sha256:3a6f763c358fd6581fe0be35d5e9917869b068c25cfee4adfdfa06fa327ad33b",
     "inventory_v1.schema.json": "sha256:2cd124a405d451cd0858ee10a72e031cd34a5cfa5787ba93ed3b5e29123e1156",

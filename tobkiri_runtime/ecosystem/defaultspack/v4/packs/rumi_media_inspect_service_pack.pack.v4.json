@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:d777caf4bf0a282a6e6c85439efe148874508e02f1879e8942dc7a9288c3a34b",
+      "digest": "sha256:ab704b161a7486c49c22ca96bf06ce33421245da6bbd2d2e358e36df1da61467",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -34,7 +34,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:417ac18d58fbf1c18dfb57b207236d5350593f407169199a405536175454b3df",
-    "artifact_set_digest": "sha256:4be31cec8c9a778540c56b9218cd12f0f031d45e0036ed4605015eeaa9a54f8e",
+    "artifact_set_digest": "sha256:0e85508b5753af52f27cfb71782121c516050d6c3bff124eb99286adea2ceee7",
     "contract_catalog_digest": "sha256:3c503800bb9e7537c47e39f7c638e5d3bd447039beebf881c8fffb06ea1e4dd7"
   },
   "migration": {
@@ -72,18 +72,18 @@
     "source_digest": "sha256:417ac18d58fbf1c18dfb57b207236d5350593f407169199a405536175454b3df",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:44a2e906fdecb865faf119bfb2048904336c6cec2ade5c1126ba11eeb4a01be3",
+    "content_root_digest": "sha256:2a002d5041709c2e38ca672fd1fbfba397452c1b4d735f2edb1982c4e99c77e4",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:c34577c66aa02d65679a8214be03fd0fdb4f65c7fcb291f1c7c27840af361ee4",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/rumi_media_inspect_service_pack/pack.v4.json",

@@ -38,5 +38,6 @@
       ]
     }
   ],
-  "catalog_digest": "sha256:0d4b110467a5115d5b31a3d9dbafabca55e010aed78dfb20819b6e04ad4a5b30"
+  "materialization_catalog_digest": "sha256:a9e04ea15c982150a1bd0aae79ca445edd43beb125c890dbc6e7cc215df6f708",
+  "catalog_digest": "sha256:af1efbb431c975be77fd6277ca2f421494f5ba9cf0826dc94715d3a4c905a4a1"
 }

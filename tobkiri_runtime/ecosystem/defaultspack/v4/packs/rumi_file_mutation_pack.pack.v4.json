@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:2da64a6112d8f04d34112414bae19b10624cfffd28e7c592fa467e071151e2a7",
+      "digest": "sha256:eb9f5781d887ad7d501f5aa2b016a096a9e807cdb177a5a6fd5f7de1102b653d",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -34,7 +34,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:2f727d2773bd58ad1f9ecfd50dc8e30a82d50e3b7064a4dd6b1d7c9cc8601acf",
-    "artifact_set_digest": "sha256:8f30c05c7b0a414e6bb9c32d509a5681508c9914b8bd33f111657fcc80c7e15b",
+    "artifact_set_digest": "sha256:f0fdb1d165cc86020959d75a88fe3c40c7f25965a894538e39cc703da6c8c8e7",
     "contract_catalog_digest": "sha256:5d98b23e83c5b54cf52ee30bb2bc570a39e5d957455f780a8487f823e1180935"
   },
   "migration": {
@@ -72,18 +72,18 @@
     "source_digest": "sha256:2f727d2773bd58ad1f9ecfd50dc8e30a82d50e3b7064a4dd6b1d7c9cc8601acf",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:bf9c56d0b1c669637b9a48602ed09b495974d0e1cb87678ed8d95fd1c5036e6b",
+    "content_root_digest": "sha256:13971c87eaefb476f45e7dc13c8528eab6e8a8bbb737562ec9090c1ea2ed88cc",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:bc18b8d3c0905a6b0f44221dbb16fa72d85c37e3e86b0ad21d6bf6f73c4753bf",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/rumi_file_mutation_pack/pack.v4.json",

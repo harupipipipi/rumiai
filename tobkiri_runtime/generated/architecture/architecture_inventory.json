@@ -8025,6 +8025,7 @@
       "tobkiri_runtime/tobkiri_protocol/defaultspack_bundle_order.py",
       "tobkiri_runtime/tobkiri_protocol/durability.py",
       "tobkiri_runtime/tobkiri_protocol/errors.py",
+      "tobkiri_runtime/tobkiri_protocol/executable_catalog.py",
       "tobkiri_runtime/tobkiri_protocol/fixtures/ambiguous_profile.v3.json",
       "tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json",
       "tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.pre_fix_binding_shape.json",
@@ -18402,8 +18403,8 @@
     ]
   },
   "repository": {
-    "commit": "aabe4770f439309e2d446a57b20e87bf4a722c1e",
-    "tree_digest": "941853a06afc7cf5aa0b7a347ef7f3661975bd5491423f749f46928d12f14a05"
+    "commit": "9ff3df5007e3be791ded76e62111dfa0b36fe880",
+    "tree_digest": "e0d389380d2f36655999a7c19f068b3a6364537b894e70565f4869aead79eda8"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

@@ -69,9 +69,7 @@ def _assert_complete_profile_release(bundle: Path) -> None:
     bundle_raw = (bundle / "bundle.lock.json").read_bytes()
     bundle_lock = json.loads(bundle_raw)
     profile_entry = next(
-        item
-        for item in bundle_lock["entries"]
-        if item["path"] == "defaults.profile.v4.json"
+        item for item in bundle_lock["entries"] if item["path"] == "defaults.profile.v4.json"
     )
     assert profile_entry["digest"] == _sha256(profile_raw)
     assert lock["profile_revision"] == canonical_digest(profile)
@@ -157,30 +155,31 @@ def test_canonical_pack_projections_are_generator_owned_derivatives() -> None:
         assert provenance["source_kind"] == "generated"
         assert provenance["source_path"] == source.relative_to(ROOT).as_posix()
         assert provenance["source_digest"] == _sha256(canonical_raw)
-        assert provenance["repository_commit"] == canonical["provenance"][
-            "repository_commit"
-        ]
-        assert provenance["generator"] == (
-            "tobkiri.scripts.generate_defaultspack_v4_bundle"
+        assert provenance["repository_commit"] == canonical["provenance"]["repository_commit"]
+        assert provenance["generator"] == ("tobkiri.scripts.generate_defaultspack_v4_bundle")
+        assert (
+            derivative["integrity"]["source_identity"] != canonical["integrity"]["source_identity"]
         )
-        assert derivative["integrity"]["source_identity"] != canonical["integrity"][
-            "source_identity"
-        ]
 
         canonical_catalog = generator._executable_catalog_source(source, canonical)
         assert canonical_catalog is not None
-        output_catalog = output.with_name(
-            f"{derivative['pack']['id']}.executables.v4.json"
-        )
+        output_catalog = output.with_name(f"{derivative['pack']['id']}.executables.v4.json")
         derivative_catalog_raw = rendered[output_catalog]
         derivative_catalog = validate_document(
             derivative_catalog_raw,
             "executable_catalog",
         )
         assert derivative_catalog_raw != canonical_catalog.read_bytes()
-        assert derivative_catalog["source_identity"] == derivative["integrity"][
-            "source_identity"
-        ]
+        assert derivative_catalog["source_identity"] == derivative["integrity"]["source_identity"]
+        canonical_catalog_document = validate_document(
+            canonical_catalog.read_bytes(),
+            "executable_catalog",
+        )
+        assert (
+            derivative_catalog["materialization_catalog_digest"]
+            == (canonical_catalog_document["catalog_digest"])
+        )
+        assert derivative_catalog["variants"] == canonical_catalog_document["variants"]
 
 
 def test_core_generator_publishes_complete_profile_release_closure(
@@ -192,9 +191,7 @@ def test_core_generator_publishes_complete_profile_release_closure(
     rendered = generator._render(SOURCE_COMMIT)
     copied = tmp_path / "v4"
     shutil.copytree(BUNDLE, copied)
-    staged_render = {
-        copied / path.relative_to(BUNDLE): raw for path, raw in rendered.items()
-    }
+    staged_render = {copied / path.relative_to(BUNDLE): raw for path, raw in rendered.items()}
     generator.BUNDLE = copied
 
     generator._publish(staged_render)

@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:9441bbc34f095dbfef1535ec969a1c959a4118e83b3834e83f98f909740afc5c",
+      "digest": "sha256:785c8ae1f5b4d5d2e0c53eb0d6867a2a2df67ba3abe09063617bb724aed18b8d",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -34,7 +34,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:25d94d10afbe1c03bb4fcc39374615473ab281718df35ff326c21ca7b15ced4e",
-    "artifact_set_digest": "sha256:303e0163e3686df33f89834a75db060f8cd5fcf1dd00b78fc0450ef58726227b",
+    "artifact_set_digest": "sha256:9e2024fa505ec5719f392758415105b2bcc03849157e59a34f1f2fc515cd4951",
     "contract_catalog_digest": "sha256:a05f4363d87e6714e137d763838629461adc38948313557b697c12c33a6d8cc8"
   },
   "migration": {
@@ -68,18 +68,18 @@
     "source_digest": "sha256:25d94d10afbe1c03bb4fcc39374615473ab281718df35ff326c21ca7b15ced4e",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:fb40fe65036a7c5f95182d32c78662075d752de8580cfa2b5344c16d988327f9",
+    "content_root_digest": "sha256:bbbd64ce54e3a0dc6e6a2d696645b9c206e1b6ec54298f1629ba39e74f0aa517",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:62e63c3cff0fb63edf6b4b4182e9ce17b79c1cc8ff447f44b15c2e4a0248a56d",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/defaultspack/pack.v4.json",

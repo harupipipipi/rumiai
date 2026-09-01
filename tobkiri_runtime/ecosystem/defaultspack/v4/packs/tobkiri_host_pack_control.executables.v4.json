@@ -3833,5 +3833,6 @@
       ]
     }
   ],
-  "catalog_digest": "sha256:330de5e8efa846ceb9afcd91c8fe9853e7b75cc23521ca44473543d2605cc283"
+  "materialization_catalog_digest": "sha256:499a38fee28ed5f2ca6a189877c91ec0fa097750e4ad3a6ce7982675d82e9cf4",
+  "catalog_digest": "sha256:b794937d7607260663c38d48ae9280c85198ea00f5faa81f335260e761f00cb7"
 }

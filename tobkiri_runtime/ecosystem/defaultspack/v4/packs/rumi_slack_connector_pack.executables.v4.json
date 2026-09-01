@@ -72,5 +72,6 @@
       ]
     }
   ],
-  "catalog_digest": "sha256:599fa054e5b24476660a02686a4b5bfde2ab2741b7b43fff1949759305f5c752"
+  "materialization_catalog_digest": "sha256:bab83277d3a38fef5c8d88808f7cec31837d3c4e36583c3017e5f1356f213946",
+  "catalog_digest": "sha256:9e28b97f9635e2f622e1e5e3e06f0f198621520373c96f2a8b9d50fdb04f6423"
 }

@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:51086c74fe2171adce1ac9a3f170c8f7f26d31ce36082835d89e3a5665e7ffc9",
+      "digest": "sha256:6f0e0c71f5ca7ee95694f2ddfa897be576d0926a20c4e39d1ffcf31805d19e9e",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -68,7 +68,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:ac127b50a624fbbe56d46d5317196a8e9dee770ca7f69ba6cebbf67cdc92f481",
-    "artifact_set_digest": "sha256:f0a798a85bfa90debc99c0745a5c17fe02eb623042595bbe25488bd106bb9354",
+    "artifact_set_digest": "sha256:12de4ee36c4632e41c5b1054f649a9687f01605846927dc5a1d1f517930333a5",
     "contract_catalog_digest": "sha256:8c3eeeb1701cf8f655ae9caab5900ad16d1ad0c158a09401583cdca6d2d1b21c"
   },
   "migration": {
@@ -124,18 +124,18 @@
     "source_digest": "sha256:ac127b50a624fbbe56d46d5317196a8e9dee770ca7f69ba6cebbf67cdc92f481",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:a610ceee32a1d1ec63692cd3d6c3249554a7e13bcf0203eecd9ffd39a5ab3f4d",
+    "content_root_digest": "sha256:4253d4dd424c8356167e1ead0b5dd823d7d0edda2c2e990e0d411e25715cfec1",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:b3b47596e6ea1b8b45fb64512b1fcd4c5906707ed154c95ee63dde17486b93e2",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/rumi_turn_runtime_pack/pack.v4.json",

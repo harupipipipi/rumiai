@@ -85,5 +85,6 @@
       ]
     }
   ],
-  "catalog_digest": "sha256:eb2e8c3ad02b8144fc1650fce59654a9defbdb834521ddd88863515a4c921c00"
+  "materialization_catalog_digest": "sha256:8ec41a83795ce98c64ae73baab8294cdbf82168024ed018783ec878bf64af0ab",
+  "catalog_digest": "sha256:e7fb7bd8378f9dd454f4f9b92e7a9c5d125a0e05be9a5763b9176c5461a06ae2"
 }

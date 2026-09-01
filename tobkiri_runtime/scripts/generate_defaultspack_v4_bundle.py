@@ -156,9 +156,7 @@ def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
         by_id[pack_id] = record
 
     selected = {
-        pack_id
-        for pack_id, record in by_id.items()
-        if record.get("kind") == "host_extension"
+        pack_id for pack_id, record in by_id.items() if record.get("kind") == "host_extension"
     }
     pending = sorted(selected)
     while pending:
@@ -186,9 +184,7 @@ def _canonical_pack_sources() -> dict[Path, Path]:
     sources = {path: path for path in PACKS.glob("*.pack.v4.json")}
     sources.update({PACKS / name: source for name, source in CANONICAL_PACK_FILES.items()})
     canonical_names = {
-        source.parent.name: output.name
-        for output, source in sources.items()
-        if source.parent.name
+        source.parent.name: output.name for output, source in sources.items() if source.parent.name
     }
     for pack_id in _canonical_optional_host_extension_ids():
         output_name = canonical_names.get(pack_id, f"{pack_id}.pack.v4.json")
@@ -364,10 +360,7 @@ def _canonical_pack_projection_provenance(
     generator_digest = _sha256_digest(Path(__file__).read_bytes())
     input_inventory = {source_path: source_digest}
     input_inventory_digest = canonical_digest(
-        [
-            {"path": path, "digest": input_inventory[path]}
-            for path in sorted(input_inventory)
-        ]
+        [{"path": path, "digest": input_inventory[path]} for path in sorted(input_inventory)]
     )
     content_root_digest = canonical_digest(
         {
@@ -412,8 +405,10 @@ def _canonical_pack_projection_provenance(
 def _render_projection_executable_catalog(
     source: Path,
     document: Mapping[str, Any],
+    *,
+    materialization_catalog: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Regenerate a projection executable catalog for its derived Pack identity."""
+    """Regenerate a projection catalog and pin its canonical materialization."""
 
     from scripts.generate_executable_catalogs_v4 import _render_document
 
@@ -421,10 +416,7 @@ def _render_projection_executable_catalog(
     contracts_path = source.parent / "contracts.v4.json"
     artifact_index_path = source.parent / "artifact-index.v4.json"
     if not contracts_path.is_file() or not artifact_index_path.is_file():
-        raise ValueError(
-            "canonical runnable Pack has no executable catalog inputs: "
-            f"{pack_id}"
-        )
+        raise ValueError(f"canonical runnable Pack has no executable catalog inputs: {pack_id}")
     contracts = validate_document(
         json.loads(contracts_path.read_text(encoding="utf-8")),
         "pack_contract_catalog",
@@ -433,7 +425,48 @@ def _render_projection_executable_catalog(
         json.loads(artifact_index_path.read_text(encoding="utf-8")),
         "pack_artifact_index",
     )
-    return _render_document(pack_id, source.parent, dict(document), contracts, artifact_index)
+    materialization_manifest = validate_document(source.read_bytes(), "pack")
+    materialization_catalog_path = source.parent / "executables.v4.json"
+    materialization_catalog_raw_digest = _sha256_digest(materialization_catalog_path.read_bytes())
+    manifest_catalog_entries = [
+        item
+        for item in materialization_manifest["artifacts"]
+        if item.get("path") == "executables.v4.json"
+    ]
+    index_catalog_entries = [
+        item for item in artifact_index["artifacts"] if item.get("path") == "executables.v4.json"
+    ]
+    expected_materialization_digest = canonical_digest(
+        {key: value for key, value in materialization_catalog.items() if key != "catalog_digest"}
+    )
+    if (
+        materialization_catalog["pack_id"] != pack_id
+        or materialization_catalog["source_identity"]
+        != materialization_manifest["integrity"]["source_identity"]
+        or materialization_catalog["catalog_digest"] != expected_materialization_digest
+        or len(manifest_catalog_entries) != 1
+        or len(index_catalog_entries) != 1
+        or manifest_catalog_entries[0].get("digest") != materialization_catalog_raw_digest
+        or index_catalog_entries[0].get("digest") != materialization_catalog_raw_digest
+    ):
+        raise ValueError(f"canonical executable catalog is stale or mismatched: {pack_id}")
+    projected = _render_document(
+        pack_id,
+        source.parent,
+        dict(document),
+        contracts,
+        artifact_index,
+    )
+    if projected["variants"] != materialization_catalog["variants"]:
+        raise ValueError(
+            f"projection executable variants differ from canonical materialization: {pack_id}"
+        )
+    unsigned = {key: value for key, value in projected.items() if key != "catalog_digest"}
+    unsigned["materialization_catalog_digest"] = materialization_catalog["catalog_digest"]
+    return validate_document(
+        {**unsigned, "catalog_digest": canonical_digest(unsigned)},
+        "executable_catalog",
+    )
 
 
 def _projection_pack_identity(
@@ -730,12 +763,7 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
     source_commit = informational_source_commit(ROOT.parent, source_commit)
     rendered: dict[Path, bytes] = {}
     pack_sources = _canonical_pack_sources()
-    pack_sources.update(
-        {
-            PACKS / name: PACKS / name
-            for name in TAURI_ROLE_PACKS
-        }
-    )
+    pack_sources.update({PACKS / name: PACKS / name for name in TAURI_ROLE_PACKS})
     for path in sorted(pack_sources):
         source = pack_sources[path]
         role_spec = TAURI_ROLE_PACKS.get(path.name)
@@ -770,32 +798,42 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                     f"{document['pack']['id']}"
                 )
             catalog_path = path.with_name(f"{document['pack']['id']}.executables.v4.json")
-            catalog = _render_projection_executable_catalog(source, document)
+            materialization_catalog = validate_document(
+                source_catalog.read_bytes(),
+                "executable_catalog",
+            )
+            catalog = _render_projection_executable_catalog(
+                source,
+                document,
+                materialization_catalog=materialization_catalog,
+            )
             catalog_raw = _pretty(catalog)
             document = _pin_projection_executable_catalog(document, catalog_raw)
             # Re-render from the fully pinned Pack rather than copying the
             # canonical sidecar.  The catalog's identity must be the derived
             # Pack identity, not the canonical source Pack identity.
-            catalog_raw = _pretty(_render_projection_executable_catalog(source, document))
+            catalog_raw = _pretty(
+                _render_projection_executable_catalog(
+                    source,
+                    document,
+                    materialization_catalog=materialization_catalog,
+                )
+            )
             rendered[catalog_path] = catalog_raw
         elif role_spec is None:
             source_catalog = _executable_catalog_source(source, document)
             if source_catalog is not None:
-                catalog_path = path.with_name(
-                    f"{document['pack']['id']}.executables.v4.json"
-                )
+                catalog_path = path.with_name(f"{document['pack']['id']}.executables.v4.json")
                 catalog = validate_document(
                     json.loads(source_catalog.read_text(encoding="utf-8")),
                     "executable_catalog",
                 )
                 if (
                     catalog["pack_id"] != document["pack"]["id"]
-                    or catalog["source_identity"]
-                    != document["integrity"]["source_identity"]
+                    or catalog["source_identity"] != document["integrity"]["source_identity"]
                 ):
                     raise ValueError(
-                        "canonical executable catalog identity is stale: "
-                        f"{document['pack']['id']}"
+                        f"canonical executable catalog identity is stale: {document['pack']['id']}"
                     )
                 rendered[catalog_path] = source_catalog.read_bytes()
         rendered[path] = _pretty(
@@ -1075,9 +1113,7 @@ def _publish(
             stage,
             source_bundle_root=BUNDLE,
         )
-        for path, raw in sorted(
-            profile_release.items(), key=lambda item: item[0].as_posix()
-        ):
+        for path, raw in sorted(profile_release.items(), key=lambda item: item[0].as_posix()):
             path.write_bytes(raw)
         profile_artifact_generator._validate_staged_release(
             stage,

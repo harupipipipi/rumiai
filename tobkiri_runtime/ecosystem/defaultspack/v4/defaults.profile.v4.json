@@ -90,7 +90,7 @@
     "source_path": "ecosystem/defaultspack/v4/defaults.profile.v4.json",
     "source_digest": "sha256:a6824a1446ba1eed13aad45108265d508408fa8412c4855882d334ac04d35f15",
     "repository_commit": "working-tree",
-    "repository_tree": "2fb662ae936576724e23bacf7595440d146281751be0adfaa94174d70db2af08",
+    "repository_tree": "b88e50f6df4e77e2bca6c2642893b86728a5b11ae3d9d5326b65f85a0b1c35a7",
     "generator": "tobkiri-profile-artifacts",
     "generator_version": "1.0.0",
     "normative": false,
@@ -103,7 +103,7 @@
       {
         "path": "scripts/generate_profile_artifacts.py",
         "rule_id": "compatibility-projection-generator-bytes",
-        "digest": "sha256:b32e0af2d0c9845dd3fe2b65f9eeb7484bb16a6c27fada806b4812df0bd5fa87"
+        "digest": "sha256:f896517c12c0c784edfdad52a088d2bd6be6726c8c08d2d98509d27c3a181feb"
       },
       {
         "path": "scripts/profile_compatibility_provenance.py",
@@ -114,6 +114,11 @@
         "path": "tobkiri_protocol/canonical.py",
         "rule_id": "compatibility-projection-input-bytes",
         "digest": "sha256:27fa2ce73fbc40668f56e664e3bbb2008ccbf569cb49044e02dbf1949304af7b"
+      },
+      {
+        "path": "tobkiri_protocol/executable_catalog.py",
+        "rule_id": "compatibility-projection-input-bytes",
+        "digest": "sha256:8df8e31596e2315eb03c6cb5bc0ccf024febbf54c2d1797dd2b339a564285653"
       },
       {
         "path": "tobkiri_protocol/profile_scope.py",

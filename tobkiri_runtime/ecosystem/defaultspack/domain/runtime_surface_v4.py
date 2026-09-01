@@ -196,9 +196,7 @@ class _BoundedReadExecutor:
             self._jobs_by_owner.setdefault(owner, set()).add(job)
         try:
             self._queue.put_nowait(job)
-        except (
-            queue.Full
-        ):  # pragma: no cover - semaphore and queue move atomically enough
+        except queue.Full:  # pragma: no cover - semaphore and queue move atomically enough
             self._finish(job)
             return None
         return future
@@ -322,9 +320,7 @@ class RuntimeProfileChangeService:
 
         self._store = ControlReconciliationStore(store_path)
 
-    def resolve(
-        self, body: Mapping[str, object], *, session_id: str
-    ) -> dict[str, object]:
+    def resolve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Resolve a candidate closure without writing runtime state."""
 
         legacy_expected = {
@@ -372,10 +368,7 @@ class RuntimeProfileChangeService:
         if no_active_predecessor:
             from core_runtime.active_profile_store_v4 import ActiveProfileStore
 
-            if (
-                ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
-                is not None
-            ):
+            if ActiveProfileStore(self._user_data_root).load(verify_snapshot=True) is not None:
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.STALE_REVISION,
                     "Profile activation predecessor is no longer empty",
@@ -383,9 +376,9 @@ class RuntimeProfileChangeService:
             current: Mapping[str, Any] | None = None
             current_data: Mapping[str, Any] | None = None
         else:
-            if hmac.compare_digest(
-                revision, NO_ACTIVE_PROFILE_REVISION
-            ) or hmac.compare_digest(plan_digest, NO_ACTIVE_PLAN_DIGEST):
+            if hmac.compare_digest(revision, NO_ACTIVE_PROFILE_REVISION) or hmac.compare_digest(
+                plan_digest, NO_ACTIVE_PLAN_DIGEST
+            ):
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.INVALID_REQUEST,
                     "Profile predecessor binding is incomplete",
@@ -417,9 +410,7 @@ class RuntimeProfileChangeService:
             catalog = self._surface().read_profile_catalog()
             catalog_data = cast(Mapping[str, Any], catalog["data"])
             entry = next(
-                item
-                for item in catalog_data["profiles"]
-                if item["profile_id"] == profile_id
+                item for item in catalog_data["profiles"] if item["profile_id"] == profile_id
             )
             definition_digest = str(entry["definition"]["digest"])
             catalog_digest = str(catalog_data["catalog_digest"])
@@ -468,8 +459,7 @@ class RuntimeProfileChangeService:
             else str(current_data["activation_record"]["activation_id"])
         )
         review = {
-            "candidate_generation": "profile-change-generation:"
-            + secrets.token_hex(16),
+            "candidate_generation": "profile-change-generation:" + secrets.token_hex(16),
             "profile": dict(resolved.profile),
             "profile_lock": dict(resolved.lock),
             "resolved_plan": dict(resolved.plan),
@@ -540,9 +530,7 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def review(
-        self, body: Mapping[str, object], *, session_id: str
-    ) -> dict[str, object]:
+    def review(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Acknowledge the exact resolved candidate for later approval."""
 
         with self._lock:
@@ -575,9 +563,7 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def approve(
-        self, body: Mapping[str, object], *, session_id: str
-    ) -> dict[str, object]:
+    def approve(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Create a one-shot server approval from a reviewed candidate."""
 
         with self._lock:
@@ -649,9 +635,7 @@ class RuntimeProfileChangeService:
             "write_set": [],
         }
 
-    def activate(
-        self, body: Mapping[str, object], *, session_id: str
-    ) -> dict[str, object]:
+    def activate(self, body: Mapping[str, object], *, session_id: str) -> dict[str, object]:
         """Consume one approval and atomically activate its exact candidate."""
 
         if set(body) != {"approval_id", "approval_digest"}:
@@ -671,9 +655,7 @@ class RuntimeProfileChangeService:
             except Exception as error:
                 raise _map_reconciliation_error(error, approval=True) from error
             if record["state"] == "activated":
-                return self._activation_projection(
-                    cast(Mapping[str, Any], record["activation"])
-                )
+                return self._activation_projection(cast(Mapping[str, Any], record["activation"]))
             candidate = self._candidate_from_record(record)
             approval = _ProfileApproval(
                 approval_id=approval_id,
@@ -711,9 +693,7 @@ class RuntimeProfileChangeService:
                 from core_runtime.pack_control_v4 import activate_resolved_profile_pack_set
 
                 bundle_binding = (
-                    {}
-                    if self._bundle_root is None
-                    else {"bundle_root": self._bundle_root}
+                    {} if self._bundle_root is None else {"bundle_root": self._bundle_root}
                 )
                 activation = activate_resolved_profile_pack_set(
                     candidate.resolved,
@@ -818,21 +798,25 @@ class RuntimeProfileChangeService:
                 NO_ACTIVE_ACTIVATION_ID,
             )
         )
-        candidate_is_current = current is not None and accepted_activation_id is not None and (
-            current.profile_id == str(candidate.resolved.profile["profile_id"])
-            and hmac.compare_digest(
-                current.profile_revision,
-                str(candidate.resolved.plan["profile_revision"]),
+        candidate_is_current = (
+            current is not None
+            and accepted_activation_id is not None
+            and (
+                current.profile_id == str(candidate.resolved.profile["profile_id"])
+                and hmac.compare_digest(
+                    current.profile_revision,
+                    str(candidate.resolved.plan["profile_revision"]),
+                )
+                and hmac.compare_digest(
+                    current.plan_digest,
+                    str(candidate.resolved.plan["plan_digest"]),
+                )
+                and hmac.compare_digest(
+                    current.lock_digest,
+                    str(candidate.resolved.lock["lock_digest"]),
+                )
+                and hmac.compare_digest(current.activation_id, accepted_activation_id)
             )
-            and hmac.compare_digest(
-                current.plan_digest,
-                str(candidate.resolved.plan["plan_digest"]),
-            )
-            and hmac.compare_digest(
-                current.lock_digest,
-                str(candidate.resolved.lock["lock_digest"]),
-            )
-            and hmac.compare_digest(current.activation_id, accepted_activation_id)
         )
         if candidate_is_current:
             return
@@ -1091,8 +1075,7 @@ class RuntimeSurfaceService:
             }
             effective_sets: list[object] = [active.resolved.lock["effective_set"]]
             effective_sets.extend(
-                record["review"]["profile_lock"]["effective_set"]
-                for record in candidate_records
+                record["review"]["profile_lock"]["effective_set"] for record in candidate_records
             )
             catalog = _catalog_for_effective_sets(catalog, effective_sets)
             from core_runtime.profile_catalog_v4 import project_profile_catalog
@@ -1305,9 +1288,7 @@ class RuntimeSurfaceService:
                     "plan_digest": None,
                     "lock_digest": None,
                     "execution_profile_id": active_profile_id,
-                    "execution_profile_revision": str(
-                        active.resolved.plan["profile_revision"]
-                    ),
+                    "execution_profile_revision": str(active.resolved.plan["profile_revision"]),
                     "execution_activation_id": str(active.activation["activation_id"]),
                     "execution_plan_digest": str(active.resolved.plan["plan_digest"]),
                 },
@@ -1474,19 +1455,13 @@ class RuntimeSurfaceService:
         )
         deadline.checkpoint()
         application = next(
-            (
-                dict(item)
-                for item in profile["packs"]
-                if item.get("role") == "application"
-            ),
+            (dict(item) for item in profile["packs"] if item.get("role") == "application"),
             None,
         )
         return {
             "profile": {
                 "profile_id": str(profile["profile_id"]),
-                "display_name": str(
-                    profile.get("display_name") or profile["profile_id"]
-                ),
+                "display_name": str(profile.get("display_name") or profile["profile_id"]),
                 "profile_revision": str(plan["profile_revision"]),
                 "catalog_revision": str(lock["catalog_revision"]),
             },
@@ -1540,11 +1515,7 @@ class RuntimeSurfaceService:
             )
         profile_entries = [item for item in profiles if isinstance(item, Mapping)]
         entry = next(
-            (
-                item
-                for item in profile_entries
-                if item["profile_id"] == selected_profile_id
-            ),
+            (item for item in profile_entries if item["profile_id"] == selected_profile_id),
             None,
         )
         if not isinstance(entry, Mapping):
@@ -1570,17 +1541,13 @@ class RuntimeSurfaceService:
                 "state": "browsing",
                 "selected_profile_id": selected_profile_id,
                 "execution_profile_id": active_profile_id,
-                "execution_profile_revision": str(
-                    active.resolved.plan["profile_revision"]
-                ),
+                "execution_profile_revision": str(active.resolved.plan["profile_revision"]),
                 "execution_activation_id": str(active.activation["activation_id"]),
                 "execution_plan_digest": str(active.resolved.plan["plan_digest"]),
             },
             "profile": {
                 "profile_id": selected_profile_id,
-                "display_name": str(
-                    definition.get("display_name") or selected_profile_id
-                ),
+                "display_name": str(definition.get("display_name") or selected_profile_id),
                 "profile_revision": canonical_digest(definition),
                 "catalog_revision": definition.get("catalog_revision"),
             },
@@ -1629,12 +1596,9 @@ class RuntimeSurfaceService:
                         _artifact_projection(pack_id, artifact)
                         for artifact in manifest["artifacts"]
                     ],
-                    "pack_dependencies": dict(
-                        manifest["requirements"]["pack_dependencies"]
-                    ),
+                    "pack_dependencies": dict(manifest["requirements"]["pack_dependencies"]),
                     "contract_dependencies": [
-                        dict(item)
-                        for item in manifest["requirements"]["contract_dependencies"]
+                        dict(item) for item in manifest["requirements"]["contract_dependencies"]
                     ],
                     "installed": False,
                     "enabled": False,
@@ -1698,9 +1662,7 @@ class RuntimeSurfaceService:
                         "contract_revision_digest": revision,
                         "function_implementation_digest": None,
                         "caller_function_id": str(edge.get("caller_function_id") or ""),
-                        "target_provider_id": str(
-                            edge.get("target_provider_id") or function_id
-                        ),
+                        "target_provider_id": str(edge.get("target_provider_id") or function_id),
                         "authority_reference": None,
                         "invokable": False,
                         "invocation_reason": "browsing_only",
@@ -1752,8 +1714,7 @@ class RuntimeSurfaceService:
         lifecycle = _captured_lifecycle_projection(snapshot)
         lifecycle_packs = {str(item["pack_id"]): item for item in lifecycle["packs"]}
         selected = {
-            str(item["identity"]): dict(item)
-            for item in active.resolved.lock["effective_set"]
+            str(item["identity"]): dict(item) for item in active.resolved.lock["effective_set"]
         }
         required_pack_ids = {
             str(active.resolved.plan["base"]["pack_id"]),
@@ -1801,32 +1762,19 @@ class RuntimeSurfaceService:
                         for artifact in manifest["artifacts"]
                     ],
                     "provenance": {
-                        "source_identity": str(
-                            manifest["integrity"]["source_identity"]
-                        ),
-                        "artifact_set_digest": str(
-                            manifest["integrity"]["artifact_set_digest"]
-                        ),
+                        "source_identity": str(manifest["integrity"]["source_identity"]),
+                        "artifact_set_digest": str(manifest["integrity"]["artifact_set_digest"]),
                         "contract_catalog_digest": str(
                             manifest["integrity"]["contract_catalog_digest"]
                         ),
                     },
-                    "pack_dependencies": dict(
-                        manifest["requirements"]["pack_dependencies"]
-                    ),
+                    "pack_dependencies": dict(manifest["requirements"]["pack_dependencies"]),
                     "contract_dependencies": [
-                        dict(item)
-                        for item in manifest["requirements"]["contract_dependencies"]
+                        dict(item) for item in manifest["requirements"]["contract_dependencies"]
                     ],
-                    "installed": bool(
-                        lifecycle_packs.get(pack_id, {}).get("installed", False)
-                    ),
-                    "enabled": bool(
-                        lifecycle_packs.get(pack_id, {}).get("enabled", False)
-                    ),
-                    "approved": bool(
-                        lifecycle_packs.get(pack_id, {}).get("approved", False)
-                    ),
+                    "installed": bool(lifecycle_packs.get(pack_id, {}).get("installed", False)),
+                    "enabled": bool(lifecycle_packs.get(pack_id, {}).get("enabled", False)),
+                    "approved": bool(lifecycle_packs.get(pack_id, {}).get("approved", False)),
                     "approval_source": "pack_control_catalog",
                     "required": pack_id in required_pack_ids,
                     "invokable_operations": sorted(invokable_by_pack.get(pack_id, [])),
@@ -1835,10 +1783,7 @@ class RuntimeSurfaceService:
             )
             for function in manifest["functions"]:
                 for contract in manifest["contracts"]:
-                    if (
-                        function["contract_revision_digest"]
-                        == contract["revision_digest"]
-                    ):
+                    if function["contract_revision_digest"] == contract["revision_digest"]:
                         functions_by_contract.setdefault(
                             (pack_id, str(contract["contract_id"])), []
                         ).append(str(function["id"]))
@@ -1918,9 +1863,7 @@ class RuntimeSurfaceService:
                 "function_id": str(principal["function_id"]),
                 "function_principal_id": _principal_id(principal),
                 "contract_revision_digest": str(principal["contract_revision_digest"]),
-                "function_implementation_digest": str(
-                    principal["function_implementation_digest"]
-                ),
+                "function_implementation_digest": str(principal["function_implementation_digest"]),
                 "caller_function_id": str(binding["caller_function_id"]),
                 "target_provider_id": str(edge.get("target_provider_id") or ""),
                 "authority_reference": str(binding["authority_reference"]),
@@ -1931,9 +1874,7 @@ class RuntimeSurfaceService:
                     "provider_pack_id": str(binding["pack_id"]),
                 },
             }
-            contract_row = contracts.get(
-                (str(binding["pack_id"]), str(binding["contract_id"]))
-            )
+            contract_row = contracts.get((str(binding["pack_id"]), str(binding["contract_id"])))
             if contract_row is None:
                 raise RuntimeSurfaceError(
                     RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
@@ -1953,23 +1894,15 @@ class RuntimeSurfaceService:
                     "ResolvedPlan binding has no unique verified Operation schema",
                 )
             row["schema"] = (
-                dict(operation_rows[0])
-                if len(operation_rows) == 1
-                else {"state": "unavailable"}
+                dict(operation_rows[0]) if len(operation_rows) == 1 else {"state": "unavailable"}
             )
             semantics = contract_row["provider_semantics"]
             row["provider_semantics"] = (
-                dict(cast(Mapping[str, Any], semantics))
-                if semantics is not None
-                else None
+                dict(cast(Mapping[str, Any], semantics)) if semantics is not None else None
             )
             lifecycle_pack = lifecycle_packs.get(str(binding["pack_id"]), {})
             pack_kind = next(
-                (
-                    item["kind"]
-                    for item in packs
-                    if item["pack_id"] == str(binding["pack_id"])
-                ),
+                (item["kind"] for item in packs if item["pack_id"] == str(binding["pack_id"])),
                 "",
             )
             capability_target = _capability_invocation_target(
@@ -1981,23 +1914,16 @@ class RuntimeSurfaceService:
             row["invocation_reason"] = (
                 None
                 if capability_target is not None
-                else str(
-                    lifecycle_pack.get("approval_reason")
-                    or "capability_binding_unavailable"
-                )
+                else str(lifecycle_pack.get("approval_reason") or "capability_binding_unavailable")
             )
             if pack_kind == "normal_sandbox" and not _packvm_attested(packvm_readiness):
                 row["invokable"] = False
                 row["invocation_reason"] = "packvm_attestation_not_current"
             row["invocation_contribution_id"] = (
-                str(capability_target["contribution_id"])
-                if capability_target is not None
-                else None
+                str(capability_target["contribution_id"]) if capability_target is not None else None
             )
             row["invocation_owner_pack_id"] = (
-                str(capability_target["owner_pack_id"])
-                if capability_target is not None
-                else None
+                str(capability_target["owner_pack_id"]) if capability_target is not None else None
             )
             row["invocation_catalog_hash"] = (
                 str(capability_binding["catalog_hash"])
@@ -2212,9 +2138,7 @@ def _active_application_manifest(
 
     application = snapshot.active.resolved.plan.get("application")
     application_id = (
-        str(application.get("pack_id") or "")
-        if isinstance(application, Mapping)
-        else ""
+        str(application.get("pack_id") or "") if isinstance(application, Mapping) else ""
     )
     if not application_id:
         application_id = next(
@@ -2242,8 +2166,7 @@ def _frontend_map_artifact(application: Mapping[str, Any]) -> Mapping[str, Any]:
         for artifact in application.get("artifacts", [])
         if isinstance(artifact, Mapping)
         and artifact.get("kind") == "asset"
-        and PurePosixPath(str(artifact.get("path") or "")).name
-        == "frontend_contract_map.v4.json"
+        and PurePosixPath(str(artifact.get("path") or "")).name == "frontend_contract_map.v4.json"
     ]
     if len(matches) != 1:
         raise RuntimeSurfaceError(
@@ -2251,11 +2174,7 @@ def _frontend_map_artifact(application: Mapping[str, Any]) -> Mapping[str, Any]:
             "Frontend Contract Map artifact is not unique",
         )
     path = PurePosixPath(str(matches[0].get("path") or ""))
-    if (
-        path.is_absolute()
-        or not path.parts
-        or any(part in {"", ".", ".."} for part in path.parts)
-    ):
+    if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
             "Frontend Contract Map artifact path is unsafe",
@@ -2470,9 +2389,7 @@ def _captured_lifecycle_projection(
     try:
         from core_runtime.pack_control_v4 import capture_pack_control_catalog
 
-        return capture_pack_control_catalog(
-            active=None if snapshot is None else snapshot.active
-        )
+        return capture_pack_control_catalog(active=None if snapshot is None else snapshot.active)
     except Exception as error:
         raise RuntimeSurfaceError(
             RuntimeSurfaceErrorCode.API_FAILURE,
@@ -2548,9 +2465,7 @@ def _capability_invocation_target(
     ):
         return None
     targets = value.get("targets")
-    if not isinstance(targets, list) or any(
-        not isinstance(item, Mapping) for item in targets
-    ):
+    if not isinstance(targets, list) or any(not isinstance(item, Mapping) for item in targets):
         return None
     required = (
         "contribution_id",
@@ -2562,9 +2477,9 @@ def _capability_invocation_target(
     )
     digest_targets: list[dict[str, str]] = []
     for target in targets:
-        if any(
-            not isinstance(target.get(key), str) for key in required
-        ) or not isinstance(target.get("owner_pack_id"), str):
+        if any(not isinstance(target.get(key), str) for key in required) or not isinstance(
+            target.get("owner_pack_id"), str
+        ):
             return None
         digest_targets.append({key: str(target[key]) for key in required})
     expected_hash = canonical_digest(
@@ -2629,17 +2544,23 @@ def _validated_contract_catalogs(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "selected Pack artifact root is invalid",
             )
+        manifest_path = root / "pack.v4.json"
         index_path = root / "artifact-index.v4.json"
         contracts_path = root / "contracts.v4.json"
         if any(
             path.is_symlink() or not path.is_file()
-            for path in (index_path, contracts_path)
+            for path in (manifest_path, index_path, contracts_path)
         ):
             raise RuntimeSurfaceError(
                 RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
                 "selected Pack Contract catalog artifact is unavailable",
             )
         try:
+            materialized_manifest_bytes = manifest_path.read_bytes()
+            materialized_manifest = validate_document(
+                materialized_manifest_bytes,
+                "pack",
+            )
             index_bytes = index_path.read_bytes()
             contract_bytes = contracts_path.read_bytes()
             index = validate_document(index_bytes, "pack_artifact_index")
@@ -2661,15 +2582,42 @@ def _validated_contract_catalogs(
         index_entries = [
             item
             for item in index["artifacts"]
-            if item["role"] == "contract_catalog"
-            and item["path"] == "contracts.v4.json"
+            if item["role"] == "contract_catalog" and item["path"] == "contracts.v4.json"
         ]
         digest = "sha256:" + hashlib.sha256(contract_bytes).hexdigest()
-        source_identity = str(manifest["integrity"]["source_identity"])
+        materialized_manifest_digest = (
+            "sha256:" + hashlib.sha256(materialized_manifest_bytes).hexdigest()
+        )
+        projected_source_identity = str(manifest["integrity"]["source_identity"])
+        source_identity = str(materialized_manifest["integrity"]["source_identity"])
+        if (
+            materialized_manifest["pack"]["id"] != pack_id
+            or materialized_manifest["pack"]["artifact_digest"]
+            != manifest["pack"]["artifact_digest"]
+        ):
+            raise RuntimeSurfaceError(
+                RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+                "selected Pack materialization identity does not match",
+            )
+        if source_identity != projected_source_identity:
+            provenance = manifest.get("provenance")
+            expected_source_path = f"ecosystem/{pack_id}/pack.v4.json"
+            if (
+                not isinstance(provenance, Mapping)
+                or provenance.get("schema") != "io.tobkiri.provenance.v2"
+                or provenance.get("source_kind") != "generated"
+                or provenance.get("source_path") != expected_source_path
+                or provenance.get("source_digest") != materialized_manifest_digest
+                or provenance.get("source_digest") != projected_source_identity
+            ):
+                raise RuntimeSurfaceError(
+                    RuntimeSurfaceErrorCode.DIGEST_MISMATCH,
+                    "selected Pack projection is not bound to its materialization",
+                )
         if (
             len(index_entries) != 1
             or str(index_entries[0]["digest"]) != digest
-            or str(manifest["integrity"]["contract_catalog_digest"]) != digest
+            or str(materialized_manifest["integrity"]["contract_catalog_digest"]) != digest
             or str(index["pack_id"]) != pack_id
             or str(catalog["pack_id"]) != pack_id
             or str(index["source_identity"]) != source_identity
@@ -2692,8 +2640,7 @@ def _one_contract_document(
     documents = [
         item
         for item in catalog["contracts"]
-        if item["contract_id"] == contract_id
-        and item["revision_digest"] == revision_digest
+        if item["contract_id"] == contract_id and item["revision_digest"] == revision_digest
     ]
     if len(documents) != 1:
         raise RuntimeSurfaceError(
@@ -2858,9 +2805,7 @@ def _commit_authority_profile_approval(
             "Profile candidate principal is invalid",
         )
     principal = FunctionPrincipal.from_dict(approval_binding["function_principal"])
-    actor_suffix = authority_digest({"session_id": session_id}).removeprefix("sha256:")[
-        :24
-    ]
+    actor_suffix = authority_digest({"session_id": session_id}).removeprefix("sha256:")[:24]
     record = ApprovalRecord(
         approval_id=approval_id,
         snapshot_digest=candidate.candidate_digest,
@@ -2982,9 +2927,7 @@ def _map_change_error(error: Exception) -> RuntimeSurfaceError:
     )
 
 
-def _map_reconciliation_error(
-    error: Exception, *, approval: bool = False
-) -> RuntimeSurfaceError:
+def _map_reconciliation_error(error: Exception, *, approval: bool = False) -> RuntimeSurfaceError:
     """Map durable reconciliation failures without leaking persisted state."""
 
     if isinstance(error, RuntimeSurfaceError):

@@ -101,6 +101,27 @@ def _resolve(catalog: BundledCatalog | None = None):
     )
 
 
+def test_projected_pack_requires_exact_materialization_catalog_pin() -> None:
+    """A source-bound projection cannot fall back to its derivative digest."""
+
+    catalog = _catalog()
+    pack_id = "rumi_file_inspect_pack"
+    executable = copy.deepcopy(catalog.executable_catalogs[pack_id])
+    executable.pop("materialization_catalog_digest")
+    executable["catalog_digest"] = canonical_digest(
+        {key: value for key, value in executable.items() if key != "catalog_digest"}
+    )
+    executables = dict(catalog.executable_catalogs)
+    executables[pack_id] = executable
+    altered = replace(catalog, executable_catalogs=executables)
+
+    with pytest.raises(
+        ProfileResolutionDenied,
+        match="materialization executable catalog digest",
+    ):
+        _resolve(altered)
+
+
 def _authority(path: Path) -> AuthorityStore:
     store = AuthorityStore(path)
     while store.security_epoch < 7:
@@ -401,9 +422,7 @@ def test_application_launch_contribution_must_be_unique() -> None:
         packs={**catalog.packs, "runtime.tauri.application.default": application},
     )
 
-    with pytest.raises(
-        ProfileResolutionDenied, match="launch contribution is ambiguous"
-    ):
+    with pytest.raises(ProfileResolutionDenied, match="launch contribution is ambiguous"):
         _resolve(ambiguous)
 
 
@@ -1301,12 +1320,9 @@ def test_activation_persistence_failure_keeps_old_pointer_and_aborts_reservation
         for event in authority.audit_events()
         if event["event_type"] == "activation"
         and event["event_state"] == "prepared"
-        and event["payload"]["activation_id"]
-        == "activation:defaults-failed-pointer"
+        and event["payload"]["activation_id"] == "activation:defaults-failed-pointer"
     )
     reservation = authority.activation_reservation(str(failed["reservation_id"]))
     assert reservation is not None
     assert reservation["state"] == "aborted"
-    assert authority.active_activation_reservation(
-        "activation:defaults-failed-pointer"
-    ) is None
+    assert authority.active_activation_reservation("activation:defaults-failed-pointer") is None

@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:909a21353e402481796aefdfc8a31e5694e79a56e35e5558363c41bb555ec747",
+      "digest": "sha256:d5837b605e6860c84947f814e039810722a8afb2a4f2db7250b69c7ca3ccded0",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -93,7 +93,7 @@
   ],
   "integrity": {
     "source_identity": "sha256:bb598b3ab2837e494aaa2fa7b2922efb9ac03720cdc0ea327dc532ae310cb085",
-    "artifact_set_digest": "sha256:3fc14d58df45eabdfc29ae595dac1dce962646cfc0da21afbd03b89508c974f5",
+    "artifact_set_digest": "sha256:e3b075092f9c7799c25e51998845ca27ee92cdbf1198f17b472faa64d9c9677a",
     "contract_catalog_digest": "sha256:99340a762328a80d77e25c4c46b46afe1f44ba1c9aa65232bfed5b9cf8a3084a"
   },
   "migration": {
@@ -303,18 +303,18 @@
     "source_digest": "sha256:bb598b3ab2837e494aaa2fa7b2922efb9ac03720cdc0ea327dc532ae310cb085",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:b3d10f165df16448baf045a79e5655514f5b69f4ea5bb8828767b4e2f11f4b29",
+    "content_root_digest": "sha256:398126878ed7e5fb279958a64e8cbe093775f39a2543df00179116db37178827",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
-    "generator_digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00",
+    "generator_digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6",
     "input_inventory_digest": "sha256:d04552e2c2e07b1ad55d3e92a1e297ee7112df4ec9e4e0986aef8777c6df6a33",
     "normative": true,
     "evidence": [
       {
         "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
         "rule_id": "normative-generator-bytes",
-        "digest": "sha256:1d90b565b78c05f9a23a8777b1656fa4d90ac689e8ded92afc7ac567d2829d00"
+        "digest": "sha256:001e37d02ef9a9661fdb9c4a2a657279b14d91bdf3bc49fdd7b84fb6372897d6"
       },
       {
         "path": "ecosystem/tobkiri_host_pack_control/pack.v4.json",

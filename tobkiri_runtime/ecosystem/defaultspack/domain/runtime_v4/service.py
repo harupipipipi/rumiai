@@ -24,6 +24,7 @@ from packaging.version import InvalidVersion, Version
 
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
+from tobkiri_protocol.executable_catalog import materialization_catalog_digest
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
 from tobkiri_protocol.secure_persistence import (
@@ -239,20 +240,12 @@ class BundledCatalog:
                     f"executable catalog source identity is stale: {pack_id}"
                 )
             expected_catalog_digest = canonical_digest(
-                {
-                    key: value
-                    for key, value in executable.items()
-                    if key != "catalog_digest"
-                }
+                {key: value for key, value in executable.items() if key != "catalog_digest"}
             )
             if executable["catalog_digest"] != expected_catalog_digest:
-                raise BundleIntegrityError(
-                    f"executable catalog digest is stale: {pack_id}"
-                )
+                raise BundleIntegrityError(f"executable catalog digest is stale: {pack_id}")
             catalog_entries = [
-                item
-                for item in manifest["artifacts"]
-                if item["path"] == "executables.v4.json"
+                item for item in manifest["artifacts"] if item["path"] == "executables.v4.json"
             ]
             if len(catalog_entries) != 1:
                 raise BundleIntegrityError(
@@ -599,9 +592,7 @@ def _exact_executable_variant(
     pack_id = str(manifest["pack"]["id"])
     executable = catalog.executable_catalogs.get(pack_id)
     if executable is None:
-        raise ProfileResolutionDenied(
-            f"executable catalog is not bundled for Pack: {pack_id}"
-        )
+        raise ProfileResolutionDenied(f"executable catalog is not bundled for Pack: {pack_id}")
     if (
         executable["pack_id"] != pack_id
         or executable["source_identity"] != manifest["integrity"]["source_identity"]
@@ -612,11 +603,7 @@ def _exact_executable_variant(
     )
     if executable["catalog_digest"] != expected_catalog_digest:
         raise ProfileResolutionDenied("executable catalog digest is stale")
-    variants = [
-        item
-        for item in executable["variants"]
-        if item["function_id"] == function["id"]
-    ]
+    variants = [item for item in executable["variants"] if item["function_id"] == function["id"]]
     if len(variants) != 1:
         raise ProfileResolutionDenied(
             f"executable variant is not unique: {pack_id}/{function['id']}"
@@ -997,12 +984,17 @@ def resolve_default_profile(
             str(edge["operation_id"]),
         )
         domain_kind = function.get("isolation", "pack_vm")
+        try:
+            executable_catalog_digest = materialization_catalog_digest(
+                manifest,
+                catalog.executable_catalogs[manifest["pack"]["id"]],
+            )
+        except ValueError as exc:
+            raise ProfileResolutionDenied(str(exc)) from exc
         pin = {
             "pack_id": manifest["pack"]["id"],
             "artifact_digest": manifest["pack"]["artifact_digest"],
-            "executable_catalog_digest": catalog.executable_catalogs[
-                manifest["pack"]["id"]
-            ]["catalog_digest"],
+            "executable_catalog_digest": executable_catalog_digest,
             "variant_id": variant["variant_id"],
             "platform": variant["platform"],
             "architecture": variant["architecture"],
@@ -1055,9 +1047,7 @@ def resolve_default_profile(
         "architecture": shell_request["architecture"],
     }
     if source.get("profile_api_version") == "io.tobkiri.profile.v5":
-        resolved_shell["executable_artifact_digest"] = selected_variant[
-            "entrypoint_digest"
-        ]
+        resolved_shell["executable_artifact_digest"] = selected_variant["entrypoint_digest"]
     profile["shell"] = resolved_shell
     profile["packs"] = [
         {
@@ -1075,10 +1065,7 @@ def resolve_default_profile(
     )
 
     profile["content_projections"] = sorted(
-        [
-            resolve_profile_projection(item)
-            for item in source.get("content_projections") or []
-        ],
+        [resolve_profile_projection(item) for item in source.get("content_projections") or []],
         key=lambda item: item["projection_id"],
     )
     selected_projection_roots(profile["content_projections"])
@@ -1144,8 +1131,8 @@ def resolve_default_profile(
         "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_digest": canonical_digest(application_manifest),
     }
-    launch_provider_id, launch_contract_id, launch_operation_id = (
-        _application_launch_identity(application_manifest)
+    launch_provider_id, launch_contract_id, launch_operation_id = _application_launch_identity(
+        application_manifest
     )
     launch_contribution = {
         "provider_id": launch_provider_id,
@@ -2104,9 +2091,7 @@ class ActivationStore:
             or canonical_digest(
                 {
                     "effective_set": legacy_effective,
-                    "content_projections": successor.plan[
-                        "content_projections"
-                    ],
+                    "content_projections": successor.plan["content_projections"],
                 }
             )
             != successor.plan["closure_digest"]

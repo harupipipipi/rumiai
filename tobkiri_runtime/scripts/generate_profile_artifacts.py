@@ -22,6 +22,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tobkiri_protocol.canonical import canonical_digest, strict_loads  # noqa: E402
+from tobkiri_protocol.executable_catalog import (  # noqa: E402
+    materialization_catalog_digest,
+)
 from tobkiri_protocol.profile_scope import (  # noqa: E402
     normalize_requested_scope_template,
 )
@@ -40,6 +43,7 @@ GENERATOR_VERSION = "1.0.0"
 GENERATOR_PATH = Path(__file__).relative_to(ROOT.parent).as_posix()
 LOCAL_INPUTS = (
     ROOT / "tobkiri_protocol" / "canonical.py",
+    ROOT / "tobkiri_protocol" / "executable_catalog.py",
     ROOT / "tobkiri_protocol" / "profile_scope.py",
     ROOT / "tobkiri_protocol" / "provenance.py",
     ROOT / "tobkiri_protocol" / "validation.py",
@@ -370,7 +374,10 @@ def _compile_profile(
         pin = {
             "pack_id": manifest["pack"]["id"],
             "artifact_digest": manifest["pack"]["artifact_digest"],
-            "executable_catalog_digest": executable["catalog_digest"],
+            "executable_catalog_digest": materialization_catalog_digest(
+                manifest,
+                executable,
+            ),
             "variant_id": variant["variant_id"],
             "platform": variant["platform"],
             "architecture": variant["architecture"],
@@ -389,9 +396,7 @@ def _compile_profile(
         root = ROOT / resolved["artifact_root"]
         for relative, digest in files.items():
             projection_inputs[_relative(root / relative)] = digest
-    profile["content_projections"] = sorted(
-        projections, key=lambda item: item["projection_id"]
-    )
+    profile["content_projections"] = sorted(projections, key=lambda item: item["projection_id"])
     selected_projection_roots(profile["content_projections"])
     provenance = compatibility_profile_provenance(
         root=ROOT,
@@ -519,9 +524,7 @@ def _compile_lock(
         "application": application,
         "effective_set": effective_set,
         "content_projections": list(profile["content_projections"]),
-        "content_projection_digest": canonical_digest(
-            profile["content_projections"]
-        ),
+        "content_projection_digest": canonical_digest(profile["content_projections"]),
         "variant_pins": pins,
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,

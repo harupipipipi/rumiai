@@ -174,5 +174,6 @@
       ]
     }
   ],
-  "catalog_digest": "sha256:fd2e5c5772878ed6d02892f1a1b251a33e0e69209746f2d4ce40362a5bd76311"
+  "materialization_catalog_digest": "sha256:528172c19e63487c02a3b40ed5f65defc57b70577f93cfb2c2e12acb104a459e",
+  "catalog_digest": "sha256:1f6335138dd7ceb3c84af7b19c363e5dd16eae4cca54baac8f4cff813b403cd1"
 }
