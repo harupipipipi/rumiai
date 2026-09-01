@@ -46,6 +46,11 @@ def _approve_profile_process(
     bundle_root: str | None = None,
 ) -> None:
     try:
+        from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+            install_defaultspack_profile_runtime,
+        )
+
+        install_defaultspack_profile_runtime()
         service = RuntimeProfileChangeService(
             bundle_root=Path(bundle_root) if bundle_root is not None else None,
             surface_service=(
