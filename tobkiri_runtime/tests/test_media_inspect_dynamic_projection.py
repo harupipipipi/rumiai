@@ -25,6 +25,9 @@ from core_runtime.bootstrap.profile_capture import (
 from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
     load_frontend_contract_bindings,
 )
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    defaultspack_activation_snapshot_loader,
+)
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
@@ -310,6 +313,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority_setup,
         backends=BackendRegistry((backend,)),
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
     )
     for contract_id, operation_id in (
         (MEDIA_CONTRACT, MEDIA_OPERATION),
@@ -335,6 +339,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
     )
 
     catalog = BundledCatalog.load(_bundle_root())
