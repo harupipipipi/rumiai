@@ -303,7 +303,7 @@ impl SignedApplicationResolver {
         let root_pack = read_json(&pack_root.join("pack.v4.json"), "materialized Pack")?;
         let root_pack_id = value_str(&root_pack, "/pack/id")
             .context("materialized Pack is missing its Pack identity")?;
-        ensure_materialized_application_pack(root_pack_id, &selected.application_pack_id)?;
+        ensure_materialized_pack_selected(root_pack_id, &selected.pack_ids)?;
         verify_pack_artifact_index(&pack_root, &bundle_root, root_pack_id)?;
 
         let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
@@ -324,12 +324,12 @@ impl SignedApplicationResolver {
     }
 }
 
-fn ensure_materialized_application_pack(
+fn ensure_materialized_pack_selected(
     root_pack_id: &str,
-    selected_application_pack_id: &str,
+    selected_pack_ids: &BTreeSet<String>,
 ) -> Result<()> {
-    if root_pack_id != selected_application_pack_id {
-        bail!("materialized Pack is not the selected Application Pack");
+    if !selected_pack_ids.contains(root_pack_id) {
+        bail!("materialized Pack is outside the selected Profile closure");
     }
     Ok(())
 }
@@ -3805,13 +3805,12 @@ mod tests {
     }
 
     #[test]
-    fn materialized_root_pack_must_be_the_selected_application() {
-        assert!(
-            ensure_materialized_application_pack("application.alpha", "application.alpha").is_ok()
-        );
-        assert!(
-            ensure_materialized_application_pack("defaults-basepack", "application.alpha").is_err()
-        );
+    fn materialized_root_pack_must_be_in_the_selected_profile_closure() {
+        let selected =
+            BTreeSet::from(["application.alpha".to_owned(), "provider.alpha".to_owned()]);
+        assert!(ensure_materialized_pack_selected("application.alpha", &selected).is_ok());
+        assert!(ensure_materialized_pack_selected("provider.alpha", &selected).is_ok());
+        assert!(ensure_materialized_pack_selected("provider.foreign", &selected).is_err());
     }
 
     #[test]
