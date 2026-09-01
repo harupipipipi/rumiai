@@ -54,6 +54,11 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "bundled",
     "python-runtime",
 ];
+const SOURCE_ONLY_PROFILE_ARTIFACTS: &[&str] = &[
+    "defaults.profile.intent.v1.json",
+    "defaults.profile.lock.v5.json",
+    "defaults.release.provenance.json",
+];
 const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
 const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
 const PRESENTATION_CATALOG_SCHEMA: &str = "io.tobkiri.launcher.presentation-catalog.v1";
@@ -4193,10 +4198,12 @@ fn stage_core_verified_release(
             &staged_bundled.join(filename),
         )?;
     }
+    let staged_defaults_bundle = staged_root.join("ecosystem/defaultspack/v4");
     copy_dir_recursive(
         &release_root.join("ecosystem/defaultspack/v4"),
-        &staged_root.join("ecosystem/defaultspack/v4"),
+        &staged_defaults_bundle,
     )?;
+    remove_source_only_profile_artifacts(&staged_defaults_bundle)?;
     let platform_artifacts = release_root.join("ecosystem/defaultspack/platform-artifacts");
     if platform_artifacts.is_dir() {
         copy_dir_recursive(
@@ -4222,6 +4229,43 @@ fn stage_core_verified_release(
         verified.key_id
     );
     Ok(Some(staged_catalog))
+}
+
+fn remove_source_only_profile_artifacts(bundle_root: &Path) -> io::Result<()> {
+    require_directory(bundle_root, "staged packaged Defaults v4 bundle")?;
+    for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+        let candidate = bundle_root.join(filename);
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_release(format!(
+                "staged source-only Profile artifact may not be a symlink: {}",
+                candidate.display()
+            )));
+        }
+        if !metadata.is_file() {
+            return Err(invalid_release(format!(
+                "staged source-only Profile artifact must be absent or regular: {}",
+                candidate.display()
+            )));
+        }
+        reject_release_hardlink(&metadata, &candidate)?;
+        fs::remove_file(&candidate)?;
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(invalid_release(format!(
+                    "staged source-only Profile artifact remained after removal: {}",
+                    candidate.display()
+                )));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn current_source_revision(repository_root: &Path) -> io::Result<String> {
@@ -7842,6 +7886,70 @@ mod tests {
             fs::read(&staged_catalog).expect("staged catalog should remain readable"),
             fs::read(&catalog).expect("mutated source should be readable")
         );
+    }
+
+    #[test]
+    fn core_staging_replaces_source_only_profile_artifacts() {
+        let tree = TestTree::new("core-source-only-profile-artifacts");
+        let (release_root, staged_root, _) = release_fixture(&tree);
+        let staged_bundle = staged_root.join("ecosystem/defaultspack/v4");
+        fs::create_dir_all(&staged_bundle).expect("staged Defaults bundle should be creatable");
+        for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+            fs::write(
+                staged_bundle.join(filename),
+                b"tracked source-only artifact",
+            )
+            .expect("tracked source-only artifact should be creatable");
+        }
+        let retained = staged_bundle.join("unrelated-tracked-file");
+        fs::write(&retained, b"retained").expect("unrelated staged file should be creatable");
+
+        stage_core_verified_release(&staged_root, &release_root)
+            .expect("Core staging should replace the packaged Defaults closure");
+
+        for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+            assert!(
+                fs::symlink_metadata(staged_bundle.join(filename))
+                    .expect_err("source-only Profile artifact must be absent")
+                    .kind()
+                    == io::ErrorKind::NotFound
+            );
+        }
+        assert_eq!(
+            fs::read(&retained).expect("unrelated staged file should remain"),
+            b"retained"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_only_profile_artifact_removal_rejects_symlink_and_special_file() {
+        use std::os::unix::fs::symlink;
+        use std::os::unix::net::UnixListener;
+
+        let tree = TestTree::new("source-only-profile-artifact-types");
+        let bundle = tree.path().join("staged/ecosystem/defaultspack/v4");
+        fs::create_dir_all(&bundle).expect("staged Defaults bundle should be creatable");
+        let outside = tree.path().join("outside-profile-artifact");
+        fs::write(&outside, b"outside").expect("outside fixture should be creatable");
+        symlink(&outside, bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[0]))
+            .expect("source-only fixture symlink should be creatable");
+
+        let error = remove_source_only_profile_artifacts(&bundle)
+            .expect_err("source-only Profile symlink must fail closed");
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(
+            fs::read(&outside).expect("outside target should remain"),
+            b"outside"
+        );
+
+        fs::remove_file(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[0]))
+            .expect("fixture symlink should be removable");
+        let _socket = UnixListener::bind(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[1]))
+            .expect("source-only special-file fixture should be creatable");
+        let error = remove_source_only_profile_artifacts(&bundle)
+            .expect_err("source-only Profile special file must fail closed");
+        assert!(error.to_string().contains("absent or regular"));
     }
 
     #[test]
