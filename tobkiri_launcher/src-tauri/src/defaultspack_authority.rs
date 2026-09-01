@@ -220,7 +220,19 @@ struct ExecutableCatalog {
     pack_id: String,
     source_identity: String,
     variants: Vec<ExecutableVariant>,
+    materialization_catalog_digest: Option<String>,
     catalog_digest: String,
+}
+
+/// Identity facts needed to bind a sidecar catalog to its Pack authority.
+///
+/// A generated Pack is a source-bound projection.  Its sidecar must preserve
+/// the digest of the canonical executable catalog that was used to materialize
+/// it.  Canonical and externally admitted Packs use `catalog_digest` directly
+/// and must not introduce that alias field.
+struct PackCatalogIdentity {
+    source_identity: String,
+    is_source_bound_projection: bool,
 }
 
 #[derive(Deserialize)]
@@ -1728,6 +1740,10 @@ fn validate_executable_catalog(raw: &[u8], path: &str) -> Result<ExecutableCatal
         || !valid_identifier(&catalog.pack_id)
         || !valid_digest(&catalog.source_identity)
         || !valid_digest(&catalog.catalog_digest)
+        || catalog
+            .materialization_catalog_digest
+            .as_deref()
+            .is_some_and(|digest| !valid_digest(digest))
     {
         bail!("executable catalog identity is invalid: {path}");
     }
@@ -1804,7 +1820,7 @@ fn validate_executable_catalog(raw: &[u8], path: &str) -> Result<ExecutableCatal
     Ok(catalog)
 }
 
-fn authority_pack_identity(raw: &[u8], path: &str) -> Result<(String, String)> {
+fn authority_pack_identity(raw: &[u8], path: &str) -> Result<(String, PackCatalogIdentity)> {
     let document: Value = serde_json::from_slice(raw)
         .with_context(|| format!("Pack authority is malformed: {path}"))?;
     let pack_id =
@@ -1817,7 +1833,19 @@ fn authority_pack_identity(raw: &[u8], path: &str) -> Result<(String, String)> {
     {
         bail!("bundle entry does not contain a valid Pack authority: {path}");
     }
-    Ok((pack_id.to_owned(), source_identity.to_owned()))
+    let provenance = document.get("provenance").and_then(Value::as_object);
+    let is_source_bound_projection = provenance.is_some_and(|provenance| {
+        provenance.get("schema").and_then(Value::as_str) == Some("io.tobkiri.provenance.v2")
+            && provenance.get("source_kind").and_then(Value::as_str) == Some("generated")
+            && provenance.get("source_digest").and_then(Value::as_str) == Some(source_identity)
+    });
+    Ok((
+        pack_id.to_owned(),
+        PackCatalogIdentity {
+            source_identity: source_identity.to_owned(),
+            is_source_bound_projection,
+        },
+    ))
 }
 
 fn validate_authority_role(kind: BundleEntryKind, raw: &[u8], path: &str) -> Result<()> {
@@ -1899,11 +1927,22 @@ fn verify_bundle_lock(root: &Path) -> Result<VerifiedBundleLock> {
         if !sidecar_pack_ids.insert(catalog.pack_id.clone()) {
             bail!("Pack v4 bundle contains duplicate executable catalogs");
         }
-        let source_identity = pack_identities
+        let pack_identity = pack_identities
             .get(&catalog.pack_id)
             .with_context(|| format!("executable catalog has no Pack authority: {path}"))?;
-        if source_identity != &catalog.source_identity {
+        if pack_identity.source_identity != catalog.source_identity {
             bail!("executable catalog source identity disagrees with its Pack: {path}");
+        }
+        if pack_identity.is_source_bound_projection {
+            if catalog.materialization_catalog_digest.is_none() {
+                bail!(
+                    "source-bound projected Pack executable catalog is missing its canonical materialization digest: {path}"
+                );
+            }
+        } else if catalog.materialization_catalog_digest.is_some() {
+            bail!(
+                "non-projected Pack executable catalog cannot replace its catalog identity: {path}"
+            );
         }
     }
     let mut actual = BTreeSet::new();
@@ -2382,6 +2421,45 @@ mod tests {
                 .unwrap();
             entry["digest"] = Value::String(sha256(&raw));
         });
+    }
+
+    fn rewrite_minimal_pack(root: &Path, mutate: impl FnOnce(&mut Value)) {
+        let relative = "packs/test_pack.pack.v4.json";
+        let path = root.join(relative);
+        let mut document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        mutate(&mut document);
+        let raw = serde_json::to_vec(&document).unwrap();
+        fs::write(&path, &raw).unwrap();
+        rewrite_minimal_lock(root, |lock| {
+            let entry = lock["entries"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["path"] == relative)
+                .unwrap();
+            entry["digest"] = Value::String(sha256(&raw));
+        });
+    }
+
+    fn minimal_projected_sidecar_bundle(name: &str) -> PathBuf {
+        let root = minimal_sidecar_bundle(name);
+        let source_identity = format!("sha256:{}", "1".repeat(64));
+        rewrite_minimal_pack(&root, |pack| {
+            pack["provenance"] = serde_json::json!({
+                "schema": "io.tobkiri.provenance.v2",
+                "source_kind": "generated",
+                "source_digest": source_identity,
+            });
+        });
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog["materialization_catalog_digest"] =
+                Value::String(format!("sha256:{}", "4".repeat(64)));
+            let object = catalog.as_object_mut().unwrap();
+            object.remove("catalog_digest");
+            let digest = sha256(&serde_json::to_vec(&catalog).unwrap());
+            catalog["catalog_digest"] = Value::String(digest);
+        });
+        root
     }
 
     fn source_manifest_entries(source_checkout: &Path) -> BTreeMap<String, Value> {
@@ -2872,6 +2950,7 @@ mod tests {
             "ecosystem/defaultspack/contracts.v4.json",
             "ecosystem/defaultspack/artifact-index.v4.json",
             "ecosystem/defaultspack/executables.v4.json",
+            "ecosystem/defaultspack/domain/runtime_surface_v4.py",
         ] {
             let path = runtime_root.join(relative);
             let metadata = fs::symlink_metadata(&path).expect("source file should exist");
@@ -3479,6 +3558,53 @@ mod tests {
         });
         let error = verify_bundle_lock(&root).unwrap_err().to_string();
         assert!(error.contains("source identity disagrees"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn projected_executable_catalog_requires_materialization_digest() {
+        let root = minimal_projected_sidecar_bundle("projection-pin-required");
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog
+                .as_object_mut()
+                .unwrap()
+                .remove("materialization_catalog_digest");
+            let object = catalog.as_object_mut().unwrap();
+            object.remove("catalog_digest");
+            let digest = sha256(&serde_json::to_vec(&catalog).unwrap());
+            catalog["catalog_digest"] = Value::String(digest);
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(
+            error.contains("missing its canonical materialization digest"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn non_projected_executable_catalog_rejects_materialization_digest_alias() {
+        let root = minimal_sidecar_bundle("materialization-alias");
+        rewrite_minimal_sidecar(&root, |catalog| {
+            catalog["materialization_catalog_digest"] =
+                Value::String(format!("sha256:{}", "4".repeat(64)));
+            let object = catalog.as_object_mut().unwrap();
+            object.remove("catalog_digest");
+            let digest = sha256(&serde_json::to_vec(&catalog).unwrap());
+            catalog["catalog_digest"] = Value::String(digest);
+        });
+        let error = verify_bundle_lock(&root).unwrap_err().to_string();
+        assert!(
+            error.contains("cannot replace its catalog identity"),
+            "{error}"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn projected_executable_catalog_accepts_valid_materialization_digest() {
+        let root = minimal_projected_sidecar_bundle("projection-pin-valid");
+        assert!(verify_bundle_lock(&root).is_ok());
         fs::remove_dir_all(root).unwrap();
     }
 
