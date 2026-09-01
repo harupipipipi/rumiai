@@ -278,7 +278,7 @@ impl SignedApplicationResolver {
         verify_symlink_free_tree(&pack_root, &pack_root)?;
         let bundle_lock = verify_bundle_lock(&bundle_root)?;
         #[cfg(test)]
-        let catalog = fixture_catalog_with_shell_variant(catalog, &app_root)?;
+        let catalog = fixture_catalog_with_shell_variant(catalog, &bundle_root, &bundle_lock)?;
         let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
 
         let selected_variant = validate_profile(&selected.profile, &catalog, &selected)?;
@@ -1169,12 +1169,10 @@ fn validate_application_pack(
         || providers.len() != 1
         || operations.len() != 1
         || artifacts.len() != 2
-        || value_str(&functions[0], "/id")
-            .map_or(true, |function_id| !valid_identifier(function_id))
+        || value_str(&functions[0], "/id") != Some(expected_application_id)
         || value_str(&functions[0], "/isolation") != Some("dedicated_process")
         || !contains_string(&functions[0], "/operations", "launch")
-        || value_str(&providers[0], "/provider_id")
-            .map_or(true, |provider_id| !valid_identifier(provider_id))
+        || value_str(&providers[0], "/provider_id") != Some(expected_application_id)
         || value_str(&providers[0], "/owner") != value_str(&providers[0], "/provider_id")
         || !valid_contract_id(value_str(&providers[0], "/contract_reference").unwrap_or_default())
         || !contains_string(&providers[0], "/operations", "launch")
@@ -2110,15 +2108,49 @@ fn verify_pack_artifact_index(
 #[cfg(test)]
 fn fixture_catalog_with_shell_variant(
     mut catalog: crate::presentation::PresentationCatalog,
-    app_root: &Path,
+    bundle_root: &Path,
+    bundle_lock: &VerifiedBundleLock,
 ) -> Result<crate::presentation::PresentationCatalog> {
-    let (_, profile_source, _) = catalog.bootstrap_profile_identity()?;
-    let bundle_root = packaged_bundle_root(app_root, profile_source)?;
     let profile = read_json(&bundle_root.join(PROFILE_PATH), "fixture bootstrap Profile")?;
     let platform = value_str(&profile, "/shell/platform")
         .context("fixture bootstrap Profile Shell platform is missing")?;
     let architecture = value_str(&profile, "/shell/architecture")
         .context("fixture bootstrap Profile Shell architecture is missing")?;
+    let application_pack_ids = profile
+        .get("packs")
+        .and_then(Value::as_array)
+        .context("fixture bootstrap Profile Pack set is missing")?
+        .iter()
+        .filter(|pack| value_str(pack, "/role") == Some("application"))
+        .filter_map(|pack| value_str(pack, "/pack_id"))
+        .collect::<Vec<_>>();
+    if application_pack_ids.len() != 1 {
+        bail!("fixture bootstrap Profile must select one Application Pack");
+    }
+    let application_pack = read_json(
+        &bundle_pack_path(bundle_root, bundle_lock, application_pack_ids[0])?,
+        "fixture Application Pack",
+    )?;
+    let selected_platform = format!("{platform}-{architecture}");
+    let executable_artifacts = application_pack
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .context("fixture Application Pack artifacts are missing")?
+        .iter()
+        .filter(|artifact| {
+            value_str(artifact, "/kind") == Some("executable")
+                && value_str(artifact, "/platform") == Some(selected_platform.as_str())
+        })
+        .collect::<Vec<_>>();
+    if executable_artifacts.len() != 1 {
+        bail!("fixture Application Pack must select one executable artifact");
+    }
+    let artifact_digest = value_str(executable_artifacts[0], "/digest")
+        .filter(|digest| valid_digest(digest))
+        .context("fixture Application Pack artifact digest is invalid")?;
+    let entrypoint_digest = value_str(executable_artifacts[0], "/entrypoint_digest")
+        .filter(|digest| valid_digest(digest))
+        .context("fixture Application Pack entrypoint digest is invalid")?;
     let default_shell_provider_id = catalog.default_selection.shell_provider_id.clone();
     let shell = catalog
         .shell_providers
@@ -2146,14 +2178,8 @@ fn fixture_catalog_with_shell_variant(
         bail!("fixture catalog Shell variant has partial installed artifact metadata");
     }
     if metadata_absent {
-        let artifact_base = app_root.join("ecosystem/defaultspack/platform-artifacts");
-        let artifact_root = artifact_base.join(safe_relative(&variant.artifact_ref)?);
-        let entrypoint = artifact_base.join(safe_relative(&variant.entrypoint)?);
-        variant.sha256 = Some(artifact_tree_digest(&artifact_root)?);
-        variant.entrypoint_sha256 = Some(sha256(&read_regular_file(
-            &entrypoint,
-            "fixture Shell entrypoint",
-        )?));
+        variant.sha256 = Some(artifact_digest.to_owned());
+        variant.entrypoint_sha256 = Some(entrypoint_digest.to_owned());
     }
     Ok(catalog)
 }
@@ -4002,6 +4028,14 @@ mod tests {
             |pack| pack["functions"][0]["id"] = Value::String("wrong.function".into()),
             |pack| {
                 pack["provider_catalog"][0]["provider_id"] = Value::String("wrong.provider".into());
+            },
+            |pack| {
+                let foreign = Value::String("application.foreign".into());
+                pack["functions"][0]["id"] = foreign.clone();
+                pack["provider_catalog"][0]["provider_id"] = foreign.clone();
+                pack["provider_catalog"][0]["owner"] = foreign.clone();
+                pack["operation_catalog"][0]["owner"] = foreign.clone();
+                pack["operation_catalog"][0]["provider_id"] = foreign;
             },
         ];
         for (index, mutation) in mutations.iter().enumerate() {
