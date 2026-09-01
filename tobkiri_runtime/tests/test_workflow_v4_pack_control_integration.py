@@ -36,6 +36,19 @@ PACK_ID = "tobkiri_workflow_pack"
 SESSION_ID = f"{'a' * 64}.{'b' * 24}.1"
 
 
+def _capture_control_session(**kwargs):
+    """Compose the Defaultspack runtime surface explicitly for direct tests."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_pack_control_session(
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 def _invoke(session, contract: str, operation: str, payload: dict | None = None):
     return session.invoke(
         contract,
@@ -52,7 +65,7 @@ def test_optional_workflow_pack_enters_closure_only_after_full_ceremony(
 
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user-data"))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    session = capture_pack_control_session()
+    session = _capture_control_session()
 
     catalog = _invoke(session, PACK_CONTROL_CONTRACT, "catalog.read")
     workflow = next(item for item in catalog["packs"] if item["pack_id"] == PACK_ID)

@@ -1681,7 +1681,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_git_publish_pack/ecosystem.json",
-          "sha256": "7bf999e0863af45e147c9281dcfb76eba9b5660800e8af9a8de786e46eac3fb4"
+          "sha256": "63d85b1d843bc247c0ee225749a9537f23bd9f462f6711baa3f33074bf104507"
         }
       ]
     },
@@ -1705,7 +1705,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/ecosystem.json",
-          "sha256": "25910b31ad6f2d940b2fb704a94d45414ecd2996cda69552ada3fb05ecde971f"
+          "sha256": "6ea736af5f94d44cce19391d96a3a7b4206fcf66b81adb0b1a974a779e6ea48d"
         }
       ]
     },
@@ -1729,7 +1729,7 @@
       "evidence": [
         {
           "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/ecosystem.json",
-          "sha256": "c3c16799a2ea86614f7fbba0bbc12773b7097de267d09a5ef058264721d028d0"
+          "sha256": "2563f39bc76f7c946686ccf22ffd2fcf8852f8887e33b66bcfb00a41b832a995"
         }
       ]
     },

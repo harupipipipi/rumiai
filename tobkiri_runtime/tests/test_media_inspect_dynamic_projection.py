@@ -78,6 +78,19 @@ MEDIA_OPERATION = "rumi_media_inspect_service_pack.media-inspect"
 FILE_CONTRACT = "tobkiri.service.file.inspect.v1"
 FILE_OPERATION = "rumi_file_inspect_pack.file-inspect.for-media"
 GENERAL_FILE_OPERATION = "rumi_file_inspect_pack.file-inspect"
+
+
+def _capture_control_session(**kwargs):
+    """Compose the Defaultspack runtime surface explicitly for direct tests."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_pack_control_session(
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
 CONVERSATION_CALLER = "defaultspack.conversation"
 MEDIA_CALLER = "rumi_media_inspect_service_pack.media-inspect.service"
 WORKSPACE_CONTRACT = "tobkiri.resource.workspace.v1"
@@ -260,7 +273,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     mounted = store.mount("defaults", str(workspace), expected_revision=0)
     store.select("defaults", expected_revision=int(mounted["revision"]))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    control = capture_pack_control_session()
+    control = _capture_control_session()
     control.invoke(
         PACK_CONTROL_CONTRACT,
         "pack.install",

@@ -36,6 +36,19 @@ CONTRACT_ID = "io.tobkiri.conformance.echo.v1"
 OPERATION_ID = "echo"
 
 
+def _capture_control_session(**kwargs):
+    """Compose the Defaultspack runtime surface explicitly for direct tests."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_pack_control_session(
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 def _write_json(path: Path, value: object) -> None:
     path.write_text(
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
@@ -137,7 +150,7 @@ def test_signed_external_pack_install_approve_enable_creates_profile_revision(
         confirmation=prepare_default_profile_confirmation()
     )
     initial_revision = canonical_digest(initial.resolved.profile)
-    session = capture_pack_control_session()
+    session = _capture_control_session()
     catalog = _invoke(session, "catalog.read")
     assert catalog["count"] == len(load_pack_catalog()) + 1
     external = next(item for item in catalog["packs"] if item["pack_id"] == PACK_ID)
@@ -167,7 +180,7 @@ def test_signed_external_pack_install_approve_enable_creates_profile_revision(
         item["contract_id"] == CONTRACT_ID and item["operation_id"] == OPERATION_ID
         for item in active.resolved.plan["bindings"]
     )
-    restarted = capture_pack_control_session()
+    restarted = _capture_control_session()
     assert _invoke(restarted, "pack.status", {"pack_id": PACK_ID})["enabled"] is True
     assert _invoke(restarted, "pack.disable", {"pack_id": PACK_ID})["enabled"] is False
     disabled = capture_default_profile()
@@ -177,7 +190,7 @@ def test_signed_external_pack_install_approve_enable_creates_profile_revision(
     revoked = _invoke(restarted, "approval.revoke", {"pack_id": PACK_ID})
     assert revoked["approval_status"] == "revoked"
     assert revoked["enabled"] is False
-    after_revoke = capture_pack_control_session()
+    after_revoke = _capture_control_session()
     status = _invoke(after_revoke, "pack.status", {"pack_id": PACK_ID})
     assert status["approved"] is False
     assert status["enabled"] is False

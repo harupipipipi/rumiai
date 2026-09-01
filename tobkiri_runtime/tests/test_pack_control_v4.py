@@ -36,13 +36,26 @@ TARGET_PACK = "rumi_git_read_pack"
 REQUIRED_PACK = "rumi_file_inspect_pack"
 
 
+def _capture_control_session(**kwargs):
+    """Compose the Defaultspack runtime surface explicitly for direct tests."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_pack_control_session(
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 @pytest.fixture
 def captured_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Capture one isolated canonical Defaults Profile and approval store."""
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    session = capture_pack_control_session()
+    session = _capture_control_session()
     state_path = user_data / "workspaces" / "defaults" / "activation" / "active.json"
     yield session, state_path, user_data
 
@@ -106,7 +119,7 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
     enabled = _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})
     assert enabled["enabled"] is True
 
-    restarted = capture_pack_control_session()
+    restarted = _capture_control_session()
     status = _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})
     assert status["installed"] is True
     assert status["approved"] is True
@@ -116,7 +129,7 @@ def test_catalog_install_approve_enable_and_restart_read_back(captured_session) 
     assert (
         _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"] is False
     )
-    recaptured = capture_pack_control_session()
+    recaptured = _capture_control_session()
     assert (
         _invoke(recaptured, "pack.status", {"pack_id": TARGET_PACK})["enabled"] is False
     )
@@ -270,7 +283,7 @@ def test_enable_does_not_require_unrelated_pack_install_or_approval(
     assert _invoke(session, "pack.status", {"pack_id": unrelated})["installed"] is False
     _approve_target(session)
     assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"] is True
-    restarted = capture_pack_control_session()
+    restarted = _capture_control_session()
     assert (
         _invoke(restarted, "pack.status", {"pack_id": unrelated})["approved"] is False
     )
@@ -419,7 +432,7 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
     _approve_target(session)
     assert _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})["enabled"]
 
-    restarted = capture_pack_control_session()
+    restarted = _capture_control_session()
     assert _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})["enabled"]
     assert not _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"]
     approval_path = (
@@ -431,7 +444,7 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
     assert revoked["enabled"] is False
     assert revoked["approval_status"] == "revoked"
 
-    after_restart = capture_pack_control_session()
+    after_restart = _capture_control_session()
     status = _invoke(after_restart, "pack.status", {"pack_id": TARGET_PACK})
     assert status["approved"] is False
     assert status["enabled"] is False
@@ -440,7 +453,7 @@ def test_revoke_persists_audit_and_rejects_revision_replay_after_restart(
         _invoke(after_restart, "approval.revoke", {"pack_id": TARGET_PACK})
 
     approval_path.write_bytes(approved_payload)
-    replayed = capture_pack_control_session()
+    replayed = _capture_control_session()
     assert (
         _invoke(replayed, "pack.status", {"pack_id": TARGET_PACK})["approval_reason"]
         == "approval_revoked"
@@ -587,14 +600,14 @@ def test_missing_profile_and_symlinked_state_fail_closed(
     user_data = tmp_path / "missing"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    capture_pack_control_session()
+    _capture_control_session()
     pointer = user_data / "workspaces" / "defaults" / "activation" / "active.json"
     pointer.unlink()
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")
     pointer.symlink_to(outside)
     with pytest.raises(PackControlDenied, match="missing"):
-        capture_pack_control_session()
+        _capture_control_session()
 
 
 def test_profile_identity_traversal_fails_before_control_state_access(
@@ -604,7 +617,7 @@ def test_profile_identity_traversal_fails_before_control_state_access(
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    session = capture_pack_control_session()
+    session = _capture_control_session()
     with pytest.raises(PackControlDenied, match="profile_id"):
         _invoke(session, "catalog.read", {"profile_id": "../escaped"})
 
