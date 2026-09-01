@@ -275,6 +275,49 @@ class _MediaBackend:
         del domain_id
 
 
+class _PackRouteValidationBackend:
+    """Test-only backend for one Pack's captured route availability."""
+
+    def __init__(self, pack_id: str, *, ready: bool) -> None:
+        self._pack_id = pack_id
+        self.status = BackendStatus(
+            backend_id="tobkiri.python-pack-v4",
+            execution_kind=ExecutionKind.PACK_VM,
+            platform="any",
+            backend_digest=canonical_digest(
+                {"backend": "route-validation-v4", "pack_id": pack_id, "ready": ready}
+            ),
+            production_enabled=ready,
+            conformance_only=not ready,
+            satisfied_gates=REQUIRED_PRODUCTION_GATES if ready else frozenset(),
+            unavailable_reason=(
+                None
+                if ready
+                else "authenticated PackVM supervisor is not registered for the selected backend"
+            ),
+        )
+
+    def supports(self, binding: Any) -> bool:
+        return binding.artifact.pack_id == self._pack_id
+
+    def bind_artifact_resolver(self, resolver: Any) -> None:
+        del resolver
+
+    def materialize(self, binding: Any, reservation_id: str) -> RuntimeEvidence:
+        del binding, reservation_id
+        raise AssertionError("route validation backend must not materialize")
+
+    def invoke(self, request: Any) -> ProviderOutcome:
+        del request
+        raise AssertionError("route validation backend must not invoke")
+
+    def cancel(self, request_id: str) -> None:
+        del request_id
+
+    def terminate(self, domain_id: str) -> None:
+        del domain_id
+
+
 @pytest.fixture
 def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user_data = tmp_path / "user-data"
@@ -355,6 +398,12 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
+        backends=BackendRegistry(
+            (
+                _PackRouteValidationBackend("defaultspack", ready=True),
+                _PackRouteValidationBackend(MEDIA_PACK, ready=False),
+            )
+        ),
     )
 
     catalog = BundledCatalog.load(_bundle_root())
