@@ -1280,7 +1280,7 @@
       "path": "scripts/quality/evidence/pack_migration_proof.v1.json",
       "type": "regular-file",
       "size": 847745,
-      "sha256": "d27d31bccd4a2565c3a23cd92abbd7642d6572f2442c92d6fbc22640436fd5fc",
+      "sha256": "56d04e4db1fb7fcbe90f1c09186b05b32a7c94c2ec835dd616508bd8c886d1e9",
       "executable": false
     },
     {
@@ -1419,8 +1419,8 @@
     {
       "path": "tobkiri_protocol/composition.py",
       "type": "regular-file",
-      "size": 17492,
-      "sha256": "f50e51118a151bf2fa85ad102ba23c39891bdedb3a2bfc79b534535482371875",
+      "size": 18099,
+      "sha256": "7fddaa782eef7e39b4040167c64fc6c917e30d83a7a1b97d83462abc8225c764",
       "executable": false
     },
     {
