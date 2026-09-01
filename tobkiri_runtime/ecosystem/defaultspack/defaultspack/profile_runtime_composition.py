@@ -352,10 +352,22 @@ class DefaultspackProfileRuntime:
         catalog: BundledCatalog,
         packs: Mapping[str, Any],
     ) -> BundledCatalog:
-        """Preserve Defaultspack catalog metadata while replacing its pack map."""
+        """Preserve Defaultspack metadata while adding admitted Pack catalogs."""
 
         from ecosystem.defaultspack.domain.runtime_v4.service import BundledCatalog
+        from core_runtime.external_pack_catalog_v4 import (
+            load_admitted_external_executable_catalog,
+        )
 
+        executable_catalogs = dict(catalog.executable_catalogs)
+        external_pack_ids = set(packs) - set(catalog.packs)
+        for pack_id in sorted(external_pack_ids):
+            manifest = packs[pack_id]
+            if not isinstance(manifest, Mapping):
+                raise self.denied("external Pack manifest is invalid")
+            executable_catalogs[pack_id] = (
+                load_admitted_external_executable_catalog(pack_id, manifest)
+            )
         return BundledCatalog(
             root=catalog.root,
             packs=dict(packs),
@@ -363,7 +375,7 @@ class DefaultspackProfileRuntime:
             shells=catalog.shells,
             profiles=catalog.profiles,
             artifact_root=catalog.artifact_root,
-            executable_catalogs=catalog.executable_catalogs,
+            executable_catalogs=executable_catalogs,
         )
 
     def catalog_with_profiles(

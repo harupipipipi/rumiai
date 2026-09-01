@@ -264,6 +264,55 @@ def external_pack_content_digest(pack_id: str) -> str | None:
     return str(entry["content_digest"])
 
 
+def load_admitted_external_executable_catalog(
+    pack_id: str,
+    expected_manifest: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Load one verified executable catalog for an admitted external Pack.
+
+    External Packs are not part of the sealed Defaultspack bundle lock.  Their
+    executable catalogs therefore enter Profile resolution only through the
+    Host's signed, content-addressed admission registry.  The caller supplies
+    the manifest it selected for the closure; this prevents a catalog for a
+    different admitted revision from being silently combined with it.
+    """
+
+    normalized = str(pack_id or "").strip()
+    if not normalized or not isinstance(expected_manifest, Mapping):
+        raise ExternalPackCatalogDenied("external Pack executable request is invalid")
+    snapshot = load_external_pack_catalog()
+    entry = snapshot.entries.get(normalized)
+    root = snapshot.roots.get(normalized)
+    if entry is None or root is None:
+        raise ExternalPackCatalogDenied("external Pack is not admitted")
+    try:
+        manifest = validate_file(root / "pack.v4.json", "pack")
+        executable = validate_file(root / "executables.v4.json", "executable_catalog")
+        compiled = compile_pack_root(root)
+    except Exception as error:
+        raise ExternalPackCatalogDenied(
+            "external Pack executable catalog verification failed"
+        ) from error
+    # Reverify the signed CAS root after all individual reads.  A mutation or
+    # root replacement is an admission failure, never a fallback to an
+    # unverified catalog document.
+    _verify_entry_root(normalized, entry, root)
+    if (
+        canonical_digest(manifest) != canonical_digest(expected_manifest)
+        or manifest["pack"]["id"] != normalized
+        or manifest["pack"]["artifact_digest"] != entry["artifact_digest"]
+        or compiled.artifact.pack_id != normalized
+        or compiled.artifact.digest != entry["artifact_digest"]
+        or executable["pack_id"] != normalized
+        or executable["source_identity"]
+        != manifest["integrity"]["source_identity"]
+    ):
+        raise ExternalPackCatalogDenied(
+            "external Pack executable catalog does not match the admitted manifest"
+        )
+    return dict(executable)
+
+
 def resolve_admitted_pack_root(
     pack_id: str,
     bundled_root: Path | None = None,
@@ -957,6 +1006,7 @@ __all__ = [
     "admit_signed_external_pack",
     "control_catalog_revision",
     "external_pack_content_digest",
+    "load_admitted_external_executable_catalog",
     "load_admitted_pack_catalog",
     "load_external_pack_catalog",
     "resolve_admitted_pack_root",

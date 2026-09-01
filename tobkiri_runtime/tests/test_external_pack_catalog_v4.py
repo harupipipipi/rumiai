@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shutil
+import hashlib
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -56,22 +57,72 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
+def _file_digest(path: Path) -> str:
+    """Return the exact digest used by the Pack v4 artifact metadata."""
+
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _refresh_fixture_artifacts(root: Path) -> None:
+    """Rebuild the finite v4 authority chain after a fixture mutation."""
+
+    manifest_path = root / "pack.v4.json"
+    executable_path = root / "executables.v4.json"
+    index_path = root / "artifact-index.v4.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    executable = json.loads(executable_path.read_text(encoding="utf-8"))
+    runtime_digest = _file_digest(root / "runtime" / "echo.py")
+    for function in manifest["functions"]:
+        function["implementation_digest"] = runtime_digest
+    for variant in executable["variants"]:
+        variant["implementation_digest"] = runtime_digest
+    executable["catalog_digest"] = canonical_digest(
+        {key: value for key, value in executable.items() if key != "catalog_digest"}
+    )
+    _write_json(executable_path, executable)
+
+    for artifact in manifest["artifacts"]:
+        artifact["digest"] = _file_digest(root / artifact["path"])
+    artifact_digest = canonical_digest(manifest["artifacts"])
+    manifest["pack"]["artifact_digest"] = artifact_digest
+    manifest["integrity"]["artifact_set_digest"] = artifact_digest
+    _write_json(manifest_path, manifest)
+
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    for artifact in index["artifacts"]:
+        artifact["digest"] = _file_digest(root / artifact["path"])
+    index["artifact_set_digest"] = artifact_digest
+    unsigned = {key: value for key, value in index.items() if key != "integrity_seal"}
+    index["integrity_seal"]["signed_digest"] = canonical_digest(unsigned)
+    _write_json(index_path, index)
+
+
 def _signed_external_pack(
     tmp_path: Path,
     *,
     kind: str | None = None,
-    artifact_digest: str | None = None,
+    runtime_suffix: str | None = None,
 ) -> tuple[Path, Path]:
     source = tmp_path / PACK_ID
     shutil.copytree(FIXTURE, source)
-    if kind is not None or artifact_digest is not None:
+    if kind is not None:
         pack_manifest_path = source / "pack.v4.json"
         pack_manifest = json.loads(pack_manifest_path.read_text(encoding="utf-8"))
-        if kind is not None:
-            pack_manifest["pack"]["kind"] = kind
-        if artifact_digest is not None:
-            pack_manifest["pack"]["artifact_digest"] = artifact_digest
+        pack_manifest["pack"]["kind"] = kind
         _write_json(pack_manifest_path, pack_manifest)
+        executable_path = source / "executables.v4.json"
+        executable = json.loads(executable_path.read_text(encoding="utf-8"))
+        for variant in executable["variants"]:
+            variant["execution_kind"] = "host_extension"
+        _write_json(executable_path, executable)
+    if runtime_suffix is not None:
+        runtime = source / "runtime" / "echo.py"
+        runtime.write_text(
+            runtime.read_text(encoding="utf-8") + runtime_suffix,
+            encoding="utf-8",
+        )
+    if kind is not None or runtime_suffix is not None:
+        _refresh_fixture_artifacts(source)
     private_key = Ed25519PrivateKey.generate()
     manifest = build_signed_manifest(
         source,
@@ -315,7 +366,7 @@ def test_admission_is_idempotent_but_pack_id_digest_rebinding_is_denied(
     conflicting_parent.mkdir()
     conflicting_source, conflicting_trust = _signed_external_pack(
         conflicting_parent,
-        artifact_digest=f"sha256:{'1' * 64}",
+        runtime_suffix="\n# different signed artifact\n",
     )
     with pytest.raises(ExternalPackCatalogDenied, match="different digest"):
         admit_signed_external_pack(
