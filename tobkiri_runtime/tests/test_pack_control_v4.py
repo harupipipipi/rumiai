@@ -147,8 +147,10 @@ def test_control_operation_reuses_only_its_scoped_capture(
 ) -> None:
     """Repeated binding checks share one capture, while each operation is fresh."""
 
+    from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore
+
     session, _state_path, _user_data = captured_session
-    original_load = profile_capture.ActivationStore.load_active_snapshot
+    original_load = ActivationStore.load_active_snapshot
     loads = 0
 
     def counted_load(store):
@@ -157,7 +159,7 @@ def test_control_operation_reuses_only_its_scoped_capture(
         return original_load(store)
 
     monkeypatch.setattr(
-        profile_capture.ActivationStore,
+        ActivationStore,
         "load_active_snapshot",
         counted_load,
     )

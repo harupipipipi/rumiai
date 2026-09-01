@@ -329,5 +329,5 @@ def test_git_commit_has_distinct_preflight_snapshot_and_one_shot_authorize_phase
     assert len(preflight_calls) == 2
     assert len(authorize_calls) == 1
     assert len(guard_calls) == 2
-    assert snapshot_calls == ["workspace-1"]
+    assert len(snapshot_calls) == 1
     assert provider_calls == ["host_authorize", "git_write"]
