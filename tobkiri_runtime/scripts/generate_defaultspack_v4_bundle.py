@@ -38,6 +38,7 @@ from tobkiri_protocol.provenance import (  # noqa: E402
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog  # noqa: E402
 from scripts.profile_compatibility_provenance import (  # noqa: E402
+    compatibility_profile_provenance,
     validate_compatibility_profile,
 )
 
@@ -924,6 +925,17 @@ def _render(source_commit: str | None = None) -> dict[Path, bytes]:
                 operation_id=edge["operation_id"],
                 semantics_digest=contract_digests[0],
             )
+        from scripts import generate_profile_artifacts as profile_artifact_generator
+
+        profile["provenance"] = compatibility_profile_provenance(
+            root=ROOT,
+            profile=profile,
+            source_path=profile_path.relative_to(ROOT).as_posix(),
+            generator=profile_artifact_generator.GENERATOR_NAME,
+            generator_version=profile_artifact_generator.GENERATOR_VERSION,
+            generator_path=Path(profile_artifact_generator.__file__),
+            input_paths=profile_artifact_generator.COMPATIBILITY_PROVENANCE_INPUTS,
+        )
         profile = validate_document(profile, "profile")
         validate_compatibility_profile(profile)
         rendered[profile_path] = _pretty(profile)

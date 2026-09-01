@@ -15459,6 +15459,106 @@
                     "state"
                   ],
                   "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "operation_status_api_version": {
+                      "const": "io.tobkiri.control-operation-status.v1"
+                    },
+                    "request_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "operation_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "contract_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "request_digest": {
+                      "pattern": "^sha256:[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "indeterminate"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "result_digest": {
+                      "pattern": "^sha256:[0-9a-f]{64}$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "record_refs": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "digest": {
+                            "pattern": "^sha256:[0-9a-f]{64}$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "safe_error_code": {
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "created_at": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "updated_at": {
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "operation_status_api_version",
+                    "request_id",
+                    "operation_id",
+                    "contract_id",
+                    "request_digest",
+                    "state",
+                    "result",
+                    "result_digest",
+                    "record_refs",
+                    "safe_error_code",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
                 }
               ]
             }
