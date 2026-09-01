@@ -37,15 +37,16 @@ def run(input_data, context):
                 )
             )
         if action == "cancel":
+            cancellation = registry.offline.cancel(
+                str(payload.get("queue_id") or ""),
+                owner_key=owner_key,
+            )
             return ok(
                 {
                     "api_version": "tobkiri.commands/v1",
-                    "status": "cancelled"
-                    if registry.offline.cancel(
-                        str(payload.get("queue_id") or ""),
-                        owner_key=owner_key,
-                    )
-                    else "failed",
+                    "status": cancellation["status"],
+                    "too_late": cancellation["too_late"],
+                    "queue": cancellation.get("queue"),
                 }
             )
     except (TypeError, ValueError, OfflineQueueError) as exc:

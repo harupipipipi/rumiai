@@ -143,7 +143,10 @@ def test_resolved_catalog_never_silently_exposes_missing_frontend_handler() -> N
         if item["availability"]["status"] == "unavailable"
     ]
 
-    assert unavailable == []
+    assert len(unavailable) == 5
+    assert {
+        item["availability"]["reason_code"] for item in unavailable
+    } == {"host_interactive_approval_unavailable"}
     assert not any(
         item["code"] == "handler_missing"
         for item in catalog["diagnostics"]
@@ -379,7 +382,7 @@ def test_high_risk_command_refuses_removed_runtime_authority(
     result = protocol.invoke(payload, trusted_context)
 
     assert result["status"] == "failed"
-    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
+    assert result["error"]["code"] == "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
     assert "approval" not in result
     assert durable_secret not in json.dumps(result, sort_keys=True)
 
@@ -408,7 +411,7 @@ def test_high_risk_executor_policy_refuses_removed_runtime_authority(
 
     assert result is not None
     assert result["status"] == "failed"
-    assert result["error"]["code"] == "AUTHORITY_UNAVAILABLE"
+    assert result["error"]["code"] == "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
 
 
 def test_high_risk_operation_plan_binds_workspace_and_git_state(
