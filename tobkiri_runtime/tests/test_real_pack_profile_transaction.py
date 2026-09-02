@@ -467,40 +467,17 @@ def _activate_current_profile(
 
 
 def _pack_status(port: int, auth: Mapping[str, str], pack_id: str) -> dict[str, Any]:
-    status, payload = _contract_request(port, auth, "GET", "/api/ui/catalog")
-    assert status == 200, payload
-    data = payload.get("data")
-    assert isinstance(data, dict)
-    dynamic_host = data.get("dynamic_host")
-    assert isinstance(dynamic_host, dict)
-    contributions = dynamic_host["contributions"]
-    matching = [item for item in contributions if item["label"] == "pack.status"]
-    assert matching, [item.get("label") for item in contributions]
-    contribution = matching[0]
-    request = {
-        "request_id": str(uuid.uuid4()),
-        "expires_at": time.time() + 30,
-        "profile_id": dynamic_host["profile_id"],
-        "profile_revision": dynamic_host["profile_revision"],
-        "activation_id": dynamic_host["activation_id"],
-        "plan_hash": dynamic_host["plan_hash"],
-        "catalog_hash": dynamic_host["catalog_hash"],
-        "contribution_id": contribution["contribution_id"],
-        "owner_pack_id": contribution["owner_pack_id"],
-        "contract_id": contribution["action_contract"],
-        "payload": {"pack_id": pack_id},
-    }
-    status, payload = _contract_request(
-        port,
-        auth,
-        "POST",
-        "/api/ui/capability/invoke",
-        body=request,
+    """Read status from the canonical Host Pack-control catalog.
+
+    The dynamic UI catalog intentionally projects only currently invokable
+    application operations. Pack lifecycle state remains Host-owned and is
+    read through the exact Pack-control route.
+    """
+
+    catalog = _catalog(port, auth)
+    return next(
+        item for item in catalog["packs"] if item["pack_id"] == pack_id
     )
-    assert status == 200, payload
-    result = payload.get("data")
-    assert isinstance(result, dict)
-    return result
 
 
 def _disk_profile_state(user_data: Path) -> dict[str, Any]:
