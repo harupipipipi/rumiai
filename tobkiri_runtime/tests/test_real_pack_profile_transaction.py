@@ -473,9 +473,10 @@ def _pack_status(port: int, auth: Mapping[str, str], pack_id: str) -> dict[str, 
     assert isinstance(data, dict)
     dynamic_host = data.get("dynamic_host")
     assert isinstance(dynamic_host, dict)
-    contribution = next(
-        item for item in dynamic_host["contributions"] if item["label"] == "pack.status"
-    )
+    contributions = dynamic_host["contributions"]
+    matching = [item for item in contributions if item["label"] == "pack.status"]
+    assert matching, [item.get("label") for item in contributions]
+    contribution = matching[0]
     request = {
         "request_id": str(uuid.uuid4()),
         "expires_at": time.time() + 30,
@@ -562,7 +563,11 @@ def _exercise_real_pack_profile_transaction(
         capture_default_profile,
         prepare_default_profile_confirmation,
     )
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        install_defaultspack_profile_runtime,
+    )
 
+    install_defaultspack_profile_runtime()
     active = capture_default_profile(
         base_dir=user_data,
         confirmation=prepare_default_profile_confirmation(base_dir=user_data),
