@@ -283,7 +283,10 @@ def test_owner_resume_returns_pending_without_claiming_or_dispatching() -> None:
         fixture.broker.close()
 
     assert result.state is PendingEffectState.APPROVAL_PENDING
-    assert controller.status(pending.effect_id).state is PendingEffectState.APPROVAL_PENDING
+    assert (
+        controller.status(pending.effect_id).state
+        is PendingEffectState.APPROVAL_PENDING
+    )
     assert fixture.backend.invocations == 0
 
 
