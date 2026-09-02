@@ -264,6 +264,29 @@ def test_owner_scoped_status_resume_and_cancel_do_not_authorize_by_effect_id() -
     assert owned.state is PendingEffectState.CANCELLED
 
 
+def test_owner_resume_returns_pending_without_claiming_or_dispatching() -> None:
+    """An owned but unapproved effect remains pending and cannot run."""
+
+    fixture = make_broker()
+    persistence = _MemoryPendingEffects()
+    approvals = _Approvals()
+    controller = _controller(persistence, approvals)
+    try:
+        pending, _prepared = _prepare(controller, fixture.broker)
+        result = controller.resume_for_presentation(
+            effect_id=pending.effect_id,
+            presentation_owner_principal_id="authority:presenter",
+            presentation_owner_session_id="presenter-session",
+            broker=fixture.broker,
+        )
+    finally:
+        fixture.broker.close()
+
+    assert result.state is PendingEffectState.APPROVAL_PENDING
+    assert controller.status(pending.effect_id).state is PendingEffectState.APPROVAL_PENDING
+    assert fixture.backend.invocations == 0
+
+
 def test_authority_store_encrypts_pending_effect_payload_and_enforces_cas(
     tmp_path,
 ) -> None:

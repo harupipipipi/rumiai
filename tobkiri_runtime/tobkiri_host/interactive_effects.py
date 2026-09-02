@@ -356,6 +356,9 @@ class PendingEffectController:
             presentation_owner_principal_id=presentation_owner_principal_id,
             presentation_owner_session_id=presentation_owner_session_id,
         )
+        observed = self.observe_approval(effect_id)
+        if observed.state is not PendingEffectState.APPROVED:
+            return observed
         return self.resume(effect_id, broker)
 
     def cancel_for_presentation(
