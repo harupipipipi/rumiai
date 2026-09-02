@@ -34,7 +34,7 @@ test("bootstrap loading state uses the Tobkiri Launcher animation and honors red
 
   await page.goto("/");
 
-  const loader = page.locator("[data-tobkiri-loading-screen]");
+  const loader = page.locator("[data-tobkiri-loading-screen]").first();
   await expect(loader).toBeVisible();
   await expect(loader).toHaveAttribute("role", "status");
   await expect(loader).toHaveAttribute("aria-live", "polite");
@@ -67,9 +67,9 @@ test("keeps the startup boundary until slash commands and mention sources are re
     beforeCommandCatalogResponse: () => commandGate,
   });
 
-  await page.goto("/chat");
+  await page.goto("/static/chat");
 
-  const loader = page.locator("[data-tobkiri-loading-screen]");
+  const loader = page.locator("[data-tobkiri-loading-screen]").first();
   await expect(loader).toBeVisible();
   await expect(loader.locator('[data-startup-step="commands"]')).toHaveAttribute("data-status", "loading");
   await expect(page.locator("textarea.rumi-composer-textarea")).toHaveCount(0);
@@ -87,6 +87,20 @@ test("keeps the startup boundary until slash commands and mention sources are re
   await expect(page.getByTestId("composer-at-mention-candidates")).toContainText("@Web Search");
 });
 
+test("verified Pack v4 conversation boots from the dynamic-host catalog", async ({ page }) => {
+  await installDefaultspackApiMocks(page);
+
+  await page.goto("/chat");
+
+  await expect(page.locator('[data-rumi-frontend-host][data-plan-hash^="sha256:"]')).toBeVisible();
+  await expect(page.locator('[data-conversation-surface="v4"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tobkiri Conversation" })).toBeVisible();
+  const composer = page.getByRole("textbox", { name: "Message Tobkiri" });
+  await composer.fill("Verify the current Pack v4 binding.");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Pack v4 fixture response.", { exact: true })).toBeVisible();
+});
+
 type ApiMockOptions = {
   beforeCommandCatalogResponse?: () => Promise<void> | void;
   beforeWorkspaceFileReadResponse?: (payload: Record<string, unknown>) => Promise<void> | void;
@@ -99,10 +113,24 @@ type ApiMockOptions = {
   codingApprovalAfterTerminal?: boolean;
   codingApprovalAfterRestore?: boolean;
   structuredComposer?: boolean;
+  interactiveApproval?: InteractiveApprovalFixture;
+  onInteractiveApprovalDecision?: (decision: "approve" | "deny", payload: Record<string, unknown>) => void;
+};
+
+type InteractiveApprovalFixture = {
+  request_id: string;
+  state: string;
+  expires_at: number;
+  typed_confirmation_required: boolean;
+  redacted_metadata: Record<string, string>;
 };
 
 function ok(data: unknown) {
-  return { status: "ok", data };
+  // The HostBootstrap reads the canonical PackAPI `success` envelope
+  // directly, while legacy resource clients validate the `status` envelope.
+  // The runtime emits both projections during the migration, so the fixture
+  // must do the same rather than accidentally testing a fallback path.
+  return { status: "ok", success: true, data, error: null };
 }
 
 function smokeConversation() {
@@ -191,6 +219,51 @@ function smokeConversation() {
         ],
       },
     ],
+  };
+}
+
+/**
+ * The smallest catalog accepted by the Pack v4 dynamic host for /chat.
+ *
+ * Compatibility-surface tests deliberately use /static/chat below. This
+ * fixture keeps the production /chat route on the same verified-contribution
+ * contract as the Host instead of silently falling back to legacy UI.
+ */
+function dynamicHostCatalog() {
+  const profileId = "defaults";
+  const profileRevision = "e2e-profile-revision";
+  const activationId = "e2e-activation";
+  const planHash = `sha256:${"b".repeat(64)}`;
+  return {
+    version: "rumi.ui.contribution.v1" as const,
+    profile_id: profileId,
+    profile_revision: profileRevision,
+    activation_id: activationId,
+    plan_hash: planHash,
+    contributions: [{
+      contribution_id: "defaults.conversation.complete",
+      kind: "route" as const,
+      mode: "declarative" as const,
+      label: "Tobkiri Conversation",
+      description: "Start a conversation with Tobkiri.",
+      priority: 0,
+      owner_pack_id: "defaultspack",
+      owner_pack_hash: `sha256:${"c".repeat(64)}`,
+      build_identity: "defaultspack.conversation",
+      resolved_profile_id: profileId,
+      resolved_profile_revision: profileRevision,
+      resolved_activation_id: activationId,
+      resolved_plan_hash: planHash,
+      descriptor_hash: `sha256:${"d".repeat(64)}`,
+      route: "/chat",
+      action_contract: "conversation.turn.v1",
+      view: { type: "conversation_v4" },
+      localization: {},
+      accessibility: { name: "Tobkiri Conversation", keyboard: true },
+    }],
+    diagnostics: [],
+    quarantined_pack_ids: [],
+    catalog_hash: `sha256:${"e".repeat(64)}`,
   };
 }
 
@@ -572,11 +645,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     sessionStorage.clear();
   });
   await page.addInitScript(() => {
+    const fixtureWindow = window as Window & {
+      __authorityApprovalFixture?: {
+        nativeCalls: Array<{ command: string; args?: Record<string, unknown> }>;
+      };
+    };
+    fixtureWindow.__authorityApprovalFixture = { nativeCalls: [] };
     Object.defineProperty(window, "__TAURI__", {
       configurable: true,
       value: {
         core: {
           invoke: async (command: string, args?: Record<string, unknown>) => {
+            fixtureWindow.__authorityApprovalFixture?.nativeCalls.push({ command, args });
             if (command === "get_desktop_system_info") {
               return {
                 source: "viewer_tauri",
@@ -591,15 +671,35 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
                 permissions: [],
               };
             }
-            if (command !== "coding_approval_operator") {
-              throw new Error(`Unexpected native command: ${command}`);
+            if (command === "authority_approval_context") {
+              const requestId = String(args?.requestId ?? "");
+              return {
+                request_id: requestId,
+                ui_operator: {
+                  version: 1,
+                  kind: "ui_operator",
+                  origin: "tauri://tobkiri-launcher",
+                  window_label: "authority-approval",
+                  request_id: requestId,
+                  issued_at: Math.floor(Date.now() / 1000),
+                  expires_at: Math.floor(Date.now() / 1000) + 30,
+                  nonce: "e2e-ui-operator-nonce",
+                  signature: "e2e-ui-operator-signature",
+                },
+              };
             }
-            return {
-              request_id: args?.requestId,
-              expected_digest: args?.expectedDigest,
-              decision: args?.decision,
-              operator: "ui-contract-fixture",
-            };
+            if (command === "close_current_window") {
+              return undefined;
+            }
+            if (command === "coding_approval_operator") {
+              return {
+                request_id: args?.requestId,
+                expected_digest: args?.expectedDigest,
+                decision: args?.decision,
+                operator: "ui-contract-fixture",
+              };
+            }
+            throw new Error(`Unexpected native command: ${command}`);
           },
         },
       },
@@ -616,6 +716,12 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   }));
   let conversationToolPreferences: Record<string, unknown> = {};
   let codingApprovalRequest: Record<string, unknown> | null = null;
+  let interactiveApprovalRequest: InteractiveApprovalFixture | null = options.interactiveApproval
+    ? {
+      ...options.interactiveApproval,
+      redacted_metadata: { ...options.interactiveApproval.redacted_metadata },
+    }
+    : null;
   const settledApprovalRequestIds = new Set<string>();
   const codingCheckpoints: Record<string, unknown>[] = options.codingApprovalAfterRestore
     ? [{ snapshot_id: "checkpoint-1", path: "/repo/.rumi/checkpoints/checkpoint-1" }]
@@ -660,6 +766,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === routeKey("api/ui/catalog")) {
       return fulfill(route, {
+        dynamic_host: dynamicHostCatalog(),
         app: { id: "defaultspack", name: "Rumi", account: { display_name: "Smoke User", plan_label: "Local" } },
         agent_service: { profiles: [], capabilities: [], presets: [] },
         sidebar: {
@@ -687,6 +794,12 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         }] : [],
         skills: catalogSkills,
         extension_points: [],
+      });
+    }
+
+    if (path === routeKey("api/ui/capability/invoke") && method === "POST") {
+      return fulfill(route, {
+        content: [{ type: "text", text: "Pack v4 fixture response." }],
       });
     }
 
@@ -852,6 +965,51 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         api_version: "command-protocol/v1",
         pending_approvals: [],
       });
+    }
+
+    // The application restores any pending high-risk command during bootstrap.
+    // Keep this fixture aligned with the V4 interactive-approval adapter: an
+    // empty invocation list is an explicit successful response, not an absent
+    // legacy `pending_approvals` field.
+    if (path === routeKey("api/command-protocol/v1/high-risk") && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      if (payload.phase === "list_pending") {
+        return fulfill(route, { invocations: [] });
+      }
+      return fulfill(route, {});
+    }
+
+    if (path === routeKey("api/interactive-approval/v1/list")) {
+      return fulfill(route, {
+        approvals: interactiveApprovalRequest ? [interactiveApprovalRequest] : [],
+      });
+    }
+
+    if (path === routeKey("api/interactive-approval/v1/get") && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      if (!interactiveApprovalRequest) return fulfill(route, {});
+      if (payload.request_id !== interactiveApprovalRequest.request_id) {
+        return fulfill(route, { ...interactiveApprovalRequest, request_id: String(payload.request_id ?? "") });
+      }
+      return fulfill(route, interactiveApprovalRequest);
+    }
+
+    if (path === routeKey("api/interactive-approval/v1/approve") && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onInteractiveApprovalDecision?.("approve", payload);
+      if (interactiveApprovalRequest && payload.request_id === interactiveApprovalRequest.request_id) {
+        interactiveApprovalRequest = { ...interactiveApprovalRequest, state: "approved" };
+      }
+      return fulfill(route, interactiveApprovalRequest ?? {});
+    }
+
+    if (path === routeKey("api/interactive-approval/v1/deny") && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onInteractiveApprovalDecision?.("deny", payload);
+      if (interactiveApprovalRequest && payload.request_id === interactiveApprovalRequest.request_id) {
+        interactiveApprovalRequest = { ...interactiveApprovalRequest, state: "denied" };
+      }
+      return fulfill(route, interactiveApprovalRequest ?? {});
     }
 
     if (path === routeKey("api/chat/conversations/c-smoke/stream") && method === "POST") {
@@ -1171,7 +1329,10 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
 async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOptions = {}) {
   await installDefaultspackApiMocks(page, options);
-  await page.goto(path);
+  // Existing dense-shell interactions remain compatibility tests. The real
+  // /chat route is asserted separately through the verified Pack v4 catalog.
+  const compatibilityPath = path === "/chat" ? "/static/chat" : path;
+  await page.goto(compatibilityPath);
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
@@ -1186,6 +1347,134 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
+
+test("native approval window binds typed approval to the current request and closes after settlement", async ({ page }) => {
+  const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
+  const requestId = "apr-native-typed-contract";
+  const confirmationPhrase = "APPROVE RELEASE";
+  await installDefaultspackApiMocks(page, {
+    interactiveApproval: {
+      request_id: requestId,
+      state: "pending",
+      expires_at: Math.floor(now / 1_000) + 300,
+      typed_confirmation_required: true,
+      redacted_metadata: {
+        action: "Release the prepared update",
+        confirmation_phrase: confirmationPhrase,
+      },
+    },
+    onInteractiveApprovalDecision: (decision, payload) => decisions.push({ decision, payload }),
+  });
+
+  await page.goto(`/approval?request_id=${requestId}`);
+
+  await expect(page.getByRole("heading", { name: "この操作を許可しますか？" })).toBeVisible();
+  await expect(page.getByText("Release the prepared update")).toBeVisible();
+  const confirmation = page.getByPlaceholder("確認文を入力");
+  const approve = page.getByRole("button", { name: "承認", exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(approve).toBeDisabled();
+
+  await confirmation.fill("APPROVE RELEASE later");
+  await expect(approve).toBeDisabled();
+  expect(decisions).toEqual([]);
+
+  await confirmation.fill(confirmationPhrase);
+  await expect(approve).toBeEnabled();
+  await approve.click();
+
+  const approvedStatus = page.getByText("承認済み", { exact: true });
+  await expect(approvedStatus).toHaveCount(2);
+  await expect(approvedStatus.nth(1)).toBeVisible();
+  expect(decisions).toHaveLength(1);
+  expect(decisions[0]).toMatchObject({
+    decision: "approve",
+    payload: {
+      request_id: requestId,
+      confirmation_text: confirmationPhrase,
+      ui_operator: {
+        kind: "ui_operator",
+        request_id: requestId,
+        window_label: "authority-approval",
+      },
+    },
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const fixtureWindow = window as Window & {
+      __authorityApprovalFixture?: {
+        nativeCalls: Array<{ command: string }>;
+      };
+    };
+    return fixtureWindow.__authorityApprovalFixture?.nativeCalls
+      .filter((call) => call.command === "close_current_window")
+      .length ?? 0;
+  })).toBe(1);
+});
+
+test("native approval window denies once and renders its settled state", async ({ page }) => {
+  const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
+  const requestId = "apr-native-deny-contract";
+  await installDefaultspackApiMocks(page, {
+    interactiveApproval: {
+      request_id: requestId,
+      state: "pending",
+      expires_at: Math.floor(now / 1_000) + 300,
+      typed_confirmation_required: false,
+      redacted_metadata: { action: "Discard the prepared update" },
+    },
+    onInteractiveApprovalDecision: (decision, payload) => decisions.push({ decision, payload }),
+  });
+
+  await page.goto(`/approval?request_id=${requestId}`);
+  await page.getByRole("button", { name: "拒否", exact: true }).click();
+
+  const deniedStatus = page.getByText("拒否済み", { exact: true });
+  await expect(deniedStatus).toHaveCount(2);
+  await expect(deniedStatus.nth(1)).toBeVisible();
+  expect(decisions).toHaveLength(1);
+  expect(decisions[0]).toMatchObject({
+    decision: "deny",
+    payload: {
+      request_id: requestId,
+      ui_operator: {
+        kind: "ui_operator",
+        request_id: requestId,
+      },
+    },
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const fixtureWindow = window as Window & {
+      __authorityApprovalFixture?: {
+        nativeCalls: Array<{ command: string }>;
+      };
+    };
+    return fixtureWindow.__authorityApprovalFixture?.nativeCalls
+      .filter((call) => call.command === "close_current_window")
+      .length ?? 0;
+  })).toBe(1);
+});
+
+test("native approval window fails closed when typed confirmation metadata is absent", async ({ page }) => {
+  const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
+  await installDefaultspackApiMocks(page, {
+    interactiveApproval: {
+      request_id: "apr-native-missing-confirmation",
+      state: "pending",
+      expires_at: Math.floor(now / 1_000) + 300,
+      typed_confirmation_required: true,
+      redacted_metadata: { action: "Apply the protected change" },
+    },
+    onInteractiveApprovalDecision: (decision, payload) => decisions.push({ decision, payload }),
+  });
+
+  await page.goto("/approval?request_id=apr-native-missing-confirmation");
+
+  await expect(page.getByText("この承認に必要な確認情報を取得できませんでした。安全のため操作できません。")).toBeVisible();
+  await expect(page.getByPlaceholder("確認文を入力")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "承認", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "拒否", exact: true })).toHaveCount(0);
+  expect(decisions).toEqual([]);
+});
 
 test("manual runtime mode control is hidden by default and available after explicit opt-in", async ({ page }) => {
   await openDefaultspack(page, "/chat");
@@ -1383,7 +1672,7 @@ test("browser approval uses the shared user-first decision surface at narrow wid
 
   const surface = page.locator('[data-approval-source="browser"]');
   await expect(surface).toBeVisible();
-  await expect(surface).toContainText("Rumi が許可を求めています");
+  await expect(surface).toContainText("Tobkiri が許可を求めています");
   await expect(surface).toContainText("https://example.test/long/path");
   await expect(surface).toContainText("必要な理由");
   await expect(surface).toContainText("許可範囲");
@@ -1476,7 +1765,9 @@ test("tool hub service selections can be scoped to the conversation and survive 
   await githubCard.getByTitle("サービスを使う").click();
   await expect(githubCard).toContainText("会話固定");
 
-  await page.reload();
+  // Explicitly revisit the compatibility route. Interactions may normalize
+  // history to /chat, which is intentionally owned by the Pack v4 host.
+  await page.goto("/static/chat");
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
   await page.locator('button[title="機能"]').click();
   await page.getByRole("button", { name: "この会話" }).click();
@@ -2257,7 +2548,7 @@ test("history reload restores localized semantic mention badges", async ({ page 
   await openDefaultspack(page, "/chat");
   await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
 
-  await page.reload();
+  await page.goto("/static/chat");
   await expect(page.getByTestId("message-mention-badge").filter({ hasText: "@Web Search" })).toBeVisible();
 });
 
