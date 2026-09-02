@@ -70,7 +70,7 @@ def _resolved_blocked_process_syscalls(
     """
     machine_name = machine if machine is not None else platform.machine()
     architecture = machine_name.strip().casefold()
-    required_syscalls = _REQUIRED_BLOCKED_PROCESS_SYSCALLS
+    required_syscalls: tuple[bytes, ...] = _REQUIRED_BLOCKED_PROCESS_SYSCALLS
     if architecture not in _FORK_VFORK_ABSENT_LINUX_ABIS:
         required_syscalls += _FORK_VFORK_SYSCALLS
 

@@ -27,7 +27,7 @@ import subprocess
 import tempfile
 from threading import RLock
 import time
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -754,9 +754,10 @@ class AuthorizedEnvelopeCredentialTransport:
                 "workspace_id": workspace_id,
             },
         }
+        credential_handle = cast(str, identity["handle"])
         if (
             identity != expected
-            or not identity["handle"].startswith(("credential:", "opaque:"))
+            or not credential_handle.startswith(("credential:", "opaque:"))
         ):
             raise CredentialTransportDenied("binding_invalid")
         identity["binding_digest"] = _credential_selection_digest(identity)

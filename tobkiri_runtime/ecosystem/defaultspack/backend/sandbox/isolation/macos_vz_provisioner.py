@@ -148,6 +148,15 @@ class _ImageDescriptorFacts(TypedDict):
     sha512: str
 
 
+class _ArtifactSeedFile(TypedDict):
+    """One typed manifest entry for a materialized artifact-seed file."""
+
+    path: str
+    digest: str
+    executable: bool
+    size: int
+
+
 @dataclass(frozen=True)
 class _AuthenticatedPackVMBundleBinding:
     """Launcher-attested immutable resource identities for a packaged app.
@@ -2383,7 +2392,7 @@ def _materialized_artifact_seed_framing(
 ) -> tuple[bytes, int]:
     """Return the canonical manifest and payload size used by seed framing."""
 
-    files = [
+    files: list[_ArtifactSeedFile] = [
         {
             "path": item.path,
             "digest": item.digest,
