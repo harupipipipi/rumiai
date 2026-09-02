@@ -788,6 +788,8 @@ class AuthorityKernel:
             request_scope.exact_request_digest is not None
             and request_scope.exact_request_digest != context.request_digest
         ):
+            if request_scope.opaque:
+                raise AuthorityDenied("opaque scope is not bound to this request")
             raise AuthorityDenied("exact scope is not bound to this request")
 
         self._validate_call_chain(context, caller, grant, request_scope)
@@ -939,6 +941,8 @@ class AuthorityKernel:
             request_scope.exact_request_digest is not None
             and request_scope.exact_request_digest != context.request_digest
         ):
+            if request_scope.opaque:
+                raise AuthorityDenied("opaque scope is not bound to this request")
             raise AuthorityDenied("exact scope is not bound to this request")
         self._validate_call_chain(context, caller, grant, request_scope)
 

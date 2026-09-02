@@ -208,6 +208,13 @@ class ApprovalManager:
         normalized_pack_id = str(pack_id or "").strip()
         if not normalized_pack_id:
             return False
+        # A partially initialized manager has no trusted descriptor root.  It
+        # must never promote a Pack to system trust merely because a caller
+        # supplied a core-looking ID or location.
+        if not isinstance(getattr(self, "packs_dir", None), Path):
+            return False
+        if not isinstance(getattr(self, "_system_pack_descriptors", None), tuple):
+            return False
         pack_dir = self._resolve_pack_dir(normalized_pack_id)
         if pack_dir is None or not pack_dir.exists():
             return False

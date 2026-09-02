@@ -18,7 +18,9 @@ def _run_app(argv: list[str], startup_result: dict[str, object]):
     kernel = MagicMock()
     kernel.run_startup.return_value = startup_result
     output = io.StringIO()
-    with patch.object(app, "Kernel", return_value=kernel), redirect_stdout(output):
+    with patch.object(
+        app, "_create_defaultspack_kernel", return_value=kernel
+    ), redirect_stdout(output):
         code = app.main(argv)
     return code, json.loads(output.getvalue()) if output.getvalue() else None, kernel
 

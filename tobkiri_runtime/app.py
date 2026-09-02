@@ -13,6 +13,7 @@ import json
 import signal
 import threading
 from collections.abc import Sequence
+from typing import Any
 
 
 def prepare_for_sealed_dispatch(scope: object) -> None:
@@ -40,14 +41,20 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Start only the canonical v4 Host and wait for process termination."""
-    args = _parser().parse_args(argv)
+def _create_defaultspack_kernel() -> Any:
+    """Lazily construct the sole Pack v4 Host composition root."""
+
     from ecosystem.defaultspack.defaultspack.runtime_composition import (
         create_defaultspack_kernel,
     )
 
-    kernel = create_defaultspack_kernel()
+    return create_defaultspack_kernel()
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Start only the canonical v4 Host and wait for process termination."""
+    args = _parser().parse_args(argv)
+    kernel = _create_defaultspack_kernel()
     stop = threading.Event()
     try:
         result = kernel.run_startup()
