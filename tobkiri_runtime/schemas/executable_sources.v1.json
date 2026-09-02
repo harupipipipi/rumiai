@@ -10808,7 +10808,7 @@
     "generator": "tobkiri.scripts.generate_executable_source_registry_v1",
     "generator_version": "1.0.0",
     "input_count": 191,
-    "input_digest": "sha256:a139dc7dc5bfc458258d373f3ee627138a8ed4fa3f80ef04e0896150a7e1bc6e",
+    "input_digest": "sha256:a094ca3ee79e94bb884c3b7ee37a33b9df247834ce44a286b015d387718349cc",
     "input_paths": [
       "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/artifact-manifest.json",
       "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/artifact-manifest.json",
@@ -11689,7 +11689,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:8c25d782df301fb9dfa04beaf0c00b2c4ca0db51a7c267b10fbde3dc6bf0e544",
+        "digest": "sha256:600dd490801089848f8b84834838849533bbf2cccfee4b5be0ca08093f6812a2",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/rumi.pack.v3.json"
       },

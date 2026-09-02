@@ -1308,14 +1308,14 @@
       "path": "scripts/quality/evidence/complete_v4_migration_red_64b2240e.json",
       "type": "regular-file",
       "size": 83526,
-      "sha256": "43521bff131b6d6a44616a789044b55c550fad1d5c1a2c241b3ca4173bd3a72a",
+      "sha256": "c08047a1ebf0a5bfff73c83f7dab3692c7783773d3640071a0584dc7353e6734",
       "executable": false
     },
     {
       "path": "scripts/quality/evidence/pack_migration_proof.v1.json",
       "type": "regular-file",
       "size": 845459,
-      "sha256": "09c336ad4c558d86226bc7145931c39670295956abc7c5075bad782f8a1a71fe",
+      "sha256": "e6b2d7dbdfca5ac5a4845d9049720ed16b7dcce57f8a5def3dfc9ce35c2b64a0",
       "executable": false
     },
     {

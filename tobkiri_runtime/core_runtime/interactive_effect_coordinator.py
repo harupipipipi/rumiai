@@ -419,12 +419,14 @@ def _sealed_git_plan(
 
     plan = _json_mapping(prepared_result, HostInteractiveEffectService._MAX_REQUEST_BYTES)
     digest = plan.get("plan_digest")
-    operation_prefix = "rumi_git_write_pack."
-    if not expected_operation.startswith(operation_prefix):
+    operation_owner, separator, operation_name = expected_operation.rpartition(".")
+    if (
+        not separator
+        or not operation_owner
+        or not operation_name.endswith("-prepare")
+    ):
         raise InteractiveEffectUnavailable("interactive effect is unavailable")
-    expected_plan_operation = expected_operation.removeprefix(
-        operation_prefix
-    ).removesuffix("-prepare")
+    expected_plan_operation = operation_name.removesuffix("-prepare")
     if (
         not _is_digest(digest)
         or plan.get("plan_version") != "tobkiri.git-write.plan.v4"
