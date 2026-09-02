@@ -905,7 +905,7 @@ def _redacted_status(status: InteractiveApprovalStatus) -> dict[str, Any]:
     return {
         "request_id": status.request_id,
         "state": status.state,
-        "expires_at": status.expires_at,
+        "expires_at": int(math.ceil(float(status.expires_at))),
         "typed_confirmation_required": status.typed_confirmation_required,
         "request_snapshot_digest": status.request_snapshot_digest,
         "typed_confirmation_digest": status.typed_confirmation_digest,
@@ -920,7 +920,7 @@ def _redacted_effect_status(status: InteractiveEffectStatus) -> dict[str, Any]:
         "effect_id": status.effect_id,
         "approval_request_id": status.approval_request_id,
         "state": status.state,
-        "expires_at": status.expires_at,
+        "expires_at": int(math.ceil(float(status.expires_at))),
         "redacted_metadata": dict(status.redacted_metadata),
     }
 

@@ -4363,7 +4363,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
-      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+      "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
       "implementation_path": "runtime/bridge.py",
       "input_schema": {
         "type": "object"
@@ -4377,7 +4377,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -4416,7 +4416,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
-      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+      "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
       "implementation_path": "runtime/bridge.py",
       "input_schema": {
         "type": "object"
@@ -4429,7 +4429,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -4449,7 +4449,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -4469,7 +4469,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -4489,7 +4489,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -4544,7 +4544,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
-      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+      "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
       "implementation_path": "runtime/bridge.py",
       "input_schema": {
         "type": "object"
@@ -4558,7 +4558,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "implementation_path": "runtime/bridge.py",
           "input_schema": {
             "type": "object"
@@ -10808,7 +10808,7 @@
     "generator": "tobkiri.scripts.generate_executable_source_registry_v1",
     "generator_version": "1.0.0",
     "input_count": 191,
-    "input_digest": "sha256:0d2cc455c382743878a3477662e40f14ad8a437105f161c8a89b493ee69b164a",
+    "input_digest": "sha256:a139dc7dc5bfc458258d373f3ee627138a8ed4fa3f80ef04e0896150a7e1bc6e",
     "input_paths": [
       "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/artifact-manifest.json",
       "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/artifact-manifest.json",
@@ -11209,7 +11209,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/artifact-manifest.json"
       },
       {
-        "digest": "sha256:6af6324b8f7a330fc865037c0680e4efa48e48b18961412991f7a121f42c4dc5",
+        "digest": "sha256:5e22099b13eafd5826fe0360bc3f0c3fb072474a37b872428ed7b198efcb2fd6",
         "kind": "legacy-artifact-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/artifact-manifest.json"
       },
@@ -11689,7 +11689,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:71be5262a3c752fcdd8962b0ac5af01b8f320d41a20956ce8d6721ad60cde9f7",
+        "digest": "sha256:8c25d782df301fb9dfa04beaf0c00b2c4ca0db51a7c267b10fbde3dc6bf0e544",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_host_authority_bridge_pack/rumi.pack.v3.json"
       },

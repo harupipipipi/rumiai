@@ -38,7 +38,7 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json",
-      "digest": "sha256:f50b15bf27efa5034da4479029a2ca47170806265d5678c103eb43723cd149e0"
+      "digest": "sha256:005b499c9a4b3d672a55ee31daf2e34e13b7256f6c37c3a35fdd71608fc45f5a"
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi-workspace-mount.pack.v4.json",
@@ -234,7 +234,7 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_host_authority_bridge_pack.executables.v4.json",
-      "digest": "sha256:ae97132cd097156d6659ca0d678471a45d6741287f961d23ffd2e0a8650069f3"
+      "digest": "sha256:99a0096f227a556c12d8061e0beae31d08a93eaa3e96fcd8a8d0c3df626e0721"
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_http_api_connector_pack.executables.v4.json",
@@ -725,9 +725,9 @@
   },
   "catalog": {
     "bundle_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
-    "bundle_digest": "sha256:9e572dbbaaba6784b6ceaa7a535443523eb009dd2304c079082319845b157466",
-    "catalog_revision": "sha256:58d0e4514c2ffcfaf784fa69025cc8679f90b0ac4afa6917c5da019ec4807dd4",
-    "closure_digest": "sha256:6659ce3139e6d5b472ff37d974878ddf8e8b79ddd09faa999a8b215eb8752461"
+    "bundle_digest": "sha256:348fe8eed8b6ce9f69b6e1787c7cf9b2186f32a2b221bd84872fbf0761ca6d3b",
+    "catalog_revision": "sha256:2456ef2efe010442c68dbf9501e735ce840cb92ac83b2eeb2e47eb5f7c9af26b",
+    "closure_digest": "sha256:aed658ea50a6dbcfcc84367622d2b91416822cda2e44d72c490a864651025382"
   },
   "outputs": [
     {
@@ -736,8 +736,8 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
-      "digest": "sha256:ba8d283c1cdac7b6e7f7f4ff76319bc9edcb208cbbfcbcfd6002184a160bbefa"
+      "digest": "sha256:3c41c343dd7fbafbce66cac3493da515e14d1a4032938505439437749f1e436a"
     }
   ],
-  "release_digest": "sha256:bb0e5dceefa14757e2bc89a4018e048d10dcf85f13f57fdd755273e61a8f4632"
+  "release_digest": "sha256:3918d19ad6d1dd6499b0ecd626d576d4e6aea4420a1a7fe2316ee5b7dec3bbef"
 }

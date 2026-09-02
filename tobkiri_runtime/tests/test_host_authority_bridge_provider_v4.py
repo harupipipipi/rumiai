@@ -351,6 +351,7 @@ def test_decisions_forward_authenticated_context_and_return_only_redacted_status
         "typed_confirmation_digest",
         "redacted_metadata",
     }
+    assert isinstance(approved["expires_at"], int)
     assert not {
         "grant",
         "grant_id",

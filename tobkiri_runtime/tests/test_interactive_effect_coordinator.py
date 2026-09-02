@@ -578,6 +578,7 @@ def test_bridge_runs_only_signed_prepare_then_hands_a_redacted_future_to_port() 
         "expires_at",
         "redacted_metadata",
     }
+    assert isinstance(result["expires_at"], int)
     assert "command" not in result
     assert "HostBoundedProcessRunner" not in Path(bridge.__file__).read_text(
         encoding="utf-8"

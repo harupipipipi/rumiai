@@ -38,7 +38,7 @@
   "pack_identity": "rumi:ecosystem/rumi_host_authority_bridge_pack",
   "provenance": {
     "build_identity": "rumi_host_authority_bridge_pack:1.0.0",
-    "content_hash": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
+    "content_hash": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
     "signature": null,
     "trust_class": "local"
   },
