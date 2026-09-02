@@ -224,7 +224,7 @@
     },
     {
       "contract_id": "tobkiri.service.git.publish.v1",
-      "digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb",
+      "digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c",
       "revision": "1.0.0",
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_git_publish_pack.pack.v4.json"
     },
@@ -271,7 +271,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_shell_policy_pack.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:0669c8f68a791c0cb4ba15975263781ca83c571cdb5c5ef3979165ac03b111b5",
+  "default_profile_digest": "sha256:e758a97578b314a210d00b1b90e0af9c4a6a97778e9d0877374dde9cc0d43a8d",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -411,10 +411,10 @@
     "rumi_ai_usage_pack": "sha256:7c042f55edb6840ce64ed355e87fc3435e522efef8712c946a15d977828533ea",
     "rumi_command_protocol_pack": "sha256:0c9db19b79c9d2ff1767bf44ecc5e54573bc5fd93a97bad6e9636a9ba866ee0d",
     "rumi_file_inspect_pack": "sha256:bb07aef155a52b5d8f66abfb4fe87253d1a0641dbdd414b3c178a8a0eb4bb623",
-    "rumi_git_publish_pack": "sha256:25284257623df4d30c51c05738744b7c07a83e7c57d8a795f838b6c2c2f10571",
+    "rumi_git_publish_pack": "sha256:e47b76b4a283196354251652b3682726d7bd08266442fcde36a594b658ac94ef",
     "rumi_git_read_pack": "sha256:effd36de39db1a504a4f10176429b353ce00fb31877403ce955e130f829f5768",
     "rumi_git_write_pack": "sha256:b553395789e1df3751c597d2fed7607f4ef39b61ed6f86c2e78c941878c253c4",
-    "rumi_host_authority_bridge_pack": "sha256:f08482b976d1a5face17a8ae3daab886d7943787525b6d70f758907e2e7a691f",
+    "rumi_host_authority_bridge_pack": "sha256:8951967a46e82417d264d2ac554d36516242033b21b3cab6a9fc3e385d570973",
     "rumi_model_catalog_pack": "sha256:01b88c8e5c1d2fd96f88ee7088c1fd3984b36127830a9a40b7a730f60eaf044e",
     "rumi_model_registry_pack": "sha256:2f85eead08ddd064625eddc9bf49c46fe5ab0e15a53bc479bcf54ff7b633f622",
     "rumi_provider_adapters_pack": "sha256:f6ec77c80384454124bab25ef169ba38e015a88c418f4044a1cccb62d6caddb3",
