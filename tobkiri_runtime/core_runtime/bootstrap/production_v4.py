@@ -1933,10 +1933,12 @@ def capture_production_dispatch(
     binding_by_function: dict[str, list[ResolvedOperationBinding]] = {}
     for binding_key, resolved_binding in resolved_binding_by_edge.items():
         if binding_key in approved_host_binding_keys:
-            binding_by_function.setdefault(
+            provider_bindings = binding_by_function.setdefault(
                 resolved_binding.function.function_id,
                 [],
-            ).append(resolved_binding)
+            )
+            if resolved_binding not in provider_bindings:
+                provider_bindings.append(resolved_binding)
     host_contributions_by_backend: dict[str, list[Any]] = {}
     close_callbacks: list[Callable[[], None]] = []
     credential_store_binding = (
