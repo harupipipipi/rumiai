@@ -144,7 +144,7 @@ def _capture():
         contract_bindings=bindings,
         application_presentation=DefaultspackHTTPPresentation(),
         packvm_lifecycle=packvm_lifecycle,
-        runtime_capture_factory=lambda active: defaultspack_runtime_capture_inputs(
+        runtime_capture_factory=lambda active=None: defaultspack_runtime_capture_inputs(
             active,
             packvm_provisioner=packvm_lifecycle,
             bundle_root=BUNDLE_ROOT,
