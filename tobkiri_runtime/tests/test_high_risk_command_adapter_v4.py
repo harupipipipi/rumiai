@@ -389,6 +389,7 @@ def test_each_high_risk_command_prepares_only_through_the_host_coordinator(
     result = _invoke(contribution, invocation, payload)
 
     assert result["state"] == "approval_pending"
+    assert isinstance(result["expires_at"], int)
     assert client.calls == [
         (
             "tobkiri.service.interactive-effect.v1",

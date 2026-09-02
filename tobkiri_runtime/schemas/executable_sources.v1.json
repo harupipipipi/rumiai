@@ -1755,7 +1755,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_command_protocol_pack.high-risk-command.service",
-      "implementation_digest": "sha256:f1a18d8f9f92abd7bb6728bcc0f5b5010541e2bcaef88c73186510e2eda2230e",
+      "implementation_digest": "sha256:b168952a90bd931d9562239ed57644d9bb355bb377ff31ec8cccbe4c55c30813",
       "implementation_path": "runtime/high_risk_adapter.py",
       "input_schema": {
         "type": "object"
@@ -1769,7 +1769,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:f1a18d8f9f92abd7bb6728bcc0f5b5010541e2bcaef88c73186510e2eda2230e",
+          "implementation_digest": "sha256:b168952a90bd931d9562239ed57644d9bb355bb377ff31ec8cccbe4c55c30813",
           "implementation_path": "runtime/high_risk_adapter.py",
           "input_schema": {
             "type": "object"

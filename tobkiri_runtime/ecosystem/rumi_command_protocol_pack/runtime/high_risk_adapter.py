@@ -910,7 +910,12 @@ def _validate_safe_result(value: Mapping[str, Any], invocation_id: str) -> dict[
         "effect_id": effect_id,
         "approval_request_id": approval_request_id,
         "state": state,
-        "expires_at": float(expires_at) if expires_at is not None else None,
+        # Public command results are journaled with strict I-JSON, which does
+        # not permit floating-point values. Rounding up preserves the Host's
+        # authoritative expiry without presenting an earlier deadline.
+        "expires_at": (
+            int(math.ceil(float(expires_at))) if expires_at is not None else None
+        ),
         "redacted_metadata": normalized_metadata,
     }
 

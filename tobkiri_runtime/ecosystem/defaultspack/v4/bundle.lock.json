@@ -139,12 +139,12 @@
     {
       "path": "packs/rumi_command_protocol_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:1ff3ba578ffe4f2e24061ca895e6c39867e2afebe90b9ffe9d61370712de1111"
+      "digest": "sha256:59b246e1fe390797a3e26cd89a787613c39dbf34306038ac1476d0afa577b5fe"
     },
     {
       "path": "packs/rumi_command_protocol_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:0c9db19b79c9d2ff1767bf44ecc5e54573bc5fd93a97bad6e9636a9ba866ee0d"
+      "digest": "sha256:abb1350a2541aeaaa9d7a59234956276d9d5228668a28204403763e5d516bb69"
     },
     {
       "path": "packs/rumi_context_runtime_pack.executables.v4.json",
