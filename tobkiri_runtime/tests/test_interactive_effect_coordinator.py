@@ -63,8 +63,8 @@ def test_shell_execute_transform_preserves_only_prepare_result_and_arguments() -
 @pytest.mark.parametrize(
     ("effect_kind", "operation"),
     [
-        ("git_commit", "rumi_git_write_pack.git-commit"),
-        ("git_restore", "rumi_git_write_pack.git-restore"),
+        ("git_commit", "git-commit"),
+        ("git_restore", "git-restore"),
     ],
 )
 def test_git_write_transforms_keep_plan_profile_and_workspace_bindings(
@@ -86,7 +86,7 @@ def test_git_write_transforms_keep_plan_profile_and_workspace_bindings(
 def test_git_patch_transform_keeps_only_prepared_plan_and_patch_bytes() -> None:
     """Patch execution carries the original patch solely for plan-hash recheck."""
 
-    plan = _git_plan("rumi_git_write_pack.git-apply-patch")
+    plan = _git_plan("git-apply-patch")
     result = _execute_payload(
         INTERACTIVE_EFFECT_SPECS["git_apply_patch"],
         {"patch": "diff --git a/a b/a\n"},
@@ -112,7 +112,7 @@ def test_git_push_transform_keeps_the_provider_sealed_plan_only() -> None:
 def test_transform_rejects_tampered_git_plan() -> None:
     """A UI or coordinator cannot replace the result of the signed prepare edge."""
 
-    plan = _git_plan("rumi_git_write_pack.git-commit")
+    plan = _git_plan("git-commit")
     plan["workspace_id"] = "workspace.foreign"
 
     with pytest.raises(InteractiveEffectUnavailable):
@@ -149,7 +149,7 @@ def _prepared_presentation(payload: Mapping[str, Any]) -> Any:
             "git_commit",
             {
                 "plan": _git_plan(
-                    "rumi_git_write_pack.git-commit",
+                    "git-commit",
                     message="Fix parser token=secret-value",
                     expected_head_ref="refs/heads/main",
                     expected_index_tree="c" * 40,
@@ -193,7 +193,7 @@ def _prepared_presentation(payload: Mapping[str, Any]) -> Any:
             "git_apply_patch",
             {
                 "plan": _git_plan(
-                    "rumi_git_write_pack.git-apply-patch",
+                    "git-apply-patch",
                     paths=["src/main.py", "secrets/token=not-displayed.py"],
                     stdin_sha256="a" * 64,
                 ),
@@ -209,7 +209,7 @@ def _prepared_presentation(payload: Mapping[str, Any]) -> Any:
             "git_restore",
             {
                 "plan": _git_plan(
-                    "rumi_git_write_pack.git-restore",
+                    "git-restore",
                     paths=["src/main.py", "bin/tool"],
                     source_tree="b" * 40,
                     targets=[
@@ -298,7 +298,7 @@ def test_commit_presentation_binds_the_message_to_the_sealed_staged_tree() -> No
 
     def presentation(index_tree: str) -> Mapping[str, str]:
         plan = _git_plan(
-            "rumi_git_write_pack.git-commit",
+            "git-commit",
             message="Ship the prepared change",
             expected_head_ref="refs/heads/main",
             expected_index_tree=index_tree,
