@@ -3008,7 +3008,9 @@ mod tests {
             "ecosystem/defaultspack/contracts.v4.json",
             "ecosystem/defaultspack/artifact-index.v4.json",
             "ecosystem/defaultspack/executables.v4.json",
+            "ecosystem/defaultspack/host_contract_contributions.v1.json",
             "ecosystem/defaultspack/domain/runtime_surface_v4.py",
+            "ecosystem/defaultspack/update_metadata.v1.json",
         ] {
             let path = runtime_root.join(relative);
             let metadata = fs::symlink_metadata(&path).expect("source file should exist");
