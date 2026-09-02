@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
@@ -250,6 +250,32 @@ def test_host_approval_presentation_describes_each_prepared_high_risk_effect(
     assert forbidden not in "\n".join(metadata.values())
     assert metadata["confirmation_phrase"] == "EXECUTE"
     assert all(len(value) <= 2_048 for value in metadata.values())
+
+
+def test_host_approval_presentation_thaws_nested_immutable_snapshot() -> None:
+    """Broker-frozen mappings remain valid inputs to Host-owned approval copy."""
+
+    frozen_payload = MappingProxyType(
+        {
+            "redacted_plan": MappingProxyType(
+                {"plan_version": "tobkiri.shell-execute.plan.v4"}
+            ),
+            "plan_digest": canonical_digest({"shell": "prepared"}),
+            "arguments": MappingProxyType(
+                {"command": ["git", "status"], "cwd": "."}
+            ),
+        }
+    )
+    metadata = _presentation_metadata(
+        INTERACTIVE_EFFECT_SPECS["shell_execute"],
+        SimpleNamespace(
+            normalized_payload=frozen_payload,
+            request_digest=canonical_digest({"prepared": "immutable"}),
+        ),
+    )
+
+    assert metadata["action"] == "Run local terminal command"
+    assert 'argv: ["git", "status"]' in metadata["detail"]
 
 
 def test_host_approval_presentation_fails_closed_on_an_unsealed_or_malformed_plan() -> None:

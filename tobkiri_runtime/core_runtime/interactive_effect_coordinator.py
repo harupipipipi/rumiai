@@ -845,7 +845,10 @@ def _json_mapping(value: Mapping[str, Any], max_bytes: int) -> dict[str, Any]:
         raise InteractiveEffectUnavailable("interactive effect is unavailable")
     try:
         encoded = json.dumps(
-            dict(value), sort_keys=True, separators=(",", ":"), allow_nan=False
+            _mutable_json_value(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
         ).encode("utf-8")
         if len(encoded) > max_bytes:
             raise ValueError("payload too large")
@@ -855,6 +858,16 @@ def _json_mapping(value: Mapping[str, Any], max_bytes: int) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise InteractiveEffectUnavailable("interactive effect is unavailable")
     return parsed
+
+
+def _mutable_json_value(value: object) -> object:
+    """Thaw nested immutable Host snapshots without changing JSON values."""
+
+    if isinstance(value, Mapping):
+        return {key: _mutable_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_mutable_json_value(item) for item in value]
+    return value
 
 
 def _reject_authority_fields(value: object, forbidden: frozenset[str]) -> None:
