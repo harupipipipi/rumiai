@@ -1162,17 +1162,25 @@ class ToolExecutor:
                     capability_executor, pack_id
                 )
                 if not approved:
-                    return {
+                    result = {
                         "result": "Pack not approved: {}".format(pack_id),
                         "is_error": True,
-                        "widget": {
-                            "type": "tool_execution_denied",
-                            "tool_name": _tool_approval_tool_name(tool_def),
-                            "reason": "Pack not approved: {}".format(pack_id),
-                        },
+                        "widget": None,
                         "error_type": "pack_not_approved",
                         "pack_not_approved_reason": reason,
                     }
+                    tool_name = _tool_approval_tool_name(tool_def)
+                    if tool_name not in {
+                        "browser_computer",
+                        "browser_use",
+                        "computer_use",
+                    }:
+                        result["widget"] = {
+                            "type": "tool_execution_denied",
+                            "tool_name": tool_name,
+                            "reason": "Pack not approved: {}".format(pack_id),
+                        }
+                    return result
         context["_tool_server_approved"] = True
         return None
 
