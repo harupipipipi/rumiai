@@ -3423,6 +3423,8 @@ mod tests {
             "contracts.v4.json",
             "artifact-index.v4.json",
             "executables.v4.json",
+            "host_contract_contributions.v1.json",
+            "update_metadata.v1.json",
             "runtime/conversation.py",
             "defaultspack/desktop_app.py",
             "defaultspack/frontend_contract_map.v4.json",
