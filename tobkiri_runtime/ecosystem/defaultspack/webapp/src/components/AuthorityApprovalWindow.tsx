@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Check,
+  Copy,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -43,6 +44,90 @@ const DISPLAY_METADATA_LABELS: Record<string, string> = {
   summary: "概要",
   title: "タイトル",
 };
+
+async function copyApprovalError(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the selection-based WebView fallback.
+  }
+  if (!document.body || typeof document.execCommand !== "function") return false;
+  const selection = document.createElement("textarea");
+  selection.value = text;
+  selection.readOnly = true;
+  selection.setAttribute("aria-hidden", "true");
+  selection.style.position = "fixed";
+  selection.style.opacity = "0";
+  selection.style.pointerEvents = "none";
+  document.body.appendChild(selection);
+  selection.select();
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    selection.remove();
+  }
+}
+
+function ApprovalError({ message, compact = false }: { message: string; compact?: boolean }) {
+  const [feedback, setFeedback] = useState<"idle" | "copied" | "failed">("idle");
+  const feedbackId = useId();
+
+  useEffect(() => {
+    setFeedback("idle");
+  }, [message]);
+
+  useEffect(() => {
+    if (feedback === "idle") return undefined;
+    const timer = window.setTimeout(() => setFeedback("idle"), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
+  const feedbackMessage = feedback === "copied"
+    ? "エラーをクリップボードにコピーしました。"
+    : feedback === "failed"
+      ? "コピーできませんでした。エラー本文を選択してコピーしてください。"
+      : "";
+  const label = feedbackMessage || "エラーをコピー";
+
+  return (
+    <div
+      aria-live="assertive"
+      className={cn(
+        "flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-100",
+        compact ? "p-2 text-xs" : "px-3 py-2 text-sm",
+      )}
+      role="alert"
+    >
+      <span className="min-w-0 flex-1 break-words">{message}</span>
+      <span className="inline-flex shrink-0 items-center gap-1.5">
+        <button
+          aria-describedby={feedbackId}
+          aria-label={label}
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-700 bg-zinc-950 text-zinc-300 hover:border-zinc-500 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-300",
+            feedback === "copied" && "border-emerald-500/60 text-emerald-200",
+            feedback === "failed" && "border-red-400/60 text-red-100",
+          )}
+          onClick={() => void copyApprovalError(message).then((copied) => {
+            setFeedback(copied ? "copied" : "failed");
+          })}
+          title={label}
+          type="button"
+        >
+          <Copy aria-hidden="true" size={14} />
+        </button>
+        <span className="sr-only" id={feedbackId} role="status" aria-live="polite">
+          {feedbackMessage}
+        </span>
+      </span>
+    </div>
+  );
+}
 
 function requestIdFromLocation(): string {
   try {
@@ -222,7 +307,11 @@ export function AuthorityApprovalWindow() {
     try {
       const current = await readAuthoritativeRequest();
       if (!isPending(current)) throw new Error("APPROVAL_REQUEST_MISMATCH");
-      const context = await getAuthorityApprovalContext(requestId);
+      const context = await getAuthorityApprovalContext(requestId, {
+        decision: "approve",
+        requestSnapshotDigest: current.request_snapshot_digest,
+        typedConfirmationDigest: current.typed_confirmation_digest,
+      });
       const result = await interactiveApprovalResources.approve(requestId, {
         confirmation_text: confirmationText.trim(),
         ui_operator: context.ui_operator,
@@ -243,7 +332,11 @@ export function AuthorityApprovalWindow() {
     try {
       const current = await readAuthoritativeRequest();
       if (!isPending(current)) throw new Error("APPROVAL_REQUEST_MISMATCH");
-      const context = await getAuthorityApprovalContext(requestId);
+      const context = await getAuthorityApprovalContext(requestId, {
+        decision: "deny",
+        requestSnapshotDigest: current.request_snapshot_digest,
+        typedConfirmationDigest: null,
+      });
       const result = await interactiveApprovalResources.deny(requestId, {
         ui_operator: context.ui_operator,
       });
@@ -290,11 +383,7 @@ export function AuthorityApprovalWindow() {
           </button>
         </header>
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
-            {error}
-          </div>
-        )}
+        {error && <div className="mt-4"><ApprovalError message={error} /></div>}
 
         <section className="mt-5 grid gap-4">
           {loading ? (
@@ -302,9 +391,7 @@ export function AuthorityApprovalWindow() {
               <Loader2 className="animate-spin text-zinc-500" size={22} />
             </div>
           ) : !requestId ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-              request_id が見つかりません。
-            </div>
+            <ApprovalError message="request_id が見つかりません。" />
           ) : request ? (
             <>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
@@ -350,9 +437,7 @@ export function AuthorityApprovalWindow() {
               )}
 
               {confirmationUnavailable && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-                  この承認に必要な確認情報を取得できませんでした。安全のため操作できません。
-                </div>
+                <ApprovalError message="この承認に必要な確認情報を取得できませんでした。安全のため操作できません。" />
               )}
 
               {settled ? (
@@ -394,11 +479,7 @@ export function AuthorityApprovalWindow() {
                 </div>
               )}
             </>
-          ) : (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-              承認リクエストを取得できませんでした。
-            </div>
-          )}
+          ) : error ? null : <ApprovalError message="承認リクエストを取得できませんでした。" />}
         </section>
       </div>
     </main>
@@ -525,7 +606,7 @@ function AmbientPackAuthorityApprovalWindow() {
         <header className="flex items-start justify-between gap-2 border-b border-zinc-800 pb-3">
           <div>
             <div className="flex items-center gap-2 text-[10px] font-medium text-amber-200">
-              <ShieldAlert size={14} /> Rumi内の許可
+              <ShieldAlert size={14} /> Tobkiri内の許可
             </div>
             <h1 className="mt-1 text-base font-semibold text-zinc-50">Tobkiriの許可</h1>
             <p className="mt-1 text-[11px] leading-4 text-zinc-400">
@@ -541,7 +622,7 @@ function AmbientPackAuthorityApprovalWindow() {
             <RefreshCw size={14} />
           </button>
         </header>
-        {error && <p className="mt-3 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-100">{error}</p>}
+        {error && <div className="mt-3"><ApprovalError compact message={error} /></div>}
         {message && <p className="mt-3 rounded border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-100">{message}</p>}
         <section className="mt-4 flex-1 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
           {loading ? (
@@ -549,7 +630,7 @@ function AmbientPackAuthorityApprovalWindow() {
           ) : (
             <>
               <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
-                <span>Rumi {rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}</span>
+                <span>Tobkiri {rumiPermissionCount}/{AMBIENT_REQUIRED_PERMISSIONS.length}</span>
                 <span>OS {osPermissionCount}/{AMBIENT_OS_PERMISSIONS.length}</span>
               </div>
               <p className="mt-4 text-sm text-zinc-200">

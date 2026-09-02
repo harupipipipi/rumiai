@@ -1413,6 +1413,11 @@ mod tests {
             shell_artifact_id: "fixture.shell.macos-arm64".into(),
             shell_artifact_digest: format!("sha256:{}", "b".repeat(64)),
             shell_entrypoint_digest: format!("sha256:{}", "c".repeat(64)),
+            host_contract_contributions:
+                crate::host_contract_contributions::HostContractContributionValues {
+                    system_pack_descriptors: "[]".into(),
+                    update_target_descriptors: "[]".into(),
+                },
         };
         let owned = PortListener {
             pid: 101,
@@ -1473,6 +1478,11 @@ mod tests {
             shell_artifact_id: "fixture.shell.macos-arm64".into(),
             shell_artifact_digest: format!("sha256:{}", "b".repeat(64)),
             shell_entrypoint_digest: format!("sha256:{}", "c".repeat(64)),
+            host_contract_contributions:
+                crate::host_contract_contributions::HostContractContributionValues {
+                    system_pack_descriptors: "[]".into(),
+                    update_target_descriptors: "[]".into(),
+                },
         };
         let prior_bundle = PortListener {
             pid: 303,
@@ -1683,6 +1693,11 @@ mod tests {
             shell_artifact_id: "fixture.shell.macos-arm64".into(),
             shell_artifact_digest: format!("sha256:{}", "4".repeat(64)),
             shell_entrypoint_digest: format!("sha256:{}", "5".repeat(64)),
+            host_contract_contributions:
+                crate::host_contract_contributions::HostContractContributionValues {
+                    system_pack_descriptors: "[]".into(),
+                    update_target_descriptors: "[]".into(),
+                },
         };
 
         write_guardian_ready_audit(&config, &metadata).unwrap();

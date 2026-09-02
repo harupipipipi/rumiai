@@ -19,6 +19,7 @@ import pytest
 from ecosystem.rumi_credential_broker_pack.runtime import store as store_module
 from ecosystem.rumi_credential_broker_pack.runtime.store import CredentialBrokerStore
 from core_runtime.credential_transport import (
+    AuthorizedEnvelopeCredentialTransport,
     CredentialTransportDenied,
     HostBoundCredentialTransport,
     _MAX_RESPONSE_BYTES,
@@ -438,6 +439,450 @@ def test_credential_material_is_encrypted_and_listing_is_redacted(
     assert "fixture-secret" not in restarted.store.path.read_text(encoding="utf-8")
 
 
+def test_git_credential_selection_is_exact_secret_free_and_fails_on_ambiguity(
+    tmp_path: Path,
+) -> None:
+    store = CredentialBrokerStore(user_data_root=tmp_path)
+    binding = {
+        "endpoint_origin": "https://github.example",
+        "workspace_id": "workspace-a",
+    }
+    created = store.create(
+        secret_material={"token": "selection-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding=binding,
+    )
+
+    selected = store.select(
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scope="git.publish",
+        resource_binding=binding,
+    )
+
+    assert selected == created
+    assert "ciphertext" not in selected
+    assert "selection-secret" not in json.dumps(selected)
+    assert (
+        store.select(
+            consumer_pack_id="rumi_git_publish_pack",
+            provider_instance_id="git-publish.service",
+            profile_id="profile-1",
+            scope="git.publish",
+            resource_binding={**binding, "workspace_id": "workspace-other"},
+        )
+        is None
+    )
+    store.create(
+        secret_material={"token": "second-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding=binding,
+    )
+    with pytest.raises(PermissionError, match="ambiguous"):
+        store.select(
+            consumer_pack_id="rumi_git_publish_pack",
+            provider_instance_id="git-publish.service",
+            profile_id="profile-1",
+            scope="git.publish",
+            resource_binding=binding,
+        )
+
+
+def test_git_credential_selection_ignores_expired_binding(tmp_path: Path) -> None:
+    store = CredentialBrokerStore(user_data_root=tmp_path)
+    binding = {
+        "endpoint_origin": "https://github.example",
+        "workspace_id": "workspace-a",
+    }
+    store.create(
+        secret_material={"token": "expired-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding=binding,
+        expires_at=time.time() - 1,
+    )
+    assert (
+        store.select(
+            consumer_pack_id="rumi_git_publish_pack",
+            provider_instance_id="git-publish.service",
+            profile_id="profile-1",
+            scope="git.publish",
+            resource_binding=binding,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "expires_at",
+    [True, "123", float("nan"), float("inf"), float("-inf")],
+)
+def test_credential_create_and_migration_reject_non_json_expiration(
+    tmp_path: Path,
+    expires_at: object,
+) -> None:
+    service = CredentialBrokerService(user_data_root=tmp_path / "service")
+    payload = {
+        "secret_material": {"token": "expiration-secret"},
+        "profile_id": "profile-1",
+        "consumer_pack_id": "rumi_git_publish_pack",
+        "provider_instance_id": "git-publish.service",
+        "scopes": ["git.publish"],
+        "expires_at": expires_at,
+    }
+
+    with pytest.raises(ValueError, match="expires_at"):
+        service.invoke("create", payload)
+
+    store = CredentialBrokerStore(user_data_root=tmp_path / "migration")
+    records = [payload]
+    try:
+        expected_hash = store_module._hash({"records": records})
+    except ValueError:
+        expected_hash = "sha256:" + "0" * 64
+    with pytest.raises(ValueError):
+        store.migrate(records, expected_source_hash=expected_hash)
+
+
+@pytest.mark.parametrize(
+    "expires_at",
+    ["tomorrow", True, float("nan"), float("inf"), float("-inf")],
+)
+def test_tampered_expiration_fails_closed_on_select_and_resolve(
+    tmp_path: Path,
+    expires_at: object,
+) -> None:
+    store = CredentialBrokerStore(user_data_root=tmp_path)
+    binding = {
+        "endpoint_origin": "https://github.example",
+        "workspace_id": "workspace-a",
+    }
+    created = store.create(
+        secret_material={"token": "tampered-expiration-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding=binding,
+    )
+    state = store._read()
+    record = state["credentials"][created["handle"]]
+    record["expires_at"] = expires_at
+    unsigned = {key: value for key, value in record.items() if key != "record_mac"}
+    raw = json.dumps(
+        unsigned,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    record["record_mac"] = store_module.hmac.new(
+        store._fernet()._signing_key,
+        raw,
+        hashlib.sha256,
+    ).hexdigest()
+    store.path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    common = {
+        "consumer_pack_id": "rumi_git_publish_pack",
+        "provider_instance_id": "git-publish.service",
+        "profile_id": "profile-1",
+        "scope": "git.publish",
+        "resource_binding": binding,
+    }
+    try:
+        selected = store.select(**common)
+    except (PermissionError, ValueError):
+        pass
+    else:
+        assert selected is None
+    with pytest.raises((PermissionError, ValueError)):
+        store.resolve(
+            created["handle"],
+            consumer_pack_id="rumi_git_publish_pack",
+            provider_instance_id="git-publish.service",
+            profile_id="profile-1",
+            scope="git.publish",
+            expected_resource_binding=binding,
+        )
+
+def test_defaultspack_composition_binds_the_real_host_credential_store(
+    tmp_path: Path,
+) -> None:
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_credential_store_factory,
+    )
+
+    binding = defaultspack_credential_store_factory(user_data_root=tmp_path)
+
+    assert isinstance(binding.store, CredentialBrokerStore)
+    assert binding.store.user_data_root == tmp_path
+    assert binding.key_version == store_module.KEY_VERSION
+
+
+def test_authorized_git_selector_binds_profile_workspace_origin_and_is_one_shot(
+    tmp_path: Path,
+) -> None:
+    service = CredentialBrokerService(user_data_root=tmp_path / "credential")
+    created = service.store.create(
+        secret_material={"token": "host-only-selection-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding={
+            "endpoint_origin": "https://github.example",
+            "workspace_id": "workspace-a",
+        },
+    )
+    authority, envelope = _dispatched_envelope(tmp_path / "dispatch")
+    transport = AuthorizedEnvelopeCredentialTransport(
+        envelope=envelope,
+        provider_principal=authority.target,
+        store=service.store,
+        authority_store=authority.store,
+        current_security_epoch=lambda: authority.store.security_epoch,
+        credential_key_version=store_module.KEY_VERSION,
+        consumer_pack_id="rumi_git_publish_pack",
+    )
+
+    selected = transport.select_git_https_credential(
+        workspace_id="workspace-a",
+        endpoint_origin="https://github.example",
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+    )
+
+    assert selected is not None
+    assert selected["handle"] == created["handle"]
+    assert selected["resource_binding"] == {
+        "endpoint_origin": "https://github.example",
+        "workspace_id": "workspace-a",
+    }
+    assert str(selected["binding_digest"]).startswith("sha256:")
+    assert "host-only-selection-secret" not in json.dumps(selected)
+    with pytest.raises(CredentialTransportDenied):
+        transport.select_git_https_credential(
+            workspace_id="workspace-a",
+            endpoint_origin="https://github.example",
+            provider_instance_id="git-publish.service",
+            credential_scope="git.publish",
+        )
+
+
+def _authorized_git_selector(
+    tmp_path: Path,
+) -> tuple[
+    CredentialBrokerService,
+    dict[str, Any],
+    _Harness,
+    RequestEnvelope,
+    AuthorizedEnvelopeCredentialTransport,
+]:
+    service = CredentialBrokerService(user_data_root=tmp_path / "credential")
+    created = service.store.create(
+        secret_material={"token": "receipt-bound-secret"},
+        consumer_pack_id="rumi_git_publish_pack",
+        provider_instance_id="git-publish.service",
+        profile_id="profile-1",
+        scopes=["git.publish"],
+        resource_binding={
+            "endpoint_origin": "https://github.example",
+            "workspace_id": "workspace-a",
+        },
+    )
+    authority, envelope = _dispatched_envelope(tmp_path / "dispatch")
+    transport = AuthorizedEnvelopeCredentialTransport(
+        envelope=envelope,
+        provider_principal=authority.target,
+        store=service.store,
+        authority_store=authority.store,
+        current_security_epoch=lambda: authority.store.security_epoch,
+        credential_key_version=store_module.KEY_VERSION,
+        consumer_pack_id="rumi_git_publish_pack",
+    )
+    return service, created, authority, envelope, transport
+
+
+def _authorized_git_push_arguments(
+    *,
+    handle: str,
+    receipt: str,
+    workspace_id: str = "workspace-a",
+) -> dict[str, Any]:
+    return {
+        "git_executable": "/usr/bin/git",
+        "git_executable_identity": {"capture": "git"},
+        "bare_repository": "/private/host-state/transport.git",
+        "remote_url": "https://github.example/owner/repository.git",
+        "refspec": "a" * 40 + ":refs/heads/main",
+        "force_with_lease": "--force-with-lease=refs/heads/main:" + "0" * 40,
+        "credential_handle": handle,
+        "provider_instance_id": "git-publish.service",
+        "credential_scope": "git.publish",
+        "workspace_id": workspace_id,
+        "selection_receipt": receipt,
+    }
+
+
+def test_authorized_git_push_rejects_skip_substitution_and_cross_workspace(
+    tmp_path: Path,
+) -> None:
+    _service, created, _authority, _envelope, transport = _authorized_git_selector(
+        tmp_path / "skip"
+    )
+    with pytest.raises(CredentialTransportDenied):
+        transport.push_git_https(
+            **_authorized_git_push_arguments(
+                handle=created["handle"],
+                receipt="credential-selection:forged",
+            )
+        )
+
+    _service, created, _authority, _envelope, transport = _authorized_git_selector(
+        tmp_path / "substitute"
+    )
+    selected = transport.select_git_https_credential(
+        workspace_id="workspace-a",
+        endpoint_origin="https://github.example",
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+    )
+    assert selected is not None
+    with pytest.raises(CredentialTransportDenied):
+        transport.push_git_https(
+            **_authorized_git_push_arguments(
+                handle="credential:known-other-handle",
+                receipt=str(selected["selection_receipt"]),
+            )
+        )
+
+    _service, created, _authority, _envelope, transport = _authorized_git_selector(
+        tmp_path / "workspace"
+    )
+    selected = transport.select_git_https_credential(
+        workspace_id="workspace-a",
+        endpoint_origin="https://github.example",
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+    )
+    assert selected is not None
+    with pytest.raises(CredentialTransportDenied):
+        transport.push_git_https(
+            **_authorized_git_push_arguments(
+                handle=created["handle"],
+                receipt=str(selected["selection_receipt"]),
+                workspace_id="workspace-b",
+            )
+        )
+
+
+def test_authorized_git_selection_succeeds_once_and_receipt_dies_on_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, created, authority, envelope, transport = _authorized_git_selector(
+        tmp_path
+    )
+    selected = transport.select_git_https_credential(
+        workspace_id="workspace-a",
+        endpoint_origin="https://github.example",
+        provider_instance_id="git-publish.service",
+        credential_scope="git.publish",
+    )
+    assert selected is not None
+    captured_bindings: list[dict[str, str]] = []
+
+    class _SelectedPush:
+        def push_git_https(self, **_kwargs: object) -> str:
+            return "selected push completed"
+
+    def capture_transport(
+        _cls: object,
+        _envelope: RequestEnvelope,
+        **kwargs: Any,
+    ) -> _SelectedPush:
+        captured_bindings.append(dict(kwargs["expected_resource_binding"]))
+        return _SelectedPush()
+
+    monkeypatch.setattr(
+        HostBoundCredentialTransport,
+        "from_authorized_envelope",
+        classmethod(capture_transport),
+    )
+    arguments = _authorized_git_push_arguments(
+        handle=created["handle"],
+        receipt=str(selected["selection_receipt"]),
+    )
+
+    assert transport.push_git_https(**arguments) == "selected push completed"
+    assert captured_bindings == [
+        {
+            "endpoint_origin": "https://github.example",
+            "workspace_id": "workspace-a",
+        }
+    ]
+    with pytest.raises(CredentialTransportDenied):
+        transport.push_git_https(**arguments)
+
+    restarted = AuthorizedEnvelopeCredentialTransport(
+        envelope=envelope,
+        provider_principal=authority.target,
+        store=service.store,
+        authority_store=authority.store,
+        current_security_epoch=lambda: authority.store.security_epoch,
+        credential_key_version=store_module.KEY_VERSION,
+        consumer_pack_id="rumi_git_publish_pack",
+    )
+    with pytest.raises(CredentialTransportDenied):
+        restarted.push_git_https(**arguments)
+
+
+def test_store_decrypt_requires_exact_selected_resource_binding(
+    tmp_path: Path,
+) -> None:
+    service, created, _authority, _envelope, _transport = _authorized_git_selector(
+        tmp_path
+    )
+    common = {
+        "consumer_pack_id": "rumi_git_publish_pack",
+        "provider_instance_id": "git-publish.service",
+        "profile_id": "profile-1",
+        "scope": "git.publish",
+        "key_version": store_module.KEY_VERSION,
+        "purpose": "provider.invoke",
+    }
+
+    with pytest.raises(PermissionError, match="resource"):
+        service.store.resolve(
+            created["handle"],
+            **common,
+            expected_resource_binding={
+                "endpoint_origin": "https://github.example",
+                "workspace_id": "workspace-b",
+            },
+        )
+    assert service.store.resolve(
+        created["handle"],
+        **common,
+        expected_resource_binding={
+            "endpoint_origin": "https://github.example",
+            "workspace_id": "workspace-a",
+        },
+    ) == {"token": "receipt-bound-secret"}
+
+
 def test_generic_resolution_is_denied_and_host_transport_applies_once(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -844,6 +1289,10 @@ def test_host_git_transport_resolves_only_inside_one_exact_push(
             "consumer_pack_id": "rumi_git_publish_pack",
             "provider_instance_id": "git-publish.service",
             "scopes": ["git.publish"],
+            "resource_binding": {
+                "endpoint_origin": "https://github.example",
+                "workspace_id": "workspace-a",
+            },
         },
     )
     authority, envelope = _dispatched_envelope(tmp_path / "dispatch")
@@ -860,12 +1309,28 @@ def test_host_git_transport_resolves_only_inside_one_exact_push(
         endpoint_origin="https://github.example",
         current_security_epoch=lambda: authority.store.security_epoch,
         consumer_pack_id="rumi_git_publish_pack",
+        expected_resource_binding={
+            "endpoint_origin": "https://github.example",
+            "workspace_id": "workspace-a",
+        },
     )
     bare = tmp_path / "transport.git"
     bare.mkdir()
     captured: dict[str, str] = {}
+    captured_identity: dict[str, object] = {}
+
+    def trusted_git(
+        _value: str,
+        *,
+        expected_identity: dict[str, object],
+    ) -> Path:
+        captured_identity.update(expected_identity)
+        return Path("/usr/bin/git")
+
     monkeypatch.setattr(
-        transport_module, "_trusted_git_executable", lambda _value: Path("/usr/bin/git")
+        transport_module,
+        "_trusted_git_executable",
+        trusted_git,
     )
     monkeypatch.setattr(
         transport_module, "_bare_repository", lambda value, _exe: Path(value)
@@ -878,6 +1343,7 @@ def test_host_git_transport_resolves_only_inside_one_exact_push(
     monkeypatch.setattr(transport_module, "_run_credentialed_git_push", run_push)
     result = transport.push_git_https(
         git_executable="/usr/bin/git",
+        git_executable_identity={"capture": "git"},
         bare_repository=str(bare),
         remote_url="https://github.example/owner/repository.git",
         refspec="a" * 40 + ":refs/heads/main",
@@ -889,12 +1355,14 @@ def test_host_git_transport_resolves_only_inside_one_exact_push(
 
     assert captured["username"] == "x-access-token"
     assert captured["secret"] == canary
+    assert captured_identity == {"capture": "git"}
     assert result == "published [REDACTED]"
     assert canary not in result
     assert transport._consumed is True
     with pytest.raises(CredentialTransportDenied):
         transport.push_git_https(
             git_executable="/usr/bin/git",
+            git_executable_identity={"capture": "git"},
             bare_repository=str(bare),
             remote_url="https://github.example/owner/repository.git",
             refspec="a" * 40 + ":refs/heads/main",
@@ -1097,6 +1565,7 @@ def test_global_client_normalizes_injected_git_transport_exception_without_chain
     with pytest.raises(HostCredentialTransportError) as caught:
         client.push_git_https_with_credential(
             git_executable="/usr/bin/git",
+            git_executable_identity={"capture": "git"},
             bare_repository="/private/host-state/transport.git",
             remote_url="https://github.example/owner/repository.git",
             refspec="a" * 40 + ":refs/heads/main",
@@ -1104,6 +1573,8 @@ def test_global_client_normalizes_injected_git_transport_exception_without_chain
             credential_handle="credential:opaque",
             provider_instance_id="git-publish.service",
             credential_scope="git.publish",
+            workspace_id="workspace-a",
+            selection_receipt="credential-selection:test",
         )
 
     error = caught.value

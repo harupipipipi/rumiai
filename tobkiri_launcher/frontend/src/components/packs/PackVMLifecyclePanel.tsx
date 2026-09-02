@@ -30,6 +30,7 @@ import {
 import {useAppStore} from '@/src/store';
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {Input} from '@/src/components/ui/Input';
 import {PackDiagnostics} from './PackDiagnostics';
@@ -56,46 +57,78 @@ function digestRow(label: string, value: string): ReactNode {
   );
 }
 
-function failureDiagnostic(operation: ApiPackVMOperation): ReactNode {
+function typedFailureDiagnosticText(operation: ApiPackVMOperation): string | null {
   const diagnostic = operation.diagnostic;
   if (!operation.error_type && !diagnostic) return null;
+  const lines: string[] = [];
+  if (operation.error_type) {
+    lines.push(`Failure type: ${userSafePackVMError(operation.error_type)}`);
+  }
+  if (diagnostic) {
+    lines.push(`Diagnostic code: ${userSafePackVMError(diagnostic.code)}`);
+    lines.push(`Stage: ${userSafePackVMError(diagnostic.stage)}`);
+    lines.push(
+      `Process result: ${userSafePackVMError(diagnostic.kind)}${
+        diagnostic.exit_code === null ? '' : ` (${diagnostic.exit_code})`
+      }`,
+    );
+    if (diagnostic.stderr) {
+      lines.push(`Host diagnostic: ${userSafePackVMError(diagnostic.stderr)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function failureDiagnostic(operation: ApiPackVMOperation): ReactNode {
+  const diagnostic = operation.diagnostic;
+  const copiedDiagnostic = typedFailureDiagnosticText(operation);
+  if (!copiedDiagnostic) return null;
   return (
-    <dl
-      className="mt-3 grid gap-2 rounded-lg border border-red-300/50 bg-red-500/5 p-3 text-xs text-text-muted sm:grid-cols-2"
+    <div
+      className="mt-3 rounded-lg border border-red-300/50 bg-red-500/5 p-3 text-xs text-text-muted"
       aria-label="Typed PackVM failure diagnostic"
+      role="alert"
     >
-      {operation.error_type ? (
-        <div>
-          <dt className="font-medium text-text-main">Failure type</dt>
-          <dd className="mt-1 break-all font-mono">{userSafePackVMError(operation.error_type)}</dd>
-        </div>
-      ) : null}
-      {diagnostic ? (
-        <>
-          <div>
-            <dt className="font-medium text-text-main">Diagnostic code</dt>
-            <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.code)}</dd>
-          </div>
-          <div>
-            <dt className="font-medium text-text-main">Stage</dt>
-            <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.stage)}</dd>
-          </div>
-          <div>
-            <dt className="font-medium text-text-main">Process result</dt>
-            <dd className="mt-1 break-all font-mono">
-              {userSafePackVMError(diagnostic.kind)}
-              {diagnostic.exit_code === null ? '' : ` (${diagnostic.exit_code})`}
-            </dd>
-          </div>
-          {diagnostic.stderr ? (
-            <div className="sm:col-span-2">
-              <dt className="font-medium text-text-main">Host diagnostic</dt>
-              <dd className="mt-1 whitespace-pre-wrap break-words">{userSafePackVMError(diagnostic.stderr)}</dd>
+      <div className="flex items-start gap-2">
+        <dl className="min-w-0 flex-1 grid gap-2 sm:grid-cols-2">
+          {operation.error_type ? (
+            <div>
+              <dt className="font-medium text-text-main">Failure type</dt>
+              <dd className="mt-1 break-all font-mono">{userSafePackVMError(operation.error_type)}</dd>
             </div>
           ) : null}
-        </>
-      ) : null}
-    </dl>
+          {diagnostic ? (
+            <>
+              <div>
+                <dt className="font-medium text-text-main">Diagnostic code</dt>
+                <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.code)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text-main">Stage</dt>
+                <dd className="mt-1 break-all font-mono">{userSafePackVMError(diagnostic.stage)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-text-main">Process result</dt>
+                <dd className="mt-1 break-all font-mono">
+                  {userSafePackVMError(diagnostic.kind)}
+                  {diagnostic.exit_code === null ? '' : ` (${diagnostic.exit_code})`}
+                </dd>
+              </div>
+              {diagnostic.stderr ? (
+                <div className="sm:col-span-2">
+                  <dt className="font-medium text-text-main">Host diagnostic</dt>
+                  <dd className="mt-1 whitespace-pre-wrap break-words">{userSafePackVMError(diagnostic.stderr)}</dd>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </dl>
+        <CopyErrorButton
+          label="Copy typed PackVM failure diagnostic"
+          text={copiedDiagnostic}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -390,17 +423,16 @@ export function PackVMLifecyclePanel() {
             </p>
           ) : null}
           {packVmError ? (
-            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
-              {formatPackVMRecoveryError(
-                packVmError,
-                safeUserError(packVmError, 'PackVM readiness could not be verified.'),
-              )}
-            </p>
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+              <p className="min-w-0 flex-1 break-words">{formatPackVMRecoveryError(packVmError, safeUserError(packVmError, 'PackVM readiness could not be verified.'))}</p>
+              <CopyErrorButton label="Copy PackVM readiness error" text={formatPackVMRecoveryError(packVmError, safeUserError(packVmError, 'PackVM readiness could not be verified.'))} />
+            </div>
           ) : null}
           {lifecycleError ? (
-            <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
-              {lifecycleError}
-            </p>
+            <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
+              <p className="min-w-0 flex-1 break-words">{lifecycleError}</p>
+              <CopyErrorButton label="Copy PackVM lifecycle error" text={lifecycleError} />
+            </div>
           ) : null}
 
           {doctor ? (
@@ -579,9 +611,10 @@ export function PackVMLifecyclePanel() {
                 ))}
               </ol>
               {operation.error ? (
-                <p className="mt-3 text-sm text-destructive" role="alert">
-                  {userSafePackVMError(operation.error)}
-                </p>
+                <div className="mt-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+                  <p className="min-w-0 flex-1 break-words">{userSafePackVMError(operation.error)}</p>
+                  <CopyErrorButton label="Copy PackVM operation error" text={userSafePackVMError(operation.error)} />
+                </div>
               ) : null}
               {operation.state === 'failed' ? failureDiagnostic(operation) : null}
               {operation.state === 'queued' ? (

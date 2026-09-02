@@ -3,6 +3,7 @@ import {ArrowRight, CheckCircle2, LockKeyhole, PackagePlus, ShieldCheck, XCircle
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {broadcastRuntimeSurfaceRefresh, type RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
 import {
@@ -808,12 +809,15 @@ export function ProfileCeremonyPanel({
               <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">One or more requested Packs are not installed, approved, enabled, or digest-matched. Refresh the Pack catalog or complete its separate lifecycle before continuing.</p>
             ) : null}
             {!catalogBindingStable ? (
-              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300" role="alert">The authoritative Profile catalog is loading, stale, or no longer matches this selection. Ceremony actions are locked until it refreshes.</p>
+              <div className="mt-3 flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300" role="alert"><p className="min-w-0 flex-1">The authoritative Profile catalog is loading, stale, or no longer matches this selection. Ceremony actions are locked until it refreshes.</p></div>
             ) : null}
             {!catalogEntry.available ? (
-              <div className="mt-3 text-sm text-destructive" role="alert">
+              <div className="mt-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+                <div className="min-w-0 flex-1">
                 <p>This Profile is unavailable in the verified catalog.</p>
                 <ul className="mt-1 list-disc pl-5">{catalogEntry.diagnostics.map((diagnostic) => <li key={`${diagnostic.code}:${diagnostic.subject}`}>{diagnostic.code}: {diagnostic.subject}</li>)}</ul>
+                </div>
+                <CopyErrorButton label="Copy unavailable Profile diagnostics" text={catalogEntry.diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.subject}`).join('\n')} />
               </div>
             ) : null}
           </div>
@@ -822,13 +826,14 @@ export function ProfileCeremonyPanel({
         {failure ? (
           <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm" role="alert">
             <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-            <div><p className="font-medium text-text-main">Profile ceremony stopped fail-closed</p><p className="mt-1 text-text-muted">{failure.code}: {failure.message}</p></div>
+            <div className="min-w-0 flex-1"><p className="font-medium text-text-main">Profile ceremony stopped fail-closed</p><p className="mt-1 break-words text-text-muted">{failure.code}: {failure.message}</p></div>
+            <CopyErrorButton label="Copy Profile ceremony error" text={`${failure.code}: ${failure.message}`} />
           </div>
         ) : null}
 
         {ceremonyState === 'result_unknown' && unknownMutation ? (
           <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-medium text-text-main">Profile ceremony result is unknown</p>
               <p className="mt-1 text-text-muted">{MUTATION_UNKNOWN_MESSAGE}</p>
               <p className="mt-1 break-all font-mono text-xs text-text-muted">Request identity: {unknownMutation.requestId}</p>

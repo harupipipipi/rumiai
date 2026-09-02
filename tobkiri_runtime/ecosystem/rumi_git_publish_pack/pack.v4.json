@@ -1,12 +1,12 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:bddcb50db810868dd6bf20328df6a134f758f83fbbf11cb5330e74b1e4c9c987",
+      "digest": "sha256:19a54c8a6241634a85b2bf45a97e125752189b1f3aef0f9bccb2026137efd7d7",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
     {
-      "digest": "sha256:e431719aae0fb9bd5195405f3ca257a2be0807b1c11e1720e682a0821694b5f9",
+      "digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
       "kind": "executable",
       "path": "runtime/publish.py"
     }
@@ -18,14 +18,14 @@
         "rumi_git_publish_pack.git-push-prepare",
         "rumi_git_publish_pack.git-push"
       ],
-      "revision_digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb"
+      "revision_digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c"
     }
   ],
   "functions": [
     {
-      "contract_revision_digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb",
+      "contract_revision_digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c",
       "id": "rumi_git_publish_pack.git-publish.service",
-      "implementation_digest": "sha256:e431719aae0fb9bd5195405f3ca257a2be0807b1c11e1720e682a0821694b5f9",
+      "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
       "isolation": "dedicated_process",
       "operations": [
         "rumi_git_publish_pack.git-push"
@@ -33,9 +33,9 @@
       "role": "host_capability_provider"
     },
     {
-      "contract_revision_digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb",
+      "contract_revision_digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c",
       "id": "rumi_git_publish_pack.git-push-prepare.service",
-      "implementation_digest": "sha256:e431719aae0fb9bd5195405f3ca257a2be0807b1c11e1720e682a0821694b5f9",
+      "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
       "isolation": "dedicated_process",
       "operations": [
         "rumi_git_publish_pack.git-push-prepare"
@@ -44,9 +44,9 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:70c1f366d9dfd54617a45dce0d0d0634744d0a4464ab07db44681c618f41040a",
-    "contract_catalog_digest": "sha256:81fae32d0fff4313ad1bd4567e8e1e6e8bfdbb0d60ae67b682c20c173af5540c",
-    "source_identity": "sha256:5b84f2b06db0d832d0c9b5e1b765a6ae7b133a865bdf10515f2fffcce28e9395"
+    "artifact_set_digest": "sha256:291975399ddcf291ad6dc9985a21636313c0787dad54e5dd1bbe2691cee661fb",
+    "contract_catalog_digest": "sha256:b026b54d4ebd440d1e7b47ebeccfeff2b2d8767ecc53f4926ab78a396ec19828",
+    "source_identity": "sha256:f220407c03fc5da9cdf27a44f1ee1e8a9a338949847893d669390c74362cc5d5"
   },
   "migration": {
     "compatibility": "read_only",
@@ -86,7 +86,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:70c1f366d9dfd54617a45dce0d0d0634744d0a4464ab07db44681c618f41040a",
+    "artifact_digest": "sha256:291975399ddcf291ad6dc9985a21636313c0787dad54e5dd1bbe2691cee661fb",
     "display_name": "Rumi Git Publish",
     "id": "rumi_git_publish_pack",
     "kind": "host_extension",
@@ -96,7 +96,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:5b84f2b06db0d832d0c9b5e1b765a6ae7b133a865bdf10515f2fffcce28e9395",
+        "digest": "sha256:f220407c03fc5da9cdf27a44f1ee1e8a9a338949847893d669390c74362cc5d5",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -107,7 +107,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:5b84f2b06db0d832d0c9b5e1b765a6ae7b133a865bdf10515f2fffcce28e9395",
+    "source_digest": "sha256:f220407c03fc5da9cdf27a44f1ee1e8a9a338949847893d669390c74362cc5d5",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_git_publish_pack"
   },

@@ -64,10 +64,21 @@ class HostCredentialTransport(Protocol):
     ) -> Mapping[str, Any]:
         """Perform exactly one Host-bound credentialed JSON request."""
 
+    def select_git_https_credential(
+        self,
+        *,
+        workspace_id: str,
+        endpoint_origin: str,
+        provider_instance_id: str,
+        credential_scope: str,
+    ) -> Mapping[str, Any] | None:
+        """Select one exact opaque Git credential identity, or no credential."""
+
     def push_git_https(
         self,
         *,
         git_executable: str,
+        git_executable_identity: Mapping[str, Any],
         bare_repository: str,
         remote_url: str,
         refspec: str,
@@ -75,6 +86,8 @@ class HostCredentialTransport(Protocol):
         credential_handle: str,
         provider_instance_id: str,
         credential_scope: str,
+        workspace_id: str,
+        selection_receipt: str,
     ) -> str:
         """Perform the sole Host-bound HTTPS Git push primitive."""
 
@@ -208,10 +221,39 @@ class GlobalContractClient:
             pass
         raise HostCredentialTransportError
 
+    def select_git_https_credential(
+        self,
+        *,
+        workspace_id: str,
+        endpoint_origin: str,
+        provider_instance_id: str,
+        credential_scope: str,
+    ) -> Mapping[str, Any] | None:
+        """Ask the Host to select one resource-bound opaque Git handle."""
+
+        if self.host_credential_transport is None:
+            return None
+        try:
+            value = self.host_credential_transport.select_git_https_credential(
+                workspace_id=workspace_id,
+                endpoint_origin=endpoint_origin,
+                provider_instance_id=provider_instance_id,
+                credential_scope=credential_scope,
+            )
+            if value is None:
+                return None
+            if not isinstance(value, Mapping):
+                raise HostCredentialTransportError
+            return dict(value)
+        except Exception:
+            pass
+        raise HostCredentialTransportError
+
     def push_git_https_with_credential(
         self,
         *,
         git_executable: str,
+        git_executable_identity: Mapping[str, Any],
         bare_repository: str,
         remote_url: str,
         refspec: str,
@@ -219,6 +261,8 @@ class GlobalContractClient:
         credential_handle: str,
         provider_instance_id: str,
         credential_scope: str,
+        workspace_id: str,
+        selection_receipt: str,
     ) -> str:
         """Use the finite Host HTTPS Git transport; never resolve material."""
 
@@ -227,6 +271,7 @@ class GlobalContractClient:
         try:
             value = self.host_credential_transport.push_git_https(
                 git_executable=git_executable,
+                git_executable_identity=git_executable_identity,
                 bare_repository=bare_repository,
                 remote_url=remote_url,
                 refspec=refspec,
@@ -234,6 +279,8 @@ class GlobalContractClient:
                 credential_handle=credential_handle,
                 provider_instance_id=provider_instance_id,
                 credential_scope=credential_scope,
+                workspace_id=workspace_id,
+                selection_receipt=selection_receipt,
             )
             if not isinstance(value, str):
                 raise HostCredentialTransportError

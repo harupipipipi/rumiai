@@ -3,6 +3,8 @@ import { cn } from '@/src/lib/utils';
 import { viewerLayers } from '@/src/lib/layers';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
+import {CopyErrorButton} from './CopyErrorButton';
+
 export function ToastContainer() {
   const toasts = useAppStore(state => state.toasts);
 
@@ -23,7 +25,13 @@ export function ToastContainer() {
           role="alert"
         >
           {toast.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-          {toast.message}
+          <span className="min-w-0 flex-1 break-words">{toast.message}</span>
+          {toast.type === 'error' ? (
+            <CopyErrorButton
+              label="Copy error notification"
+              text={toast.message}
+            />
+          ) : null}
         </div>
       ))}
     </div>

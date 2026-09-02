@@ -64,6 +64,7 @@ from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import 
 )
 
 if TYPE_CHECKING:
+    from tobkiri_host.artifact_materialization import MaterializedPackArtifact
     from tobkiri_host.macos_vz_supervisor import (
         MacOSVZAgentIdentity,
         MacOSVZDomainAllocation,
@@ -80,11 +81,40 @@ VZ_STATE_VERSION = 1
 VZ_INSTANCE = "tobkiri-packvm-v4"
 VZ_PLATFORM = "macos-arm64"
 VZ_RAW_EFI_IMAGE_DECLARED_BYTES = 3 * 1024 * 1024 * 1024
-VZ_INSTANCE_COW_BYTES = 4 * 1024 * 1024 * 1024
+# ``clonefile`` creates a same-sized raw COW image and no Direct VZ path
+# resizes it. Reserve its exact, pinned raw size rather than an invented
+# larger sparse-disk ceiling; a missing cache is charged separately below.
 VZ_HOST_STORAGE_RESERVE_BYTES = 512 * 1024 * 1024
 _MAX_STATE_BYTES = 128 * 1024
 _MAX_MANIFEST_BYTES = 128 * 1024
 _MAX_HELPER_PROTOCOL_BYTES = 1024 * 1024
+_MAX_ARTIFACT_SEED_MANIFEST_BYTES = 16 * 1024 * 1024
+_MAX_ARTIFACT_SEED_PAYLOAD_BYTES = 512 * 1024 * 1024
+_ARTIFACT_SEED_MAGIC = b"tobkiri-packvm-artifact-seed.v1\0"
+_ARTIFACT_SEED_FORMAT = "io.tobkiri.packvm-artifact-seed.v1"
+_MAX_ARTIFACT_SEED_BYTES = (
+    len(_ARTIFACT_SEED_MAGIC)
+    + 8
+    + _MAX_ARTIFACT_SEED_MANIFEST_BYTES
+    + _MAX_ARTIFACT_SEED_PAYLOAD_BYTES
+)
+# Allocation briefly owns both the private artifact seed and the CIDATA ISO
+# into which that seed is copied.  Charge both maximum-size copies during the
+# user-visible preflight; the ordinary Host reserve remains available for the
+# EFI store, the agent seed, ISO metadata/alignment, and COW writes.
+VZ_ARTIFACT_SEED_PEAK_RESERVE_BYTES = 2 * _MAX_ARTIFACT_SEED_BYTES
+# The guest image starts cloud-final after network-online.target.  A VZ
+# domain deliberately has no physical NIC, which makes an empty NoCloud
+# configuration wait for the image's networkd-wait-online timeout.  This
+# local-only dummy link is rendered from CIDATA before that dependency: it
+# has one /32 address but no route, gateway, DNS, or Host attachment.
+_NOCLOUD_LOCAL_ONLY_NETWORK_CONFIG = (
+    b"version: 2\n"
+    b"renderer: networkd\n"
+    b"dummy-devices:\n"
+    b"  tobkiri0:\n"
+    b"    addresses: [192.0.2.1/32]\n"
+)
 _DIGEST_PREFIX = "sha256:"
 _DIRECT_IMAGE_URL = (
     "https://gemmei.ftp.acc.umu.se/images/cloud/trixie/20260819-2575/"
@@ -602,7 +632,7 @@ class MacOSVZProvisioner:
                 "image_download_required": image_download_required,
                 "image_download_bytes": download_bytes,
                 "image_cache_status": cache_status,
-                "disk_size_bytes": VZ_INSTANCE_COW_BYTES,
+                "disk_size_bytes": VZ_RAW_EFI_IMAGE_DECLARED_BYTES,
                 "host_free_space_required_bytes": required_space,
                 "config_digest": config_digest,
                 "guest_runner_digest": guest_digest,
@@ -626,7 +656,7 @@ class MacOSVZProvisioner:
                 image_download_bytes=download_bytes,
                 image_cache_status=cache_status,
                 image_cache_reason=cache_reason,
-                disk_size_bytes=VZ_INSTANCE_COW_BYTES,
+                disk_size_bytes=VZ_RAW_EFI_IMAGE_DECLARED_BYTES,
                 host_free_space_required_bytes=required_space,
                 host_free_space_available_bytes=available,
                 host_free_space_reason=storage_reason,
@@ -829,6 +859,7 @@ class MacOSVZProvisioner:
         artifact_digest: str,
         executable_digest: str,
         materialization_digest: str,
+        artifact: MaterializedPackArtifact,
         channel_key: bytes,
     ) -> MacOSVZDomainAllocation:
         """Create one unshared APFS COW boot disk and helper-made EFI store."""
@@ -843,6 +874,12 @@ class MacOSVZProvisioner:
         }
         if any(not _is_digest(value) for value in launch_artifacts.values()):
             raise ValueError("PackVM VZ allocation artifact bindings are invalid")
+        _validate_materialized_artifact(
+            artifact,
+            artifact_digest=artifact_digest,
+            executable_digest=executable_digest,
+            materialization_digest=materialization_digest,
+        )
         state = self._load_state()
         manifest = self._require_manifest()
         self._verify_state_bindings(state, manifest)
@@ -856,6 +893,10 @@ class MacOSVZProvisioner:
         with self.operation_gate("allocate", binding):
             if root.exists() or root.is_symlink():
                 raise ValueError("PackVM VZ domain allocation already exists")
+            # Recheck while the cross-process mutation gate is held.  The
+            # user-visible plan reserves the maximum artifact, but actual free
+            # space may have changed before this exact allocation begins.
+            self._require_allocation_capacity(artifact)
             _ensure_private_directory(self._state_dir / "domains")
             _ensure_private_directory(root)
             cow = root / "boot-cow.raw"
@@ -895,6 +936,7 @@ class MacOSVZProvisioner:
                     artifact_digest=artifact_digest,
                     executable_digest=executable_digest,
                     materialization_digest=materialization_digest,
+                    artifact=artifact,
                 )
                 allocation = {
                     "domain_id": domain_id,
@@ -1004,6 +1046,7 @@ class MacOSVZProvisioner:
         artifact_digest: str,
         executable_digest: str,
         materialization_digest: str,
+        artifact: MaterializedPackArtifact,
     ) -> dict[str, str]:
         """Create fresh domain-bound guest identity and no-cloud seed disks.
 
@@ -1015,6 +1058,7 @@ class MacOSVZProvisioner:
 
         agent_seed = root / "agent-seed.iso"
         config_seed = root / "config-seed.iso"
+        artifact_seed = root / "artifact-seed.v1.bin"
         runner = _read_verified_bundle_file(
             manifest.agent_path, manifest.agent_digest, 8 * 1024 * 1024
         )
@@ -1066,28 +1110,37 @@ class MacOSVZProvisioner:
             "executable": executable_digest,
             "materialization": materialization_digest,
         }
+        artifact_seed_binding = _write_materialized_artifact_seed(artifact_seed, artifact)
         agent_config = {
             "version": 1,
             "domain_id": domain_id,
             "binding_digests": binding_digests,
             "private_key_path": "/run/tobkiri-packvm/agent-ed25519.pem",
+            "artifact_seed": artifact_seed_binding,
         }
         cloud_template = _read_verified_bundle_file(
             manifest.config_path, manifest.config_digest, _MAX_MANIFEST_BYTES
         )
-        _write_iso_seed(
-            config_seed,
-            "cidata",
-            {
-                "user-data": cloud_template,
-                "meta-data": (f"instance-id: {domain_id}\nlocal-hostname: tobkiri-packvm\n").encode(
-                    "utf-8"
-                ),
-                "network-config": b"version: 2\nethernets: {}\n",
-                "agent-ed25519.pem": private_pem,
-                "agent-config.json": _canonical_bytes(agent_config),
-            },
-        )
+        try:
+            _write_iso_seed(
+                config_seed,
+                "cidata",
+                {
+                    "user-data": cloud_template,
+                    "meta-data": (
+                        f"instance-id: {domain_id}\nlocal-hostname: tobkiri-packvm\n"
+                    ).encode("utf-8"),
+                    "network-config": _NOCLOUD_LOCAL_ONLY_NETWORK_CONFIG,
+                    "agent-ed25519.pem": private_pem,
+                    "agent-config.json": _canonical_bytes(agent_config),
+                    "artifact-seed.v1.bin": artifact_seed,
+                },
+            )
+        finally:
+            try:
+                artifact_seed.unlink()
+            except FileNotFoundError:
+                pass
         config_seed_digest = _file_digest(config_seed)
         return {
             "agent_seed_path": str(agent_seed),
@@ -1317,7 +1370,8 @@ class MacOSVZProvisioner:
                 raise ValueError("PackVM VZ verified raw EFI image digest changed")
             if (
                 manifest.image_sha512 is not None
-                and _file_digest_algorithm(source, "sha512") != manifest.image_sha512
+                and _file_digest_algorithm(source, "sha512").removeprefix("sha512:")
+                != manifest.image_sha512
             ):
                 raise ValueError("PackVM VZ verified raw EFI image SHA-512 changed")
             # The cache owns the immutable base.  The per-instance metadata only
@@ -1622,7 +1676,22 @@ class MacOSVZProvisioner:
         )
 
     def _required_host_space(self, download_bytes: int) -> int:
-        return VZ_INSTANCE_COW_BYTES + VZ_HOST_STORAGE_RESERVE_BYTES + download_bytes
+        return (
+            VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+            + VZ_HOST_STORAGE_RESERVE_BYTES
+            + VZ_ARTIFACT_SEED_PEAK_RESERVE_BYTES
+            + download_bytes
+        )
+
+    def _required_allocation_space(self, artifact: MaterializedPackArtifact) -> int:
+        """Return peak bytes needed to allocate this already-validated artifact."""
+
+        artifact_seed_bytes = _materialized_artifact_seed_size(artifact)
+        return (
+            VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+            + VZ_HOST_STORAGE_RESERVE_BYTES
+            + (2 * artifact_seed_bytes)
+        )
 
     def _host_capacity(self, required: int) -> tuple[int, str | None]:
         path = self._state_dir
@@ -1641,6 +1710,13 @@ class MacOSVZProvisioner:
 
     def _require_host_capacity(self, download_bytes: int) -> None:
         _available, reason = self._host_capacity(self._required_host_space(download_bytes))
+        if reason is not None:
+            raise ValueError(reason)
+
+    def _require_allocation_capacity(self, artifact: MaterializedPackArtifact) -> None:
+        """Recheck current free space for the exact artifact before mutation."""
+
+        _available, reason = self._host_capacity(self._required_allocation_space(artifact))
         if reason is not None:
             raise ValueError(reason)
 
@@ -2228,8 +2304,126 @@ def _atomic_private_json(path: Path, payload: Mapping[str, Any]) -> None:
     _atomic_private_bytes(path, _canonical_bytes(payload) + b"\n")
 
 
-def _write_iso_seed(path: Path, volume_label: str, files: Mapping[str, bytes]) -> None:
-    """Write a small deterministic ISO9660 seed disk aligned to 2048/512 bytes.
+def _validate_materialized_artifact(
+    artifact: MaterializedPackArtifact,
+    *,
+    artifact_digest: str,
+    executable_digest: str,
+    materialization_digest: str,
+) -> None:
+    """Reject an artifact that differs from the Host-resolved launch binding."""
+
+    from tobkiri_host.artifact_materialization import MaterializedPackArtifact
+
+    if not isinstance(artifact, MaterializedPackArtifact):
+        raise ValueError("PackVM VZ artifact payload is invalid")
+    if (
+        artifact.artifact_digest != artifact_digest
+        or artifact.implementation_digest != executable_digest
+        or artifact.materialization_digest != materialization_digest
+    ):
+        raise ValueError("PackVM VZ artifact payload binding changed")
+    if sum(len(item.content) for item in artifact.files) > _MAX_ARTIFACT_SEED_PAYLOAD_BYTES:
+        raise ValueError("PackVM VZ artifact payload exceeds the seed limit")
+
+
+def _write_materialized_artifact_seed(
+    path: Path,
+    artifact: MaterializedPackArtifact,
+) -> dict[str, object]:
+    """Serialize already Host-verified Pack bytes into one bounded seed file.
+
+    The compact binary framing deliberately avoids base64 expansion: a valid
+    512 MiB Host artifact therefore remains admissible.  The guest replays the
+    exact manifest and raw file stream into its normal materialization path.
+    """
+
+    encoded_manifest, total_payload = _materialized_artifact_seed_framing(artifact)
+    total_size = len(_ARTIFACT_SEED_MAGIC) + 8 + len(encoded_manifest) + total_payload
+    _ensure_private_directory(path.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    digest = hashlib.sha256()
+
+    def write_hashed(data: bytes) -> None:
+        _write_all(descriptor, data)
+        digest.update(data)
+
+    try:
+        os.fchmod(descriptor, 0o600)
+        write_hashed(_ARTIFACT_SEED_MAGIC)
+        write_hashed(len(encoded_manifest).to_bytes(8, "big"))
+        write_hashed(encoded_manifest)
+        for item in artifact.files:
+            if _digest_bytes(item.content) != item.digest:
+                raise ValueError("PackVM VZ artifact bytes changed before seed creation")
+            write_hashed(item.content)
+        if os.fstat(descriptor).st_size != total_size:
+            raise ValueError("PackVM VZ artifact seed size is invalid")
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        _validate_private_file(path, total_size)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return {
+        "format": _ARTIFACT_SEED_FORMAT,
+        "digest": _DIGEST_PREFIX + digest.hexdigest(),
+        "size_bytes": total_size,
+    }
+
+
+def _materialized_artifact_seed_framing(
+    artifact: MaterializedPackArtifact,
+) -> tuple[bytes, int]:
+    """Return the canonical manifest and payload size used by seed framing."""
+
+    files = [
+        {
+            "path": item.path,
+            "digest": item.digest,
+            "executable": item.executable,
+            "size": len(item.content),
+        }
+        for item in artifact.files
+    ]
+    manifest = {
+        "schema": _ARTIFACT_SEED_FORMAT,
+        "pack_id": artifact.pack_id,
+        "artifact_digest": artifact.artifact_digest,
+        "function_id": artifact.function_id,
+        "implementation_digest": artifact.implementation_digest,
+        "implementation_path": artifact.implementation_path,
+        "materialization_digest": artifact.materialization_digest,
+        "files": files,
+    }
+    encoded_manifest = _canonical_bytes(manifest)
+    if len(encoded_manifest) > _MAX_ARTIFACT_SEED_MANIFEST_BYTES:
+        raise ValueError("PackVM VZ artifact seed manifest exceeds its bound")
+    total_payload = sum(item["size"] for item in files)
+    if total_payload > _MAX_ARTIFACT_SEED_PAYLOAD_BYTES:
+        raise ValueError("PackVM VZ artifact seed payload exceeds its bound")
+    return encoded_manifest, total_payload
+
+
+def _materialized_artifact_seed_size(artifact: MaterializedPackArtifact) -> int:
+    """Return exact artifact-seed bytes without writing allocation state."""
+
+    encoded_manifest, total_payload = _materialized_artifact_seed_framing(artifact)
+    return len(_ARTIFACT_SEED_MAGIC) + 8 + len(encoded_manifest) + total_payload
+
+
+def _write_iso_seed(
+    path: Path,
+    volume_label: str,
+    files: Mapping[str, bytes | Path],
+) -> None:
+    """Write a deterministic ISO9660 seed disk aligned to 2048/512 bytes.
 
     Cloud-init's NoCloud datasource recognizes ``cidata`` ISO volumes and the
     guest agent can mount the separate agent volume.  We build the narrow ISO
@@ -2238,35 +2432,44 @@ def _write_iso_seed(path: Path, volume_label: str, files: Mapping[str, bytes]) -
     exact VM ceremony.
     """
 
-    if (
-        not files
-        or len(files) > 16
-        or any(
+    if not files or len(files) > 16:
+        raise ValueError("PackVM VZ ISO seed content is invalid")
+    source_facts: dict[str, tuple[int, bytes | Path, str | None]] = {}
+    for name, data in files.items():
+        if (
             not isinstance(name, str)
             or not name
             or len(name.encode("ascii", errors="ignore")) != len(name)
             or len(name) > 96
             or "/" in name
             or "\x00" in name
-            or not isinstance(data, bytes)
-            or len(data) > 512 * 1024
-            for name, data in files.items()
-        )
-    ):
-        raise ValueError("PackVM VZ ISO seed content is invalid")
+        ):
+            raise ValueError("PackVM VZ ISO seed content is invalid")
+        if isinstance(data, bytes):
+            source_facts[name] = (len(data), data, _digest_bytes(data))
+        elif isinstance(data, Path):
+            descriptor = _open_private_file(data, os.O_RDONLY)
+            try:
+                metadata = os.fstat(descriptor)
+                if metadata.st_size < 0 or metadata.st_size > _MAX_ARTIFACT_SEED_BYTES:
+                    raise ValueError("PackVM VZ ISO seed source exceeds its bound")
+            finally:
+                os.close(descriptor)
+            source_facts[name] = (metadata.st_size, data, _file_digest(data))
+        else:
+            raise ValueError("PackVM VZ ISO seed content is invalid")
     block = 2048
     root_sector = 20
     root_blocks = 1
     file_sectors: dict[str, tuple[int, int]] = {}
     cursor = root_sector + root_blocks
-    for name, data in sorted(files.items()):
-        sectors = max(1, (len(data) + block - 1) // block)
+    for name, (size, _data, _digest) in sorted(source_facts.items()):
+        sectors = max(1, (size + block - 1) // block)
         file_sectors[name] = (cursor, sectors)
         cursor += sectors
     total = max(cursor, 32)
-    image = bytearray(total * block)
 
-    def both_endian(offset: int, value: int, width: int) -> None:
+    def both_endian(image: bytearray, offset: int, value: int, width: int) -> None:
         image[offset : offset + width] = value.to_bytes(width, "little")
         image[offset + width : offset + 2 * width] = value.to_bytes(width, "big")
 
@@ -2290,42 +2493,88 @@ def _write_iso_seed(path: Path, volume_label: str, files: Mapping[str, bytes]) -
         result[33 : 33 + len(identifier)] = identifier
         return bytes(result)
 
-    primary = 16 * block
-    image[primary] = 1
-    image[primary + 1 : primary + 6] = b"CD001"
-    image[primary + 6] = 1
-    image[primary + 8 : primary + 40] = b"TOBKIRI".ljust(32, b" ")
-    image[primary + 40 : primary + 72] = volume_label.upper().encode("ascii").ljust(32, b" ")
-    both_endian(primary + 80, total, 4)
-    both_endian(primary + 120, 1, 2)
-    both_endian(primary + 124, 1, 2)
-    both_endian(primary + 128, block, 2)
+    primary = bytearray(block)
+    primary[0] = 1
+    primary[1:6] = b"CD001"
+    primary[6] = 1
+    primary[8:40] = b"TOBKIRI".ljust(32, b" ")
+    primary[40:72] = volume_label.upper().encode("ascii").ljust(32, b" ")
+    both_endian(primary, 80, total, 4)
+    both_endian(primary, 120, 1, 2)
+    both_endian(primary, 124, 1, 2)
+    both_endian(primary, 128, block, 2)
     root_record = record(b"\x00", root_sector, root_blocks * block, 2)
-    image[primary + 156 : primary + 156 + len(root_record)] = root_record
-    terminator = 17 * block
-    image[terminator] = 255
-    image[terminator + 1 : terminator + 6] = b"CD001"
-    image[terminator + 6] = 1
-    root_offset = root_sector * block
+    primary[156 : 156 + len(root_record)] = root_record
+    terminator = bytearray(block)
+    terminator[0] = 255
+    terminator[1:6] = b"CD001"
+    terminator[6] = 1
+    root_directory = bytearray(block)
     entries = [
         record(b"\x00", root_sector, root_blocks * block, 2),
         record(b"\x01", root_sector, root_blocks * block, 2),
     ]
-    for name, data in sorted(files.items()):
+    for name, (size, _data, _digest) in sorted(source_facts.items()):
         sector, _sectors = file_sectors[name]
-        entries.append(record((name + ";1").encode("ascii"), sector, len(data), 0))
-    position = root_offset
+        entries.append(record((name + ";1").encode("ascii"), sector, size, 0))
+    position = 0
     for entry in entries:
-        if position + len(entry) > root_offset + block:
+        if position + len(entry) > block:
             raise ValueError("PackVM VZ ISO seed directory exceeds its bound")
-        image[position : position + len(entry)] = entry
+        root_directory[position : position + len(entry)] = entry
         position += len(entry)
-    for name, data in sorted(files.items()):
-        sector, _sectors = file_sectors[name]
-        offset = sector * block
-        image[offset : offset + len(data)] = data
-    _atomic_private_bytes(path, bytes(image))
-    _validate_private_file(path, len(image))
+    _ensure_private_directory(path.parent)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.ftruncate(descriptor, total * block)
+
+        def write_at(offset: int, content: bytes) -> None:
+            os.lseek(descriptor, offset, os.SEEK_SET)
+            _write_all(descriptor, content)
+
+        write_at(16 * block, bytes(primary))
+        write_at(17 * block, bytes(terminator))
+        write_at(root_sector * block, bytes(root_directory))
+        for name, (size, data, expected_digest) in sorted(source_facts.items()):
+            sector, _sectors = file_sectors[name]
+            os.lseek(descriptor, sector * block, os.SEEK_SET)
+            if isinstance(data, bytes):
+                _write_all(descriptor, data)
+                continue
+            source_descriptor = _open_private_file(data, os.O_RDONLY)
+            try:
+                before = os.fstat(source_descriptor)
+                copied = 0
+                digest = hashlib.sha256()
+                while chunk := os.read(source_descriptor, min(1024 * 1024, size - copied)):
+                    _write_all(descriptor, chunk)
+                    digest.update(chunk)
+                    copied += len(chunk)
+                after = os.fstat(source_descriptor)
+                if (
+                    copied != size
+                    or _DIGEST_PREFIX + digest.hexdigest() != expected_digest
+                    or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+                ):
+                    raise ValueError("PackVM VZ ISO seed source changed while copying")
+            finally:
+                os.close(source_descriptor)
+        if os.fstat(descriptor).st_size != total * block:
+            raise ValueError("PackVM VZ ISO seed size is invalid")
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary, path)
+        _validate_private_file(path, total * block)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def _clone_file_apfs(source: Path, target: Path) -> None:
@@ -2492,7 +2741,12 @@ def _recovery_binding(proof: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _canonical_bytes(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 def _digest_bytes(value: bytes) -> str:

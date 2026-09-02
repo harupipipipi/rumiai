@@ -1,6 +1,7 @@
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
 import { Button } from './Button';
+import {CopyErrorButton} from './CopyErrorButton';
 import { TobkiriLoadingMark } from './TobkiriLoader';
 
 interface InlineLoadErrorProps {
@@ -35,6 +36,7 @@ export function InlineLoadError({
         {retrying ? <TobkiriLoadingMark /> : <RefreshCw className="h-4 w-4" />}
         Retry
       </Button>
+      <CopyErrorButton label={`Copy ${title} error`} text={message} />
     </div>
   );
 }

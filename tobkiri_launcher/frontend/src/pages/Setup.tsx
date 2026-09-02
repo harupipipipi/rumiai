@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router';
 import {CheckCircle2} from 'lucide-react';
 import {useAppStore} from '@/src/store';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {PresentationSelector} from '@/src/components/presentation/PresentationSelector';
 import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {panelRoutes} from '@/src/lib/routes';
@@ -245,7 +246,10 @@ export function Setup() {
       <Header />
       {reconciliationError ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-500">
         <p className="font-medium text-text-main">Activation is verified; runtime surfaces need reconciliation.</p>
-        <p className="mt-2">{reconciliationError}</p>
+        <div className="mt-2 flex items-start gap-2">
+          <p className="min-w-0 flex-1 break-words">{reconciliationError}</p>
+          <CopyErrorButton label="Copy runtime reconciliation error" text={reconciliationError} />
+        </div>
         <div className="mt-4"><Button variant="outline" onClick={() => void recoverActivation()} loading={activating}>Retry runtime reconciliation</Button></div>
       </div> : presentation ? <PresentationSelector
         state={presentation}
@@ -257,7 +261,10 @@ export function Setup() {
         onSave={savePresentation}
         onLaunch={launchPresentation}
       /> : <div role={presentationError ? 'alert' : 'status'} className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
-        {presentationError ?? 'Loading selected presentation…'}
+        <div className="flex items-start gap-2">
+          <span className="min-w-0 flex-1 break-words">{presentationError ?? 'Loading selected presentation…'}</span>
+          {presentationError ? <CopyErrorButton label="Copy presentation error" text={presentationError} /> : null}
+        </div>
         {presentationError && <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>Retry</Button></div>}
       </div>}
     </div></div>;

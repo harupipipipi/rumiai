@@ -693,18 +693,13 @@ class CommandProtocolRegistry:
             }
         availability = resolved.get("availability", {})
         if availability.get("status") == "unavailable":
-            reason_code = str(availability.get("reason_code") or "").strip()
             return {
                 "api_version": API_VERSION,
                 "operation_id": operation_id,
                 "status": "failed",
                 "command_ref": resolved["canonical_id"],
                 "error": {
-                    "code": (
-                        "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
-                        if reason_code == "host_interactive_approval_unavailable"
-                        else "COMMAND_UNAVAILABLE"
-                    ),
+                    "code": "COMMAND_UNAVAILABLE",
                     "message": availability.get("reason") or "command is unavailable",
                 },
                 "state_changes": [],
@@ -904,10 +899,10 @@ class CommandProtocolRegistry:
             "command_ref": resolved["canonical_id"],
             "state_changes": [],
             "error": {
-                "code": "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE",
+                "code": "HIGH_RISK_COMMAND_ADAPTER_REQUIRED",
                 "message": (
-                    "The captured Production V4 Host has no interactive approval "
-                    "request/token port for high-risk command execution."
+                    "high-risk commands must use the captured Host interactive "
+                    "approval adapter"
                 ),
             },
         }
@@ -1290,19 +1285,12 @@ class CommandProtocolRegistry:
                 "executor_policy_ref": "tobkiri.command.standard",
             },
         )
-        if (
-            availability.get("status") == "available"
-            and authority["approval_policy"] == "required"
-            and str(resolved_execution.get("operation_ref") or "").startswith("host:")
-        ):
-            availability = {
-                "status": "unavailable",
-                "reason_code": "host_interactive_approval_unavailable",
-                "reason": (
-                    "The captured Production V4 Host has no interactive approval "
-                    "request/token port for this high-risk command."
-                ),
-            }
+        # The five high-risk command presentations stay available.  The
+        # browser routes them to the signed Host Adapter at
+        # ``/api/command-protocol/v1/high-risk`` before it can request an
+        # approval or execute.  Marking them unavailable here would disable
+        # that sole approved path in the Composer, even though the Host
+        # adapter and its one-shot interactive approval port are captured.
         return {
             "canonical_id": canonical_id,
             "pack_id": PACK_ID,

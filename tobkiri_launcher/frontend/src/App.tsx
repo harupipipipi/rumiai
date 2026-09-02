@@ -17,6 +17,7 @@ import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
+import { CopyErrorButton } from '@/src/components/ui/CopyErrorButton';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
 import { applyAppearanceToRoot } from '@/src/lib/appearance';
 import { runtimeMonitorDelay } from '@/src/lib/runtimeHealth';
@@ -275,7 +276,15 @@ function VerificationMessage({
           {copy.title}
         </h1>
       )}
-      <p className="mt-3 text-sm leading-6 text-text-muted">{copy.detail}</p>
+      <div className="mt-3 flex items-start gap-2">
+        <p className="min-w-0 flex-1 text-sm leading-6 text-text-muted">{copy.detail}</p>
+        {state === 'denied' ? (
+          <CopyErrorButton
+            label="Copy setup verification error"
+            text={`${copy.title}\n${copy.detail}`}
+          />
+        ) : null}
+      </div>
       <VerificationActions
         linkClassName={linkClassName}
         onRetry={onRetry}

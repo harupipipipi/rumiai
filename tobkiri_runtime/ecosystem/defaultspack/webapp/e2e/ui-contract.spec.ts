@@ -119,9 +119,11 @@ type ApiMockOptions = {
 
 type InteractiveApprovalFixture = {
   request_id: string;
+  request_snapshot_digest: string;
   state: string;
   expires_at: number;
   typed_confirmation_required: boolean;
+  typed_confirmation_digest: string | null;
   redacted_metadata: Record<string, string>;
 };
 
@@ -646,17 +648,17 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
   });
   await page.addInitScript(() => {
     const fixtureWindow = window as Window & {
-      __authorityApprovalFixture?: {
-        nativeCalls: Array<{ command: string; args?: Record<string, unknown> }>;
+      __approvalRendererFixture?: {
+        tauriBridgeCalls: Array<{ command: string; args?: Record<string, unknown> }>;
       };
     };
-    fixtureWindow.__authorityApprovalFixture = { nativeCalls: [] };
+    fixtureWindow.__approvalRendererFixture = { tauriBridgeCalls: [] };
     Object.defineProperty(window, "__TAURI__", {
       configurable: true,
       value: {
         core: {
           invoke: async (command: string, args?: Record<string, unknown>) => {
-            fixtureWindow.__authorityApprovalFixture?.nativeCalls.push({ command, args });
+            fixtureWindow.__approvalRendererFixture?.tauriBridgeCalls.push({ command, args });
             if (command === "get_desktop_system_info") {
               return {
                 source: "viewer_tauri",
@@ -673,14 +675,20 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
             }
             if (command === "authority_approval_context") {
               const requestId = String(args?.requestId ?? "");
+              const interactive = args?.decision === "approve" || args?.decision === "deny";
               return {
                 request_id: requestId,
                 ui_operator: {
-                  version: 1,
+                  version: interactive ? 3 : 1,
                   kind: "ui_operator",
                   origin: "tauri://tobkiri-launcher",
                   window_label: "authority-approval",
                   request_id: requestId,
+                  ...(interactive ? {
+                    decision: args?.decision,
+                    request_snapshot_digest: args?.requestSnapshotDigest,
+                    typed_confirmation_digest: args?.typedConfirmationDigest,
+                  } : {}),
                   issued_at: Math.floor(Date.now() / 1000),
                   expires_at: Math.floor(Date.now() / 1000) + 30,
                   nonce: "e2e-ui-operator-nonce",
@@ -699,7 +707,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
                 operator: "ui-contract-fixture",
               };
             }
-            throw new Error(`Unexpected native command: ${command}`);
+            throw new Error(`Unexpected Tauri bridge command: ${command}`);
           },
         },
       },
@@ -1348,16 +1356,21 @@ async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
 }
 
-test("native approval window binds typed approval to the current request and closes after settlement", async ({ page }) => {
+// These browser tests cover the approval-window renderer through a mocked
+// Tauri bridge. WebviewWindowBuilder creation, focus, and always-on-top need
+// dedicated desktop E2E coverage; they are not established by this fixture.
+test("approval window renderer contract binds typed approval to the current request and closes after settlement", async ({ page }) => {
   const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
-  const requestId = "apr-native-typed-contract";
+  const requestId = "apr-renderer-typed-contract";
   const confirmationPhrase = "APPROVE RELEASE";
   await installDefaultspackApiMocks(page, {
     interactiveApproval: {
       request_id: requestId,
+      request_snapshot_digest: "1".repeat(64),
       state: "pending",
       expires_at: Math.floor(now / 1_000) + 300,
       typed_confirmation_required: true,
+      typed_confirmation_digest: "2".repeat(64),
       redacted_metadata: {
         action: "Release the prepared update",
         confirmation_phrase: confirmationPhrase,
@@ -1393,33 +1406,39 @@ test("native approval window binds typed approval to the current request and clo
       request_id: requestId,
       confirmation_text: confirmationPhrase,
       ui_operator: {
+        version: 3,
         kind: "ui_operator",
         request_id: requestId,
         window_label: "authority-approval",
+        decision: "approve",
+        request_snapshot_digest: "1".repeat(64),
+        typed_confirmation_digest: "2".repeat(64),
       },
     },
   });
   await expect.poll(() => page.evaluate(() => {
     const fixtureWindow = window as Window & {
-      __authorityApprovalFixture?: {
-        nativeCalls: Array<{ command: string }>;
+      __approvalRendererFixture?: {
+        tauriBridgeCalls: Array<{ command: string }>;
       };
     };
-    return fixtureWindow.__authorityApprovalFixture?.nativeCalls
+    return fixtureWindow.__approvalRendererFixture?.tauriBridgeCalls
       .filter((call) => call.command === "close_current_window")
       .length ?? 0;
   })).toBe(1);
 });
 
-test("native approval window denies once and renders its settled state", async ({ page }) => {
+test("approval window renderer contract denies once and renders its settled state", async ({ page }) => {
   const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
-  const requestId = "apr-native-deny-contract";
+  const requestId = "apr-renderer-deny-contract";
   await installDefaultspackApiMocks(page, {
     interactiveApproval: {
       request_id: requestId,
+      request_snapshot_digest: "3".repeat(64),
       state: "pending",
       expires_at: Math.floor(now / 1_000) + 300,
       typed_confirmation_required: false,
+      typed_confirmation_digest: null,
       redacted_metadata: { action: "Discard the prepared update" },
     },
     onInteractiveApprovalDecision: (decision, payload) => decisions.push({ decision, payload }),
@@ -1437,39 +1456,47 @@ test("native approval window denies once and renders its settled state", async (
     payload: {
       request_id: requestId,
       ui_operator: {
+        version: 3,
         kind: "ui_operator",
         request_id: requestId,
+        decision: "deny",
+        request_snapshot_digest: "3".repeat(64),
+        typed_confirmation_digest: null,
       },
     },
   });
   await expect.poll(() => page.evaluate(() => {
     const fixtureWindow = window as Window & {
-      __authorityApprovalFixture?: {
-        nativeCalls: Array<{ command: string }>;
+      __approvalRendererFixture?: {
+        tauriBridgeCalls: Array<{ command: string }>;
       };
     };
-    return fixtureWindow.__authorityApprovalFixture?.nativeCalls
+    return fixtureWindow.__approvalRendererFixture?.tauriBridgeCalls
       .filter((call) => call.command === "close_current_window")
       .length ?? 0;
   })).toBe(1);
 });
 
-test("native approval window fails closed when typed confirmation metadata is absent", async ({ page }) => {
+test("approval window renderer contract fails closed when typed confirmation metadata is absent", async ({ page }) => {
   const decisions: Array<{ decision: "approve" | "deny"; payload: Record<string, unknown> }> = [];
   await installDefaultspackApiMocks(page, {
     interactiveApproval: {
-      request_id: "apr-native-missing-confirmation",
+      request_id: "apr-renderer-missing-confirmation",
+      request_snapshot_digest: "4".repeat(64),
       state: "pending",
       expires_at: Math.floor(now / 1_000) + 300,
       typed_confirmation_required: true,
+      typed_confirmation_digest: "5".repeat(64),
       redacted_metadata: { action: "Apply the protected change" },
     },
     onInteractiveApprovalDecision: (decision, payload) => decisions.push({ decision, payload }),
   });
 
-  await page.goto("/approval?request_id=apr-native-missing-confirmation");
+  await page.goto("/approval?request_id=apr-renderer-missing-confirmation");
 
   await expect(page.getByText("この承認に必要な確認情報を取得できませんでした。安全のため操作できません。")).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("この承認に必要な確認情報を取得できませんでした。安全のため操作できません。");
+  await expect(page.getByRole("button", { name: "エラーをコピー" })).toBeVisible();
   await expect(page.getByPlaceholder("確認文を入力")).toBeDisabled();
   await expect(page.getByRole("button", { name: "承認", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "拒否", exact: true })).toHaveCount(0);

@@ -104,6 +104,50 @@ def test_native_helper_rejects_extra_entitlement_after_ad_hoc_resign(
     assert error == "macOS VZ native helper entitlements are not exact"
 
 
+def test_native_helper_reads_entitlements_before_codesign_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The entitlement plist is delimited before verbose codesign output."""
+
+    helper = tmp_path / "tobkiri-packvm-vz-helper"
+    helper.write_bytes(b"fixture")
+    digest = _digest(b"helper-code")
+    identity = MacOSVZHelperIdentity(
+        binary_digest=digest,
+        bundle_id="dev.tobkiri.launcher.packvm-vz-helper",
+        team_id="",
+        signing_identity="",
+    )
+    entitlements = (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b"<plist><dict><key>com.apple.security.virtualization</key><true/>"
+        b"</dict></plist>"
+    ).decode("utf-8")
+
+    monkeypatch.setattr(
+        macos_vz_supervisor,
+        "_secure_macho_code_digest",
+        lambda _path: ((1, 2), digest),
+    )
+    monkeypatch.setattr(macos_vz_supervisor.host_platform, "system", lambda: "Darwin")
+
+    def run(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        if "--display" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=entitlements,
+                stderr=(
+                    "Identifier=dev.tobkiri.launcher.packvm-vz-helper\n"
+                    "Signature=adhoc\n"
+                    "TeamIdentifier=not set\n"
+                ),
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(macos_vz_supervisor.subprocess, "run", run)
+    assert verify_macos_vz_helper_identity(helper, identity) == (True, None)
+
+
 class _Verifier:
     def __init__(self, ready: bool = True) -> None:
         self.ready = ready
@@ -137,12 +181,16 @@ class _Allocator:
         artifact_digest: str,
         executable_digest: str,
         materialization_digest: str,
+        artifact: MaterializedPackArtifact,
         channel_key: bytes,
     ) -> MacOSVZDomainAllocation:
         assert all(
             value.startswith("sha256:")
             for value in (artifact_digest, executable_digest, materialization_digest)
         )
+        assert artifact.artifact_digest == artifact_digest
+        assert artifact.implementation_digest == executable_digest
+        assert artifact.materialization_digest == materialization_digest
         root = self.root / hashlib.sha256(domain_id.encode()).hexdigest()
         root.mkdir(parents=True, mode=0o700)
         files = {
@@ -612,10 +660,19 @@ def test_signed_pending_bridge_uses_host_callback_and_resumes_once(tmp_path: Pat
 
 
 def test_runtime_bounds_are_fail_closed() -> None:
+    assert MacOSVZRuntime().memory_bytes == 1024 * 1024 * 1024
+    assert MacOSVZRuntime(memory_bytes=512 * 1024 * 1024).memory_bytes == (
+        512 * 1024 * 1024
+    )
+    assert MacOSVZRuntime(memory_bytes=4 * 1024 * 1024 * 1024).memory_bytes == (
+        4 * 1024 * 1024 * 1024
+    )
     with pytest.raises(BackendUnavailableError, match="vsock port"):
         MacOSVZRuntime(guest_vsock_port=8765)
     with pytest.raises(BackendUnavailableError, match="memory"):
         MacOSVZRuntime(memory_bytes=128 * 1024 * 1024)
+    with pytest.raises(BackendUnavailableError, match="memory"):
+        MacOSVZRuntime(memory_bytes=4 * 1024 * 1024 * 1024 + 1)
 
 
 @pytest.mark.parametrize(

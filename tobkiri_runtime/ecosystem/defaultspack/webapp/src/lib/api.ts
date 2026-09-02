@@ -404,9 +404,11 @@ export type AuthorityApprovalDecision = {
  */
 export type InteractiveApprovalRequest = {
   request_id: string;
+  request_snapshot_digest: string;
   state: string;
   expires_at: number;
   typed_confirmation_required: boolean;
+  typed_confirmation_digest: string | null;
   redacted_metadata: Record<string, string>;
 };
 
@@ -440,6 +442,9 @@ export type AuthorityUiOperator = {
   origin: string;
   window_label: string;
   request_id: string;
+  decision?: "approve" | "deny";
+  request_snapshot_digest?: string;
+  typed_confirmation_digest?: string | null;
   issued_at: number;
   expires_at: number;
   nonce: string;

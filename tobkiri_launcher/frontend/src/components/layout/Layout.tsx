@@ -7,6 +7,13 @@ import { useAppStore } from '@/src/store';
 import { describeRuntimeBanner } from '@/src/lib/runtimeHealth';
 import { panelRoutes } from '@/src/lib/routes';
 import { RouteBoundary } from './RouteBoundary';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
+
+export function shouldShowRuntimeErrorCopy(
+  banner: Pick<ReturnType<typeof describeRuntimeBanner>, 'tone' | 'detail'>,
+): boolean {
+  return banner.tone === 'danger' && Boolean(banner.detail.trim());
+}
 
 export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
   const location = useLocation();
@@ -23,6 +30,7 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
     runtimeDisconnected,
     lastRuntimeHealthyAt,
   });
+  const canCopyRuntimeError = shouldShowRuntimeErrorCopy(runtimeBanner);
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-main text-text-main">
@@ -41,10 +49,16 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
               }`}
             >
               <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${runtimeBanner.tone === 'danger' ? 'bg-red-500' : 'bg-amber-500 animate-pulse'}`} />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="font-medium">{runtimeBanner.title}</p>
                 <p className="text-xs opacity-80">{runtimeBanner.detail}</p>
               </div>
+              {canCopyRuntimeError ? (
+                <CopyErrorButton
+                  label="Copy runtime status error"
+                  text={`${runtimeBanner.title}\n${runtimeBanner.detail}`}
+                />
+              ) : null}
             </div>
           )}
           <RouteBoundary>

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from ecosystem.rumi_git_publish_pack.runtime import publish
 
@@ -42,11 +44,21 @@ def _repository(root: Path) -> None:
 
 
 class _WorkspaceClient:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        credential_identity: Mapping[str, Any] | None = None,
+    ) -> None:
         self.root = root
         self.revision = 1
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
-        self.credential_pushes: list[dict[str, str]] = []
+        self.credential_identity = (
+            dict(credential_identity) if credential_identity is not None else None
+        )
+        self.credential_selections: list[dict[str, str]] = []
+        self.credential_pushes: list[dict[str, Any]] = []
+        self.selection_sequence = 0
 
     def invoke(
         self,
@@ -70,6 +82,20 @@ class _WorkspaceClient:
 
         self.credential_pushes.append(dict(payload))
         return "published by Host credential port"
+
+    def select_git_https_credential(self, **payload: str) -> Mapping[str, Any] | None:
+        """Return only the configured Host-owned opaque credential identity."""
+
+        self.credential_selections.append(dict(payload))
+        if self.credential_identity is None:
+            return None
+        self.selection_sequence += 1
+        return {
+            **self.credential_identity,
+            "selection_receipt": (
+                f"credential-selection:test-{self.selection_sequence}"
+            ),
+        }
 
 
 def _request_context(**overrides: Any) -> SimpleNamespace:
@@ -103,7 +129,11 @@ class _Invocation:
         return self.client
 
 
-def _service(root: Path) -> tuple[publish.GitPushProviderV4, _Invocation]:
+def _service(
+    root: Path,
+    *,
+    credential_identity: Mapping[str, Any] | None = None,
+) -> tuple[publish.GitPushProviderV4, _Invocation]:
     context = _request_context()
     state_root = root / ".host-state"
     state_root.mkdir(exist_ok=True)
@@ -113,8 +143,31 @@ def _service(root: Path) -> tuple[publish.GitPushProviderV4, _Invocation]:
         security_epoch=context.security_epoch,
         state_root=state_root,
     )
-    client = _WorkspaceClient(root)
+    client = _WorkspaceClient(root, credential_identity=credential_identity)
     return publish.GitPushProviderV4(capture), _Invocation(client, context)
+
+
+def _credential_identity(
+    *,
+    handle: str = "credential:opaque-git-push",
+    workspace_id: str = "workspace-a",
+    origin: str = "https://example.test",
+) -> dict[str, Any]:
+    identity = {
+        "handle": handle,
+        "key_version": "credential-broker.v1",
+        "consumer_pack_id": publish.SERVICE_PACK_ID,
+        "provider_instance_id": publish.GIT_CREDENTIAL_PROVIDER_INSTANCE_ID,
+        "profile_id": "profile-a",
+        "scope": publish.GIT_CREDENTIAL_SCOPE,
+        "purpose": "provider.invoke",
+        "resource_binding": {
+            "endpoint_origin": origin,
+            "workspace_id": workspace_id,
+        },
+    }
+    identity["binding_digest"] = publish.canonical_digest(identity)
+    return identity
 
 
 def test_v4_prepare_binds_canonical_exact_push_plan_and_executes_once(
@@ -150,6 +203,14 @@ def test_v4_prepare_binds_canonical_exact_push_plan_and_executes_once(
         "argument": "--force-with-lease=refs/heads/main:" + "0" * 40,
     }
     assert prepared["plan_digest"] == publish.canonical_digest(plan)
+    assert invocation.client.credential_selections == [
+        {
+            "workspace_id": "workspace-a",
+            "endpoint_origin": "https://example.test",
+            "provider_instance_id": "git-publish.service",
+            "credential_scope": "git.publish",
+        }
+    ]
 
     calls: list[tuple[Path, list[str], dict[str, Any]]] = []
     real_git = publish._git
@@ -244,23 +305,24 @@ def test_v4_push_uses_the_host_credential_port_without_exposing_material(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _repository(tmp_path)
-    service, invocation = _service(tmp_path)
+    credential_identity = _credential_identity()
+    service, invocation = _service(
+        tmp_path,
+        credential_identity=credential_identity,
+    )
     prepared = service.invoke(
         publish.PREPARE_OPERATION,
         {
             "workspace_id": "workspace-a",
             "remote": "origin",
             "branch": "main",
-            "credential_handle": "credential:opaque-git-push",
         },
         invocation,
     )
     plan = prepared["plan"]
     assert plan["credential_transport"] == {
         "mode": "host-bound-https",
-        "credential_handle": "credential:opaque-git-push",
-        "credential_scope": "git.publish",
-        "provider_instance_id": "git-publish.service",
+        "credential_identity": credential_identity,
     }
     direct_pushes: list[list[str]] = []
     real_git = publish._git
@@ -283,6 +345,7 @@ def test_v4_push_uses_the_host_credential_port_without_exposing_material(
     assert invocation.client.credential_pushes == [
         {
             "git_executable": publish._git_executable(),
+            "git_executable_identity": plan["host_toolchain"]["git"],
             "bare_repository": invocation.client.credential_pushes[0][
                 "bare_repository"
             ],
@@ -292,8 +355,142 @@ def test_v4_push_uses_the_host_credential_port_without_exposing_material(
             "credential_handle": "credential:opaque-git-push",
             "provider_instance_id": "git-publish.service",
             "credential_scope": "git.publish",
+            "workspace_id": "workspace-a",
+            "selection_receipt": "credential-selection:test-2",
         }
     ]
+
+
+def test_v4_private_credential_identity_survives_provider_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repository(tmp_path)
+    identity = _credential_identity()
+    service, invocation = _service(tmp_path, credential_identity=identity)
+    prepared = service.invoke(
+        publish.PREPARE_OPERATION,
+        {"workspace_id": "workspace-a", "remote": "origin", "branch": "main"},
+        invocation,
+    )
+    service.close()
+    restarted, restarted_invocation = _service(
+        tmp_path,
+        credential_identity=identity,
+    )
+    monkeypatch.setattr(
+        publish,
+        "_execute_force_with_lease",
+        lambda **_kwargs: "published by restarted provider",
+    )
+
+    result = restarted.invoke(publish.PUSH_OPERATION, prepared, restarted_invocation)
+
+    assert result["published"] is True
+    assert result["output"] == "published by restarted provider"
+
+
+def test_v4_rejects_browser_credential_handle_before_host_selection(
+    tmp_path: Path,
+) -> None:
+    _repository(tmp_path)
+    service, invocation = _service(tmp_path)
+
+    with pytest.raises(PermissionError, match="client-supplied"):
+        service.invoke(
+            publish.PREPARE_OPERATION,
+            {
+                "workspace_id": "workspace-a",
+                "remote": "origin",
+                "branch": "main",
+                "credential_handle": "credential:browser-chosen",
+            },
+            invocation,
+        )
+
+    assert invocation.client.calls == []
+    assert invocation.client.credential_selections == []
+
+
+def test_v4_input_schema_rejects_browser_credential_handle() -> None:
+    pack_root = (
+        Path(__file__).resolve().parents[1]
+        / "ecosystem"
+        / "rumi_git_publish_pack"
+    )
+    executable_catalog = json.loads(
+        (pack_root / "executables.v4.json").read_text(encoding="utf-8")
+    )
+    operation_schemas = [
+        operation["input_schema"]
+        for variant in executable_catalog["variants"]
+        for operation in variant["operations"]
+    ]
+
+    assert len(operation_schemas) == 2
+    for schema in operation_schemas:
+        assert schema["additionalProperties"] is False
+        assert "credential_handle" not in schema["properties"]
+        assert not Draft202012Validator(schema).is_valid(
+            {
+                "workspace_id": "workspace-a",
+                "remote": "origin",
+                "branch": "main",
+                "credential_handle": "credential:browser-chosen",
+            }
+        )
+
+
+def test_v4_push_fails_if_host_credential_selection_changes_after_prepare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repository(tmp_path)
+    service, invocation = _service(
+        tmp_path,
+        credential_identity=_credential_identity(),
+    )
+    prepared = service.invoke(
+        publish.PREPARE_OPERATION,
+        {"workspace_id": "workspace-a", "remote": "origin", "branch": "main"},
+        invocation,
+    )
+    invocation.client.credential_identity = _credential_identity(
+        handle="credential:replacement"
+    )
+    monkeypatch.setattr(
+        publish,
+        "_execute_force_with_lease",
+        lambda *_args, **_kwargs: pytest.fail("push executor must not run"),
+    )
+
+    with pytest.raises(PermissionError, match="compare-and-swap"):
+        service.invoke(publish.PUSH_OPERATION, prepared, invocation)
+
+
+def test_v4_push_fails_if_host_credential_is_revoked_after_prepare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repository(tmp_path)
+    service, invocation = _service(
+        tmp_path,
+        credential_identity=_credential_identity(),
+    )
+    prepared = service.invoke(
+        publish.PREPARE_OPERATION,
+        {"workspace_id": "workspace-a", "remote": "origin", "branch": "main"},
+        invocation,
+    )
+    invocation.client.credential_identity = None
+    monkeypatch.setattr(
+        publish,
+        "_execute_force_with_lease",
+        lambda *_args, **_kwargs: pytest.fail("push executor must not run"),
+    )
+
+    with pytest.raises(PermissionError, match="compare-and-swap"):
+        service.invoke(publish.PUSH_OPERATION, prepared, invocation)
 
 
 def test_v4_rejects_client_authority_upstream_and_ambient_git_controls(
@@ -367,6 +564,7 @@ def test_v4_ssh_requires_unavailable_host_credential_port(tmp_path: Path) -> Non
     )
     with pytest.raises(PermissionError, match="HOST_CREDENTIAL_PORT_UNAVAILABLE"):
         service.invoke(publish.PUSH_OPERATION, prepared, invocation)
+    assert invocation.client.credential_selections == []
 
 
 def test_host_factories_each_require_one_exact_operation(tmp_path: Path) -> None:

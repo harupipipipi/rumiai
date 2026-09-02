@@ -103,6 +103,8 @@ class _Approvals:
             state=state,
             expires_at=1_000.0,
             typed_confirmation_required=True,
+            request_snapshot_digest="a" * 64,
+            typed_confirmation_digest="b" * 64,
             redacted_metadata={"summary": "effect"},
         )
 

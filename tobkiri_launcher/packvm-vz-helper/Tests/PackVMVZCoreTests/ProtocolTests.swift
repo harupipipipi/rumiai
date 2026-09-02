@@ -1,9 +1,23 @@
+import CryptoKit
 import Foundation
+import Darwin
 import Testing
 @testable import PackVMVZCore
 
 struct ProtocolTests {
     private let key = Data("01234567890123456789012345678901".utf8)
+
+    @Test
+    func canonicalBytesMatchUtf8HostEncodingForPathsAndUnicode() throws {
+        let payload = ["path": "/Users/é"]
+        let encoded = try CanonicalJSON.data(payload)
+
+        #expect(String(data: encoded, encoding: .utf8) == "{\"path\":\"/Users/é\"}")
+        #expect(
+            try CanonicalJSON.hmacHex(key: key, object: payload)
+                == "fd5fa037f203e451dd633ca6810db1125a6760b57851c0518ff963368d5d36cc"
+        )
+    }
 
     @Test
     func authenticatesCanonicalRequestAndSignsResponse() throws {
@@ -115,6 +129,60 @@ struct ProtocolTests {
     }
 
     @Test
+    func directGuestResponseRequiresTheAllocationBoundEd25519Signature() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let bindings = ["domain": "sha256:" + String(repeating: "a", count: 64)]
+        let response = try signedDirectGuestResponse(key: key, bindings: bindings)
+
+        try VZSupervisor.validateDirectGuestResponse(
+            response,
+            operation: "attest",
+            requestID: "attest-domain.provider.conversation",
+            domainID: "domain.provider.conversation",
+            bindingDigests: bindings,
+            guestChallenge: String(repeating: "e", count: 64),
+            attestationNonce: String(repeating: "f", count: 64),
+            publicKeyBytes: key.publicKey.rawRepresentation
+        )
+    }
+
+    @Test
+    func directGuestResponseRejectsTamperingAndWrongAllocationKey() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let bindings = ["domain": "sha256:" + String(repeating: "a", count: 64)]
+        let response = try signedDirectGuestResponse(key: key, bindings: bindings)
+        var tampered = response
+        tampered["data"] = [
+            "guest_artifact_identity": "sha256:" + String(repeating: "c", count: 64),
+        ]
+
+        #expect(throws: HelperError.unauthenticated) {
+            try VZSupervisor.validateDirectGuestResponse(
+                tampered,
+                operation: "attest",
+                requestID: "attest-domain.provider.conversation",
+                domainID: "domain.provider.conversation",
+                bindingDigests: bindings,
+                guestChallenge: String(repeating: "e", count: 64),
+                attestationNonce: String(repeating: "f", count: 64),
+                publicKeyBytes: key.publicKey.rawRepresentation
+            )
+        }
+        #expect(throws: HelperError.unauthenticated) {
+            try VZSupervisor.validateDirectGuestResponse(
+                response,
+                operation: "attest",
+                requestID: "attest-domain.provider.conversation",
+                domainID: "domain.provider.conversation",
+                bindingDigests: bindings,
+                guestChallenge: String(repeating: "e", count: 64),
+                attestationNonce: String(repeating: "f", count: 64),
+                publicKeyBytes: Curve25519.Signing.PrivateKey().publicKey.rawRepresentation
+            )
+        }
+    }
+
+    @Test
     func rejectsDirectReplayAndMissingGuestChallenge() throws {
         let request: [String: Any] = [
             "kind": directSupervisorRequestKind,
@@ -141,5 +209,126 @@ struct ProtocolTests {
         #expect(throws: HelperError.invalidRequest("INVALID_DIRECT_ENVELOPE")) {
             _ = try DirectSupervisorRequest.parse(incomplete, replayGuard: NonceReplayGuard())
         }
+    }
+
+    private func signedDirectGuestResponse(
+        key: Curve25519.Signing.PrivateKey,
+        bindings: [String: String]
+    ) throws -> [String: Any] {
+        var response: [String: Any] = [
+            "kind": "tobkiri.packvm.guest.response.v1",
+            "protocol": directSupervisorProtocol,
+            "version": 1,
+            "operation": "attest",
+            "request_id": "attest-domain.provider.conversation",
+            "domain_id": "domain.provider.conversation",
+            "binding_digests": bindings,
+            "guest_challenge": String(repeating: "e", count: 64),
+            "attestation_nonce": String(repeating: "f", count: 64),
+            "success": true,
+            "data": ["guest_artifact_identity": "sha256:" + String(repeating: "b", count: 64)],
+        ]
+        response["agent_signature"] = try key.signature(
+            for: CanonicalJSON.data(response)
+        ).base64EncodedString()
+        return response
+    }
+
+    @Test
+    func readsShortPipeLineWithoutWaitingForTheBufferToFill() throws {
+        var descriptors: [Int32] = [0, 0]
+        #expect(pipe(&descriptors) == 0)
+        let reader = SendableLineReader(
+            BoundedLineReader(
+                handle: FileHandle(fileDescriptor: descriptors[0], closeOnDealloc: true)
+            )
+        )
+        let writer = FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: true)
+        defer { try? writer.close() }
+
+        // This is the exact short JSONL framing used after the separate
+        // 32-byte inherited channel-key pipe is consumed by the helper.
+        try writer.write(contentsOf: Data("{}\n".utf8))
+        let completion = DispatchSemaphore(value: 0)
+        let result = LockedLineResult()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { completion.signal() }
+            result.store(Result { try reader.value.nextLine() })
+        }
+
+        #expect(completion.wait(timeout: .now() + .seconds(1)) == .success)
+        #expect(try result.load().get() == Data("{}".utf8))
+    }
+
+    @Test
+    func rejectsOversizedUnterminatedPipeLineWithoutGrowingTheBuffer() throws {
+        var descriptors: [Int32] = [0, 0]
+        #expect(pipe(&descriptors) == 0)
+        let reader = BoundedLineReader(
+            handle: FileHandle(fileDescriptor: descriptors[0], closeOnDealloc: true)
+        )
+        let writer = FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: true)
+        defer { try? writer.close() }
+
+        let payload = Data(repeating: 0x61, count: maxProtocolLineBytes)
+        let writeCompletion = DispatchSemaphore(value: 0)
+        let writeResult = LockedWriteResult()
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { writeCompletion.signal() }
+            writeResult.store(Result { try writer.write(contentsOf: payload) })
+        }
+        #expect(throws: HelperError.protocolTooLarge) {
+            _ = try reader.nextLine()
+        }
+        #expect(writeCompletion.wait(timeout: .now() + .seconds(1)) == .success)
+        try writeResult.load().get()
+    }
+}
+
+private final class LockedLineResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Result<Data?, Error>?
+
+    func store(_ result: Result<Data?, Error>) {
+        lock.lock()
+        value = result
+        lock.unlock()
+    }
+
+    func load() throws -> Result<Data?, Error> {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let value else {
+            throw HelperError.invalidState("TEST_RESULT_MISSING")
+        }
+        return value
+    }
+}
+
+private final class SendableLineReader: @unchecked Sendable {
+    let value: BoundedLineReader
+
+    init(_ value: BoundedLineReader) {
+        self.value = value
+    }
+}
+
+private final class LockedWriteResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Result<Void, Error>?
+
+    func store(_ result: Result<Void, Error>) {
+        lock.lock()
+        value = result
+        lock.unlock()
+    }
+
+    func load() throws -> Result<Void, Error> {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let value else {
+            throw HelperError.invalidState("TEST_RESULT_MISSING")
+        }
+        return value
     }
 }

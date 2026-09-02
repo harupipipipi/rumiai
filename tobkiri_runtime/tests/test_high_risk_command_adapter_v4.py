@@ -62,6 +62,54 @@ class _CoordinatorClient:
         raise AssertionError(phase)
 
 
+class _ApprovalLifecycleCoordinator(_CoordinatorClient):
+    """Host-coordinator double with an opaque one-shot approval transition."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.executed_effect_ids: list[str] = []
+
+    def approve(self, effect_id: str) -> None:
+        """Record the Host-owned approval decision; no token reaches the adapter."""
+
+        self.statuses[effect_id] = _status(effect_id, "approved")
+
+    def invoke(
+        self,
+        contract_id: str,
+        operation_id: str,
+        payload: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Resume only a Host-approved effect and record one execution."""
+
+        assert contract_id == "tobkiri.service.interactive-effect.v1"
+        assert operation_id == "interactive_effect.manage"
+        request = dict(payload)
+        self.calls.append((contract_id, operation_id, request))
+        phase = request["phase"]
+        if phase == "prepare":
+            effect_id = f"effect-{len(self.statuses) + 1}"
+            status = _status(effect_id, "approval_pending")
+            self.statuses[effect_id] = status
+            return status
+        effect_id = str(request["effect_id"])
+        if phase == "status":
+            return self.statuses[effect_id]
+        if phase == "resume":
+            current = self.statuses[effect_id]
+            if current["state"] != "approved":
+                return current
+            self.executed_effect_ids.append(effect_id)
+            status = _status(effect_id, "succeeded")
+            self.statuses[effect_id] = status
+            return status
+        if phase == "cancel":
+            status = _status(effect_id, "cancelled")
+            self.statuses[effect_id] = status
+            return status
+        raise AssertionError(phase)
+
+
 class _Invocation:
     """One authenticated outer envelope plus the declared coordinator client."""
 
@@ -312,15 +360,137 @@ def test_prepare_is_exactly_once_and_stores_no_raw_arguments(tmp_path: Path) -> 
     captured.close()
 
 
-def test_restart_resyncs_a_persisted_resume_marker_without_exposing_effect_id(
+@pytest.mark.parametrize(
+    ("command_ref", "effect_kind"),
+    (
+        ("terminal", "shell_execute"),
+        ("commit", "git_commit"),
+        ("push", "git_push"),
+        ("patch", "git_apply_patch"),
+        ("restore", "git_restore"),
+    ),
+)
+def test_each_high_risk_command_prepares_only_through_the_host_coordinator(
     tmp_path: Path,
+    command_ref: str,
+    effect_kind: str,
 ) -> None:
+    """All five commands enter the one signed approval coordinator path."""
+
     client = _CoordinatorClient()
     contribution, invocation, captured = _provider(tmp_path, client)
-    _invoke(contribution, invocation, _prepare_payload())
+    payload = _prepare_payload(f"invoke-{command_ref}")
+    payload["command_ref"] = command_ref
+    payload["presentation"] = {
+        "title": "Client-forged approval title",
+        "summary": "client-presentation-must-not-reach-host-approval",
+    }
+
+    result = _invoke(contribution, invocation, payload)
+
+    assert result["state"] == "approval_pending"
+    assert client.calls == [
+        (
+            "tobkiri.service.interactive-effect.v1",
+            "interactive_effect.manage",
+            {
+                "phase": "prepare",
+                "effect_kind": effect_kind,
+                "request": payload["arguments"],
+            },
+        )
+    ]
+    assert "presentation" not in client.calls[0][2]
+    assert "client-presentation-must-not-reach-host-approval" not in str(
+        client.calls[0][2]
+    )
+    captured.close()
+
+
+@pytest.mark.parametrize(
+    ("command_ref", "effect_kind"),
+    (
+        ("terminal", "shell_execute"),
+        ("commit", "git_commit"),
+        ("push", "git_push"),
+        ("patch", "git_apply_patch"),
+        ("restore", "git_restore"),
+    ),
+)
+def test_each_high_risk_command_requires_host_approval_and_executes_once(
+    tmp_path: Path,
+    command_ref: str,
+    effect_kind: str,
+) -> None:
+    """A client cannot approve, replay, or execute any of the five commands."""
+
+    client = _ApprovalLifecycleCoordinator()
+    contribution, invocation, captured = _provider(tmp_path, client)
+    invocation_id = f"lifecycle-{command_ref}"
+    payload = _prepare_payload(invocation_id)
+    payload["command_ref"] = command_ref
+
+    pending = _invoke(contribution, invocation, payload)
+    assert pending["state"] == "approval_pending"
+    assert client.calls[-1][2]["effect_kind"] == effect_kind
+
+    unapproved = _invoke(
+        contribution,
+        invocation,
+        {"phase": "resume", "invocation_id": invocation_id},
+    )
+    assert unapproved["state"] == "approval_pending"
+    assert client.executed_effect_ids == []
+
+    client.approve("effect-1")
+    approved = _invoke(
+        contribution,
+        invocation,
+        {"phase": "resume", "invocation_id": invocation_id},
+    )
+    assert approved["state"] == "succeeded"
+    assert client.executed_effect_ids == ["effect-1"]
+
+    replay = _invoke(
+        contribution,
+        invocation,
+        {"phase": "resume", "invocation_id": invocation_id},
+    )
+    assert replay["state"] == "succeeded"
+    assert client.executed_effect_ids == ["effect-1"]
+    assert len([call for call in client.calls if call[2]["phase"] == "resume"]) == 2
+
+    with pytest.raises(adapter.HighRiskCommandUnavailable):
+        _invoke(
+            contribution,
+            invocation,
+            {
+                "phase": "resume",
+                "invocation_id": invocation_id,
+                "receipt": "client-replayed-receipt",
+            },
+        )
+    captured.close()
+
+
+@pytest.mark.parametrize(
+    "command_ref", ("terminal", "commit", "push", "patch", "restore")
+)
+def test_restart_resyncs_a_persisted_resume_marker_without_exposing_effect_id(
+    tmp_path: Path,
+    command_ref: str,
+) -> None:
+    """Restart recovery is the same opaque invocation protocol for all five."""
+
+    client = _CoordinatorClient()
+    contribution, invocation, captured = _provider(tmp_path, client)
+    invocation_id = f"restart-{command_ref}"
+    payload = _prepare_payload(invocation_id)
+    payload["command_ref"] = command_ref
+    _invoke(contribution, invocation, payload)
     stored = contribution.invoke.__self__._store.load(  # type: ignore[attr-defined]
         adapter._Owner("caller-a", "session-a", "profile-a"),
-        "invoke-1",
+        invocation_id,
     )
     contribution.invoke.__self__._store.replace_result(  # type: ignore[attr-defined]
         stored,
@@ -332,7 +502,7 @@ def test_restart_resyncs_a_persisted_resume_marker_without_exposing_effect_id(
     result = _invoke(
         restarted,
         restart_invocation,
-        {"phase": "status", "invocation_id": "invoke-1"},
+        {"phase": "status", "invocation_id": invocation_id},
     )
     assert result["state"] == "dispatched"
     assert "effect_id" not in result

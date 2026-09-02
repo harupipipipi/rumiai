@@ -33,6 +33,7 @@ from .control_reconciliation_v4 import (
     ControlReconciliationStore,
     ControlReconciliationUnavailableError,
 )
+from .credential_transport import CredentialMaterialStoreFactory
 from .global_contracts.http_contract_dispatch import (
     HTTPCapabilitySnapshot,
     HTTPContractBinding,
@@ -295,6 +296,7 @@ class RuntimeCaptureInputs:
     capability_binding_snapshot_factory: CapabilityBindingSnapshotFactory | None = None
     capability_binding_selector: CapabilityBindingSelector | None = None
     packvm_backend_factory: Callable[[], ExecutionBackend | None] | None = None
+    credential_store_factory: CredentialMaterialStoreFactory | None = None
 
 
 class ActivationSnapshotLoader(Protocol):
@@ -2546,6 +2548,7 @@ class PackAPIServer:
                             inputs.capability_binding_snapshot_factory
                         ),
                         capability_binding_selector=inputs.capability_binding_selector,
+                        credential_store_factory=inputs.credential_store_factory,
                     )
                 except Exception:
                     authority.close()

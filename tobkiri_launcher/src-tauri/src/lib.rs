@@ -64,16 +64,18 @@ pub struct AllowedNavigationPorts(pub Arc<Mutex<Vec<u16>>>);
 
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
+const DEFAULTSPACK_MAIN_WINDOW_LABEL: &str = "defaultspack-main";
 const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
-const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumiの許可";
+const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Tobkiriの許可";
 const AMBIENT_TRIGGER_WINDOW_LABEL: &str = "ambient-trigger";
 const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "合図待ち";
+const AMBIENT_AUTHORITY_REQUEST_ID: &str = "rumi_ambient_trigger_pack";
 const FINGER_RECORDING_WINDOW_LABEL: &str = "finger-recording";
 const FINGER_RECORDING_WINDOW_TITLE: &str = "指で録音";
 const DEFAULTS_CONSOLE_WINDOW_LABEL: &str = "defaults-console";
 const DEFAULTS_CONSOLE_WINDOW_TITLE: &str = "詳細ログ";
 const HOST_PERMISSIONS_WINDOW_LABEL: &str = "host-permissions";
-const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Rumi Host Permissions";
+const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Tobkiri Launcher Host Permissions";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
 #[cfg(any(debug_assertions, test))]
 const DEBUG_INSTANCE_ID_ENV: &str = "RUMI_VIEWER_DEBUG_INSTANCE_ID";
@@ -227,6 +229,12 @@ struct AuthorityUiOperator {
     origin: String,
     window_label: String,
     request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_snapshot_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    typed_confirmation_digest: Option<String>,
     issued_at: u64,
     expires_at: u64,
     nonce: String,
@@ -504,12 +512,66 @@ fn open_authority_approval_window_for_app(
     focus_authority_approval_window(&window)
 }
 
+fn validate_authority_approval_open_caller(
+    window_label: &str,
+    focused: bool,
+    current_url: &Url,
+    expected_port: u16,
+) -> Result<(), String> {
+    if !focused {
+        return Err("opening an approval window requires the focused caller window".into());
+    }
+    if current_url.scheme() != "http"
+        || !current_url.username().is_empty()
+        || current_url.password().is_some()
+        || current_url.host_str() != Some("127.0.0.1")
+        || current_url.port_or_known_default() != Some(expected_port)
+    {
+        return Err("approval window is unavailable from this caller origin".into());
+    }
+    let path_allowed = match window_label {
+        DEFAULTSPACK_MAIN_WINDOW_LABEL => matches!(
+            current_url.path(),
+            "/" | "/chat"
+                | "/defaultspack"
+                | "/pack/defaultspack"
+                | "/coding"
+                | "/calendar"
+                | "/kanban"
+                | "/desktops"
+                | "/subagents"
+                | "/canvas"
+                | "/tools"
+        ),
+        AMBIENT_TRIGGER_WINDOW_LABEL => current_url.path() == "/ambient",
+        FINGER_RECORDING_WINDOW_LABEL => current_url.path() == "/finger-recording",
+        _ => false,
+    };
+    if !path_allowed {
+        return Err("approval window is unavailable from this caller route".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn open_authority_approval_window(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     config: tauri::State<'_, AppConfig>,
     request_id: String,
 ) -> Result<(), String> {
+    let focused = window
+        .is_focused()
+        .map_err(|error| format!("failed to inspect approval caller focus: {error}"))?;
+    let current_url = window
+        .url()
+        .map_err(|error| format!("failed to inspect approval caller URL: {error}"))?;
+    validate_authority_approval_open_caller(
+        window.label(),
+        focused,
+        &current_url,
+        active_defaultspack_http_port(),
+    )?;
     open_authority_approval_window_for_app(&app, config.inner(), &request_id)
 }
 
@@ -705,16 +767,15 @@ async fn open_host_permissions_window(
 }
 
 #[cfg(debug_assertions)]
-#[derive(Debug, Deserialize)]
-struct AuthorityTestResponse {
-    status: String,
-    data: Option<AuthorityTestData>,
-}
+const DEBUG_DEFAULTSPACK_CONTRACT_PREFIX: &str = "/api/contracts/defaultspack/";
 
+/// One authenticated, short-lived panel session used only by the debug native
+/// approval smoke.  The cookie and CSRF token stay in this thread and are
+/// never logged or exposed to the approval window.
 #[cfg(debug_assertions)]
-#[derive(Debug, Deserialize)]
-struct AuthorityTestData {
-    request_id: Option<String>,
+struct DebugPanelSession {
+    cookie: String,
+    csrf_token: String,
 }
 
 #[cfg(debug_assertions)]
@@ -727,6 +788,299 @@ fn truthy_env_flag(name: &str) -> bool {
             .as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+#[cfg(debug_assertions)]
+fn debug_contract_url(base_url: &str, method: &str, api_path: &str) -> AnyResult<String> {
+    if !matches!(method, "GET" | "POST")
+        || !api_path.starts_with("/api/")
+        || api_path.contains(['?', '#', '\\'])
+    {
+        bail!("debug approval smoke contract route is invalid");
+    }
+    // The production web client sends an opaque `METHOD /api/...` token.  A
+    // slash must be percent-encoded too: the Host rejects a token containing a
+    // path separator before it decodes the exact signed route.
+    let encoded_path = api_path.replace('/', "%2F");
+    Ok(format!(
+        "{base_url}{DEBUG_DEFAULTSPACK_CONTRACT_PREFIX}{method}%20{encoded_path}"
+    ))
+}
+
+#[cfg(debug_assertions)]
+fn debug_contract_request_id() -> String {
+    let mut bytes = [0_u8; 16];
+    rand::thread_rng().fill(&mut bytes);
+    // RFC 4122 UUIDv4: PackAPI's replay guard deliberately requires this
+    // format rather than accepting arbitrary client correlation IDs.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
+}
+
+#[cfg(debug_assertions)]
+fn debug_panel_session(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    bootstrap_secret: &str,
+) -> AnyResult<DebugPanelSession> {
+    let bootstrap = client
+        .post(format!("{base_url}/api/panel/auth/bootstrap"))
+        .header("X-Rumi-Desktop-Bootstrap", bootstrap_secret)
+        .send()
+        .context("debug approval smoke panel bootstrap request failed")?;
+    let bootstrap_status = bootstrap.status();
+    let bootstrap: ApiEnvelope<PanelBootstrapPayload> = bootstrap
+        .json()
+        .context("debug approval smoke panel bootstrap response was invalid")?;
+    if !bootstrap_status.is_success() || !bootstrap.success {
+        bail!("debug approval smoke panel bootstrap was rejected");
+    }
+    let code = bootstrap
+        .data
+        .context("debug approval smoke panel bootstrap response had no code")?
+        .code;
+    if code.is_empty() {
+        bail!("debug approval smoke panel bootstrap response had an empty code");
+    }
+
+    let exchange = client
+        .post(format!("{base_url}/api/panel/auth/exchange"))
+        .header(reqwest::header::ORIGIN, base_url)
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .context("debug approval smoke panel exchange request failed")?;
+    let exchange_status = exchange.status();
+    let cookie = exchange
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .filter(|value| value.starts_with("rumi_panel_session="))
+        .map(str::to_owned)
+        .context("debug approval smoke panel exchange had no session cookie")?;
+    let exchange: ApiEnvelope<serde_json::Value> = exchange
+        .json()
+        .context("debug approval smoke panel exchange response was invalid")?;
+    if !exchange_status.is_success() || !exchange.success {
+        bail!("debug approval smoke panel exchange was rejected");
+    }
+    let csrf_token = exchange
+        .data
+        .as_ref()
+        .and_then(|data| data.get("csrf_token"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .context("debug approval smoke panel exchange had no CSRF token")?;
+    Ok(DebugPanelSession { cookie, csrf_token })
+}
+
+#[cfg(debug_assertions)]
+fn debug_contract_request(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    session: &DebugPanelSession,
+    method: &str,
+    api_path: &str,
+    payload: Option<serde_json::Value>,
+) -> AnyResult<serde_json::Value> {
+    let url = debug_contract_url(base_url, method, api_path)?;
+    let mut request = client
+        .request(
+            reqwest::Method::from_bytes(method.as_bytes())
+                .context("debug approval smoke contract method was invalid")?,
+            url,
+        )
+        .header(reqwest::header::ORIGIN, base_url)
+        .header(reqwest::header::COOKIE, &session.cookie)
+        .header("X-Rumi-CSRF", &session.csrf_token)
+        .header("X-Tobkiri-Request-ID", debug_contract_request_id());
+    if let Some(payload) = payload {
+        request = request.json(&payload);
+    }
+    let response = request
+        .send()
+        .context("debug approval smoke contract request failed")?;
+    let status = response.status();
+    let envelope: ApiEnvelope<serde_json::Value> = response
+        .json()
+        .context("debug approval smoke contract response was invalid")?;
+    if !status.is_success() || !envelope.success {
+        bail!("debug approval smoke contract operation was rejected");
+    }
+    envelope
+        .data
+        .context("debug approval smoke contract response had no result")
+}
+
+#[cfg(debug_assertions)]
+fn debug_pending_interactive_request_id(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("approval_request_id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|request_id| valid_authority_request_id(request_id))
+}
+
+#[cfg(debug_assertions)]
+fn debug_result_state(value: &serde_json::Value) -> Option<&str> {
+    value.get("state").and_then(serde_json::Value::as_str)
+}
+
+/// Finish one debug-only native approval smoke through the same captured V4
+/// client path that prepared it.
+///
+/// The approval window alone may settle the Host approval record but it cannot
+/// dispatch the deferred command.  A real command client resumes its own
+/// invocation after that decision.  This monitor mirrors that one client
+/// responsibility for the `RUMI_AUTHORITY_TEST_AUTORUN` smoke only; it never
+/// provides a UI operator, changes production routes, or retries a resumed
+/// effect.  The Host remains the sole authority that decides whether resume
+/// can execute the effect.
+#[cfg(debug_assertions)]
+fn monitor_debug_authority_smoke_settlement(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    session: &DebugPanelSession,
+    request_id: &str,
+    invocation_id: &str,
+) {
+    let deadline = SystemTime::now() + Duration::from_secs(120);
+    while SystemTime::now() < deadline {
+        let approval = match debug_contract_request(
+            client,
+            base_url,
+            session,
+            "POST",
+            "/api/interactive-approval/v1/get",
+            Some(serde_json::json!({ "request_id": request_id })),
+        ) {
+            Ok(approval) => approval,
+            Err(error) => {
+                warn!("debug approval smoke could not refresh its approval state: {error}");
+                return;
+            }
+        };
+        match debug_result_state(&approval) {
+            Some("approval_pending" | "pending") => {
+                thread::sleep(Duration::from_millis(300));
+            }
+            Some("approved") => {
+                let resumed = match debug_contract_request(
+                    client,
+                    base_url,
+                    session,
+                    "POST",
+                    "/api/command-protocol/v1/high-risk",
+                    Some(serde_json::json!({
+                        "phase": "resume",
+                        "invocation_id": invocation_id,
+                    })),
+                ) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        warn!(
+                            "debug approval smoke could not resume its approved command: {error}"
+                        );
+                        return;
+                    }
+                };
+                if debug_result_state(&resumed) != Some("succeeded") {
+                    warn!(
+                        "debug approval smoke approved command did not settle successfully: {}",
+                        debug_result_state(&resumed).unwrap_or("unknown")
+                    );
+                    return;
+                }
+                let status = match debug_contract_request(
+                    client,
+                    base_url,
+                    session,
+                    "POST",
+                    "/api/command-protocol/v1/high-risk",
+                    Some(serde_json::json!({
+                        "phase": "status",
+                        "invocation_id": invocation_id,
+                    })),
+                ) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        warn!("debug approval smoke could not verify its settled command: {error}");
+                        return;
+                    }
+                };
+                if debug_result_state(&status) == Some("succeeded") {
+                    info!(
+                        "debug approval smoke approved and resumed exactly once for request {request_id}"
+                    );
+                } else {
+                    warn!(
+                        "debug approval smoke approved command status was not succeeded: {}",
+                        debug_result_state(&status).unwrap_or("unknown")
+                    );
+                }
+                return;
+            }
+            Some("denied" | "expired") => {
+                let cancelled = match debug_contract_request(
+                    client,
+                    base_url,
+                    session,
+                    "POST",
+                    "/api/command-protocol/v1/high-risk",
+                    Some(serde_json::json!({
+                        "phase": "cancel",
+                        "invocation_id": invocation_id,
+                    })),
+                ) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        warn!(
+                            "debug approval smoke could not cancel its declined command: {error}"
+                        );
+                        return;
+                    }
+                };
+                match debug_result_state(&cancelled) {
+                    Some("cancelled" | "stale") => info!(
+                        "debug approval smoke declined request settled without dispatch for request {request_id}"
+                    ),
+                    state => warn!(
+                        "debug approval smoke declined command had an unexpected terminal state: {}",
+                        state.unwrap_or("unknown")
+                    ),
+                }
+                return;
+            }
+            Some(state) => {
+                warn!("debug approval smoke saw an unexpected approval state: {state}");
+                return;
+            }
+            None => {
+                warn!("debug approval smoke approval state was missing");
+                return;
+            }
+        }
+    }
+    warn!("debug approval smoke timed out waiting for native approval settlement");
 }
 
 #[cfg(debug_assertions)]
@@ -747,7 +1101,7 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
             }
         };
         let base_url = format!("http://127.0.0.1:{}", active_defaultspack_http_port());
-        let health_url = format!("{base_url}/api/health");
+        let health_url = format!("{base_url}/health");
         let deadline = SystemTime::now() + Duration::from_secs(60);
         while SystemTime::now() < deadline {
             if client
@@ -761,63 +1115,137 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
             thread::sleep(Duration::from_millis(300));
         }
 
-        let request_url = format!("{base_url}/api/authority/test/request");
-        let response = match client
-            .post(&request_url)
-            .json(&serde_json::json!({
-                "provider_id": "opencode-go",
-                "api_id": "legacy",
-                "model_id": "deepseek-v4-pro",
-                "model_ref": "opencode-go/deepseek-v4-pro",
-                "pack_id": "defaultspack",
-                "app_display_name": "defaultspack v2",
-                "provider_display_name": "OpenCode Go",
-                "model_display_name": "DeepSeek V4 Pro via OpenCode Go",
-                "credential_label": "OpenCode Go API key",
-                "endpoint_url": "https://opencode.ai/zen/go/v1/chat/completions",
-                "endpoint_path": "/chat/completions",
-                "domain": "opencode.ai",
-                "transport": "https",
-                "provider_transport": "openai_chat_completions",
-                "provider_kind": "cloud",
-                "port": 443,
-                "reason": "defaultspack v2: OpenCode Go provider を DeepSeek V4 Pro との通信に使います。"
-            }))
-            .send()
-        {
-            Ok(response) => response,
+        let config = app.state::<AppConfig>().inner().clone();
+        let bootstrap_secret = match load_or_create_panel_bootstrap_secret(&config) {
+            Ok(secret) => secret,
             Err(error) => {
-                warn!("authority smoke test request failed: {error}");
+                warn!("debug approval smoke could not load panel bootstrap secret: {error}");
+                return;
+            }
+        };
+        let session = match debug_panel_session(&client, &base_url, &bootstrap_secret) {
+            Ok(session) => session,
+            Err(error) => {
+                warn!("debug approval smoke could not establish its panel session: {error}");
                 return;
             }
         };
 
-        let payload = match response.json::<AuthorityTestResponse>() {
-            Ok(payload) => payload,
+        // This is the real signed V4 high-risk path. `true` is a
+        // Host-allowlisted no-op when the Host later resumes the effect; it
+        // still exercises prepare -> pending approval -> single-use resume
+        // without a test-only authority bypass or a retired endpoint.  The
+        // relative cwd deliberately asks the Host to use the already selected
+        // trusted workspace instead of letting this debug client choose one.
+        let invocation_id = format!(
+            "debug-native-{}",
+            rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(24)
+                .map(char::from)
+                .collect::<String>()
+        );
+        let prepared = match debug_contract_request(
+            &client,
+            &base_url,
+            &session,
+            "POST",
+            "/api/command-protocol/v1/high-risk",
+            Some(serde_json::json!({
+                "phase": "prepare",
+                "invocation_id": invocation_id,
+                "command_ref": "terminal",
+                "arguments": {
+                    "command": ["true"],
+                    "cwd": ".",
+                    "env": {},
+                    "timeout": 30
+                },
+                "presentation": {
+                    "title": "Tobkiri native approval smoke (debug)",
+                    "summary": "A debug-only no-op command is awaiting one interactive approval."
+                }
+            })),
+        ) {
+            Ok(result) => result,
             Err(error) => {
-                warn!("authority smoke test response was not JSON: {error}");
+                warn!("debug approval smoke high-risk prepare failed: {error}");
                 return;
             }
         };
-        if payload.status != "ok" {
-            warn!(
-                "authority smoke test endpoint returned status={}",
-                payload.status
-            );
+        let request_id = match debug_pending_interactive_request_id(&prepared) {
+            Some(request_id) => request_id.to_string(),
+            None => {
+                warn!("debug approval smoke high-risk prepare did not return a pending request");
+                return;
+            }
+        };
+        if !matches!(
+            prepared.get("state").and_then(serde_json::Value::as_str),
+            Some("approval_pending" | "pending")
+        ) {
+            warn!("debug approval smoke high-risk prepare returned a non-pending state");
             return;
         }
-        let request_id = payload
-            .data
-            .and_then(|data| data.request_id)
-            .unwrap_or_default();
-        if !valid_authority_request_id(&request_id) {
-            warn!("authority smoke test returned invalid request id");
+        let fetched = match debug_contract_request(
+            &client,
+            &base_url,
+            &session,
+            "POST",
+            "/api/interactive-approval/v1/get",
+            Some(serde_json::json!({ "request_id": request_id })),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                warn!("debug approval smoke could not read its pending request: {error}");
+                return;
+            }
+        };
+        let listed = match debug_contract_request(
+            &client,
+            &base_url,
+            &session,
+            "GET",
+            "/api/interactive-approval/v1/list",
+            None,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                warn!("debug approval smoke could not list pending requests: {error}");
+                return;
+            }
+        };
+        let fetched_is_pending = fetched
+            .get("request_id")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|candidate| candidate == request_id)
+            && matches!(
+                fetched.get("state").and_then(serde_json::Value::as_str),
+                Some("approval_pending" | "pending")
+            );
+        let listed_is_pending = listed
+            .get("approvals")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|approvals| {
+                approvals.iter().any(|approval| {
+                    approval
+                        .get("request_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(request_id.as_str())
+                        && matches!(
+                            approval.get("state").and_then(serde_json::Value::as_str),
+                            Some("approval_pending" | "pending")
+                        )
+                })
+            });
+        if !fetched_is_pending || !listed_is_pending {
+            warn!("debug approval smoke pending request did not survive authoritative get/list");
             return;
         }
 
         thread::sleep(Duration::from_secs(2));
         let app_for_open = app.clone();
-        let config_for_open = app.state::<AppConfig>().inner().clone();
+        let config_for_open = config;
         let request_id_for_open = request_id.clone();
         if let Err(error) = app.run_on_main_thread(move || {
             match open_authority_approval_window_for_app(
@@ -834,7 +1262,16 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
             }
         }) {
             warn!("authority smoke test could not schedule approval window: {error}");
+            return;
         }
+
+        monitor_debug_authority_smoke_settlement(
+            &client,
+            &base_url,
+            &session,
+            &request_id,
+            &invocation_id,
+        );
     });
 }
 
@@ -846,16 +1283,28 @@ fn unix_now_seconds() -> u64 {
 }
 
 fn authority_operator_message(operator: &AuthorityUiOperator) -> String {
-    [
+    let mut fields = vec![
         format!("v{}", operator.version),
         operator.origin.clone(),
         operator.window_label.clone(),
         operator.request_id.clone(),
+    ];
+    if operator.version == 3 {
+        fields.extend([
+            operator.decision.clone().unwrap_or_default(),
+            operator.request_snapshot_digest.clone().unwrap_or_default(),
+            operator
+                .typed_confirmation_digest
+                .clone()
+                .unwrap_or_default(),
+        ]);
+    }
+    fields.extend([
         operator.issued_at.to_string(),
         operator.expires_at.to_string(),
         operator.nonce.clone(),
-    ]
-    .join("\n")
+    ]);
+    fields.join("\n")
 }
 
 fn coding_operator_message(operator: &CodingUiOperator) -> String {
@@ -975,6 +1424,9 @@ fn sign_authority_ui_operator(
         origin: "tauri_webview_window".into(),
         window_label: AUTHORITY_APPROVAL_WINDOW_LABEL.into(),
         request_id: request_id.trim().into(),
+        decision: None,
+        request_snapshot_digest: None,
+        typed_confirmation_digest: None,
         issued_at: now,
         expires_at: now + AUTHORITY_UI_OPERATOR_TTL_SECONDS,
         nonce,
@@ -987,29 +1439,112 @@ fn sign_authority_ui_operator(
     Ok(operator)
 }
 
+fn valid_authority_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn sign_interactive_authority_ui_operator(
+    request_id: &str,
+    decision: &str,
+    request_snapshot_digest: &str,
+    typed_confirmation_digest: Option<&str>,
+    bootstrap_secret: &str,
+    now: u64,
+    nonce: String,
+) -> Result<AuthorityUiOperator, String> {
+    if !valid_authority_request_id(request_id) {
+        return Err("invalid authority request id".into());
+    }
+    if !matches!(decision, "approve" | "deny")
+        || !valid_authority_digest(request_snapshot_digest)
+        || typed_confirmation_digest.is_some_and(|digest| !valid_authority_digest(digest))
+        || decision == "deny" && typed_confirmation_digest.is_some()
+    {
+        return Err("interactive approval binding is invalid".into());
+    }
+    if bootstrap_secret.trim().is_empty() {
+        return Err("approval signing secret is unavailable".into());
+    }
+    let mut operator = AuthorityUiOperator {
+        version: 3,
+        kind: "ui_operator".into(),
+        origin: "tauri_webview_window".into(),
+        window_label: AUTHORITY_APPROVAL_WINDOW_LABEL.into(),
+        request_id: request_id.trim().into(),
+        decision: Some(decision.into()),
+        request_snapshot_digest: Some(request_snapshot_digest.into()),
+        typed_confirmation_digest: typed_confirmation_digest.map(str::to_string),
+        issued_at: now,
+        expires_at: now + AUTHORITY_UI_OPERATOR_TTL_SECONDS,
+        nonce,
+        signature: String::new(),
+    };
+    let mut mac = HmacSha256::new_from_slice(bootstrap_secret.as_bytes())
+        .map_err(|error| format!("failed to prepare approval signature: {error}"))?;
+    mac.update(authority_operator_message(&operator).as_bytes());
+    operator.signature = hex::encode(mac.finalize().into_bytes());
+    Ok(operator)
+}
+
+fn validate_authority_approval_context_caller(
+    window_label: &str,
+    focused: bool,
+    current_url: &Url,
+    request_id: &str,
+    expected_port: u16,
+) -> Result<(), String> {
+    if window_label != AUTHORITY_APPROVAL_WINDOW_LABEL {
+        return Err("approval context is only available in the approval window".into());
+    }
+    if !focused {
+        return Err("approval context requires the focused approval window".into());
+    }
+    if current_url.scheme() != "http"
+        || current_url.host_str() != Some("127.0.0.1")
+        || current_url.port_or_known_default() != Some(expected_port)
+        || current_url.path() != "/approval"
+    {
+        return Err("approval context is only available on the local approval route".into());
+    }
+    if !valid_authority_request_id(request_id) {
+        return Err("invalid authority request id".into());
+    }
+    let query_pairs = current_url.query_pairs().collect::<Vec<_>>();
+    if query_pairs.len() != 1
+        || query_pairs[0].0 != "request_id"
+        || request_id.trim() != query_pairs[0].1
+    {
+        return Err("approval context request id does not match the approval window URL".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn authority_approval_context(
     window: tauri::WebviewWindow,
     config: tauri::State<'_, AppConfig>,
     request_id: String,
+    decision: Option<String>,
+    request_snapshot_digest: Option<String>,
+    typed_confirmation_digest: Option<String>,
 ) -> Result<AuthorityApprovalContext, String> {
-    if window.label() != AUTHORITY_APPROVAL_WINDOW_LABEL {
-        return Err("approval context is only available in the approval window".into());
-    }
+    let focused = window
+        .is_focused()
+        .map_err(|error| format!("failed to inspect approval window focus: {error}"))?;
     let current_url = window
         .url()
         .map_err(|error| format!("failed to inspect approval window URL: {error}"))?;
-    if current_url.path() != "/approval" {
-        return Err("approval context is only available on the approval route".into());
-    }
     let request_id = request_id.trim().to_string();
-    let url_request_id = current_url
-        .query_pairs()
-        .find_map(|(key, value)| (key == "request_id").then(|| value.into_owned()))
-        .unwrap_or_default();
-    if request_id != url_request_id {
-        return Err("approval context request id does not match the approval window URL".into());
-    }
+    validate_authority_approval_context_caller(
+        window.label(),
+        focused,
+        &current_url,
+        &request_id,
+        active_defaultspack_http_port(),
+    )?;
     let bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
         .map_err(|error| format!("failed to load approval signing secret: {error}"))?;
     let nonce: String = rand::thread_rng()
@@ -1017,8 +1552,28 @@ fn authority_approval_context(
         .take(32)
         .map(char::from)
         .collect();
-    let operator =
-        sign_authority_ui_operator(&request_id, &bootstrap_secret, unix_now_seconds(), nonce)?;
+    let operator = match (decision, request_snapshot_digest) {
+        (None, None)
+            if request_id == AMBIENT_AUTHORITY_REQUEST_ID
+                && typed_confirmation_digest.is_none() =>
+        {
+            sign_authority_ui_operator(&request_id, &bootstrap_secret, unix_now_seconds(), nonce)?
+        }
+        (Some(decision), Some(request_snapshot_digest))
+            if request_id != AMBIENT_AUTHORITY_REQUEST_ID =>
+        {
+            sign_interactive_authority_ui_operator(
+                &request_id,
+                &decision,
+                &request_snapshot_digest,
+                typed_confirmation_digest.as_deref(),
+                &bootstrap_secret,
+                unix_now_seconds(),
+                nonce,
+            )?
+        }
+        _ => return Err("interactive approval binding is incomplete".into()),
+    };
     Ok(AuthorityApprovalContext {
         request_id,
         ui_operator: operator,
@@ -2413,7 +2968,7 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
                 ) {
                     Ok(code) => code,
                     Err(e) => {
-                        let msg = startup_failure_message("Viewer startup", &e, &config);
+                        let msg = startup_failure_message("Tobkiri Launcher startup", &e, &config);
                         error!("{msg}");
                         update_setup_progress(Some(&handle), &progress_arc, &msg);
                         return;
@@ -3039,6 +3594,205 @@ mod tests {
     }
 
     #[test]
+    fn authority_approval_open_requires_focused_exact_launcher_route() {
+        for (label, route) in [
+            (DEFAULTSPACK_MAIN_WINDOW_LABEL, "/chat?chat=conversation-1"),
+            (DEFAULTSPACK_MAIN_WINDOW_LABEL, "/coding"),
+            (AMBIENT_TRIGGER_WINDOW_LABEL, "/ambient"),
+            (FINGER_RECORDING_WINDOW_LABEL, "/finger-recording"),
+        ] {
+            validate_authority_approval_open_caller(
+                label,
+                true,
+                &Url::parse(&format!("http://127.0.0.1:18771{route}")).unwrap(),
+                18771,
+            )
+            .unwrap();
+        }
+
+        let main_url = Url::parse("http://127.0.0.1:18771/chat").unwrap();
+        assert!(validate_authority_approval_open_caller(
+            DEFAULTSPACK_MAIN_WINDOW_LABEL,
+            false,
+            &main_url,
+            18771,
+        )
+        .is_err());
+        for (label, rejected) in [
+            (DEFAULTSPACK_MAIN_WINDOW_LABEL, "http://127.0.0.1:8766/chat"),
+            (
+                DEFAULTSPACK_MAIN_WINDOW_LABEL,
+                "https://127.0.0.1:18771/chat",
+            ),
+            (
+                DEFAULTSPACK_MAIN_WINDOW_LABEL,
+                "http://example.invalid:18771/chat",
+            ),
+            (
+                DEFAULTSPACK_MAIN_WINDOW_LABEL,
+                "http://localhost:18771/chat",
+            ),
+            (
+                DEFAULTSPACK_MAIN_WINDOW_LABEL,
+                "http://user@127.0.0.1:18771/chat",
+            ),
+            (
+                DEFAULTSPACK_MAIN_WINDOW_LABEL,
+                "http://127.0.0.1:18771/approval",
+            ),
+            (
+                AMBIENT_TRIGGER_WINDOW_LABEL,
+                "http://127.0.0.1:18771/finger-recording",
+            ),
+            (
+                FINGER_RECORDING_WINDOW_LABEL,
+                "http://127.0.0.1:18771/ambient",
+            ),
+            ("main", "http://127.0.0.1:18771/chat"),
+        ] {
+            assert!(validate_authority_approval_open_caller(
+                label,
+                true,
+                &Url::parse(rejected).unwrap(),
+                18771,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn authority_approval_context_requires_focused_exact_local_route() {
+        let url = Url::parse("http://127.0.0.1:18771/approval?request_id=auth_123").unwrap();
+        validate_authority_approval_context_caller(
+            AUTHORITY_APPROVAL_WINDOW_LABEL,
+            true,
+            &url,
+            "auth_123",
+            18771,
+        )
+        .unwrap();
+
+        assert!(validate_authority_approval_context_caller(
+            AUTHORITY_APPROVAL_WINDOW_LABEL,
+            false,
+            &url,
+            "auth_123",
+            18771,
+        )
+        .is_err());
+        for rejected in [
+            "http://127.0.0.1:8766/approval?request_id=auth_123",
+            "https://127.0.0.1:18771/approval?request_id=auth_123",
+            "http://example.invalid:18771/approval?request_id=auth_123",
+            "http://localhost:18771/approval?request_id=auth_123",
+            "http://127.0.0.1:18771/ambient?request_id=auth_123",
+            "http://127.0.0.1:18771/approval?request_id=other",
+            "http://127.0.0.1:18771/approval?request_id=auth_123&extra=1",
+            "http://127.0.0.1:18771/approval?request_id=auth_123&request_id=auth_123",
+        ] {
+            assert!(validate_authority_approval_context_caller(
+                AUTHORITY_APPROVAL_WINDOW_LABEL,
+                true,
+                &Url::parse(rejected).unwrap(),
+                "auth_123",
+                18771,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn authority_approval_acl_supports_isolated_local_ports_with_narrow_windows() {
+        let open: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/authority-approval-open.json"))
+                .unwrap();
+        assert_eq!(
+            open["windows"],
+            serde_json::json!(["defaultspack-main", "ambient-trigger", "finger-recording"])
+        );
+        assert_eq!(
+            open["remote"]["urls"],
+            serde_json::json!(["http://127.0.0.1:*/*"])
+        );
+        assert_eq!(
+            open["permissions"],
+            serde_json::json!(["allow-open-authority-approval-window"])
+        );
+
+        let context: serde_json::Value = serde_json::from_str(include_str!(
+            "../capabilities/authority-approval-context.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            context["windows"],
+            serde_json::json!(["authority-approval"])
+        );
+        assert_eq!(
+            context["remote"]["urls"],
+            serde_json::json!(["http://127.0.0.1:*/*"])
+        );
+        assert_eq!(
+            context["permissions"],
+            serde_json::json!([
+                "allow-authority-approval-context",
+                "allow-close-current-window"
+            ])
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_authority_smoke_uses_an_opaque_signed_contract_route() {
+        assert_eq!(
+            debug_contract_url(
+                "http://127.0.0.1:18771",
+                "POST",
+                "/api/command-protocol/v1/high-risk",
+            )
+            .unwrap(),
+            "http://127.0.0.1:18771/api/contracts/defaultspack/POST%20%2Fapi%2Fcommand-protocol%2Fv1%2Fhigh-risk",
+        );
+        assert!(debug_contract_url(
+            "http://127.0.0.1:18771",
+            "PUT",
+            "/api/command-protocol/v1/high-risk",
+        )
+        .is_err());
+        assert!(debug_contract_url(
+            "http://127.0.0.1:18771",
+            "POST",
+            "/api/command-protocol/v1/high-risk?unsafe=true",
+        )
+        .is_err());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_authority_smoke_request_ids_are_uuid_v4() {
+        let request_id = debug_contract_request_id();
+        let bytes = request_id.as_bytes();
+
+        assert_eq!(request_id.len(), 36);
+        assert_eq!(bytes[8], b'-');
+        assert_eq!(bytes[13], b'-');
+        assert_eq!(bytes[14], b'4');
+        assert_eq!(bytes[18], b'-');
+        assert!(matches!(bytes[19], b'8' | b'9' | b'a' | b'b'));
+        assert_eq!(bytes[23], b'-');
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_authority_smoke_reads_only_the_authoritative_state_field() {
+        assert_eq!(
+            debug_result_state(&serde_json::json!({ "state": "approved" })),
+            Some("approved")
+        );
+        assert_eq!(debug_result_state(&serde_json::json!({ "state": 1 })), None);
+        assert_eq!(debug_result_state(&serde_json::json!({})), None);
+    }
+
+    #[test]
     fn ambient_trigger_url_targets_defaultspack_window_route() {
         let url = ambient_trigger_url().unwrap();
 
@@ -3071,11 +3825,92 @@ mod tests {
 
         assert_eq!(operator.window_label, AUTHORITY_APPROVAL_WINDOW_LABEL);
         assert_eq!(operator.request_id, "auth_123");
+        assert_eq!(operator.decision, None);
+        assert_eq!(operator.request_snapshot_digest, None);
+        assert_eq!(operator.typed_confirmation_digest, None);
         assert_eq!(
             authority_operator_message(&operator),
             "v1\ntauri_webview_window\nauthority-approval\nauth_123\n1700000000\n1700000180\nnonce-1"
         );
         assert!(!operator.signature.is_empty());
+    }
+
+    #[test]
+    fn interactive_authority_ui_operator_binds_decision_snapshot_and_confirmation() {
+        let snapshot = "a".repeat(64);
+        let confirmation = "b".repeat(64);
+        let approve = sign_interactive_authority_ui_operator(
+            "auth_123",
+            "approve",
+            &snapshot,
+            Some(&confirmation),
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .unwrap();
+        assert_eq!(approve.version, 3);
+        assert_eq!(approve.decision.as_deref(), Some("approve"));
+        assert_eq!(
+            authority_operator_message(&approve),
+            format!(
+                "v3\ntauri_webview_window\nauthority-approval\nauth_123\napprove\n{snapshot}\n{confirmation}\n1700000000\n1700000180\nnonce-1"
+            )
+        );
+
+        let deny = sign_interactive_authority_ui_operator(
+            "auth_123",
+            "deny",
+            &snapshot,
+            None,
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .unwrap();
+        let changed_snapshot = sign_interactive_authority_ui_operator(
+            "auth_123",
+            "approve",
+            &"c".repeat(64),
+            Some(&confirmation),
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .unwrap();
+        let changed_confirmation = sign_interactive_authority_ui_operator(
+            "auth_123",
+            "approve",
+            &snapshot,
+            Some(&"d".repeat(64)),
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .unwrap();
+        assert_ne!(approve.signature, deny.signature);
+        assert_ne!(approve.signature, changed_snapshot.signature);
+        assert_ne!(approve.signature, changed_confirmation.signature);
+        assert!(sign_interactive_authority_ui_operator(
+            "auth_123",
+            "deny",
+            &snapshot,
+            Some(&confirmation),
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .is_err());
+        assert!(sign_interactive_authority_ui_operator(
+            "auth_123",
+            "approve",
+            &"A".repeat(64),
+            None,
+            "test-bootstrap-secret",
+            1_700_000_000,
+            "nonce-1".into(),
+        )
+        .is_err());
     }
 
     #[test]
@@ -3097,6 +3932,21 @@ mod tests {
 
         assert_eq!(main_window["hiddenTitle"], true);
         assert_eq!(main_window["titleBarStyle"], "Transparent");
+    }
+
+    #[test]
+    fn macos_development_config_disables_all_packaged_runtime_resources() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.macos.dev.conf.json")).unwrap();
+
+        assert_eq!(
+            config["identifier"], "dev.tobkiri.local-launcher",
+            "the unbundled mode must be independently identifiable"
+        );
+        assert!(
+            config["bundle"]["resources"].is_null(),
+            "a per-entry null does not override Tauri's base resource map; dev must disable the map itself"
+        );
     }
 
     #[test]

@@ -34,7 +34,7 @@ from core_runtime.authority.v4 import (
 )
 from core_runtime.authority.ui_operator import (
     ui_operator_audit_record,
-    verify_ui_operator,
+    verify_interactive_ui_operator,
 )
 
 from .contracts import ResolvedOperationBinding
@@ -755,6 +755,12 @@ class AuthorityV4Adapter:
             state=state,
             expires_at=request.expires_at,
             typed_confirmation_required=request.typed_confirmation_digest is not None,
+            request_snapshot_digest=_interactive_ui_operator_digest(request.digest),
+            typed_confirmation_digest=(
+                _interactive_ui_operator_digest(request.typed_confirmation_digest)
+                if request.typed_confirmation_digest is not None
+                else None
+            ),
             redacted_metadata=dict(request.redacted_metadata),
         )
 
@@ -784,28 +790,27 @@ class AuthorityV4Adapter:
         *,
         action: str,
     ) -> str:
-        """Verify v1/v2 request/window provenance and retain audit correlation.
-
-        Current UI-operator signatures bind the request/window but do not sign
-        the Host route action or typed-confirmation digest.  ``action`` below
-        is a Host-controlled audit label, not signed evidence.  A future
-        ui_operator v3 verifier may add those fields without changing this
-        mapping-shaped port API.
-        """
+        """Verify a v3 proof bound to this exact immutable Host decision."""
 
         if not isinstance(command.ui_operator, Mapping):
             raise AuthorityDenied("interactive ui_operator is required")
-        verified, reason, payload = verify_ui_operator(
-            dict(command.ui_operator), request_id=request.request_id
+        expected_confirmation_digest = (
+            _interactive_ui_operator_digest(request.typed_confirmation_digest)
+            if action == "approve" and request.typed_confirmation_digest is not None
+            else None
+        )
+        verified, reason, payload = verify_interactive_ui_operator(
+            dict(command.ui_operator),
+            request_id=request.request_id,
+            decision=action,
+            request_snapshot_digest=_interactive_ui_operator_digest(request.digest),
+            typed_confirmation_digest=expected_confirmation_digest,
         )
         if not verified:
             raise AuthorityDenied(f"interactive ui_operator is invalid: {reason}")
         browser_actor = payload.get("principal_id")
         if browser_actor is not None and browser_actor != command.actor_id:
             raise AuthorityDenied("interactive ui_operator actor does not match")
-        # ``verify_ui_operator`` authenticates request/window/origin/expiry.
-        # The action is deliberately retained only as a Host audit label until
-        # a v3 signed UI-operator payload binds it cryptographically.
         return authority_digest(
             {
                 "action": action,
@@ -862,6 +867,20 @@ class AuthorityV4Adapter:
     def _forget(self, request_id: str) -> None:
         with self._lock:
             self._issued_by_request.pop(request_id, None)
+
+
+def _interactive_ui_operator_digest(value: str) -> str:
+    """Convert a canonical tagged digest to the v3 wire's exact hex form."""
+
+    prefix = "sha256:"
+    if not isinstance(value, str) or not value.startswith(prefix):
+        raise AuthorityDenied("interactive approval digest is unavailable")
+    untagged = value.removeprefix(prefix)
+    if len(untagged) != 64 or any(
+        character not in "0123456789abcdef" for character in untagged
+    ):
+        raise AuthorityDenied("interactive approval digest is unavailable")
+    return untagged
 
 
 __all__ = [

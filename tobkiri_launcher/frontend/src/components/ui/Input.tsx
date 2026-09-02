@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cn } from "@/src/lib/utils"
+import {CopyErrorButton} from './CopyErrorButton'
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -39,7 +40,10 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         {input}
         {error && (
-          <p id={`${inputId}-error`} className="text-xs text-destructive">{error}</p>
+          <div className="flex items-start gap-2" id={`${inputId}-error`} role="alert">
+            <p className="min-w-0 flex-1 break-words text-xs text-destructive">{error}</p>
+            <CopyErrorButton label={`Copy ${label ?? 'input'} error`} text={error} />
+          </div>
         )}
         {!error && helperText && (
           <p id={`${inputId}-helper`} className="text-xs text-text-muted">{helperText}</p>

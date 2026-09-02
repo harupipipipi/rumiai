@@ -4,6 +4,7 @@ import {Link} from 'react-router';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {
   fetchPresentationState,
@@ -119,6 +120,7 @@ export function ShellLaunchCard({
         ) : error ? (
           <div className="flex flex-wrap items-center gap-3" role="alert">
             <p className="flex-1 text-sm text-destructive">{error}</p>
+            <CopyErrorButton label="Copy Shell launch error" text={error} />
             <Button variant="outline" size="sm" onClick={() => void loadSurfaceState()}>
               Retry
             </Button>

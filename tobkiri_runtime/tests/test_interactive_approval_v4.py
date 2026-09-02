@@ -91,8 +91,39 @@ def _request_command(
     )
 
 
-def _operator(request_id: str, *, nonce: str) -> dict[str, object]:
-    return sign_ui_operator(request_id, nonce=nonce)
+def _wire_digest(value: str) -> str:
+    """Return the exact untagged digest required by native UI-operator v3."""
+
+    assert value.startswith("sha256:")
+    return value.removeprefix("sha256:")
+
+
+def _operator(
+    harness: _Harness,
+    request_id: str,
+    *,
+    action: str,
+    nonce: str,
+    request_snapshot_digest: str | None = None,
+    typed_confirmation_digest: str | None = None,
+) -> dict[str, object]:
+    request, _state = harness.kernel.interactive_approval(request_id)
+    expected_confirmation_digest = (
+        _wire_digest(request.typed_confirmation_digest)
+        if action == "approve" and request.typed_confirmation_digest is not None
+        else None
+    )
+    return sign_ui_operator(
+        request_id,
+        nonce=nonce,
+        decision=action,
+        request_snapshot_digest=request_snapshot_digest or _wire_digest(request.digest),
+        typed_confirmation_digest=(
+            expected_confirmation_digest
+            if typed_confirmation_digest is None
+            else typed_confirmation_digest
+        ),
+    )
 
 
 def _decision_command(
@@ -101,13 +132,23 @@ def _decision_command(
     *,
     phrase: str = "APPROVE",
     nonce: str = "interactive-operator-nonce",
+    action: str = "approve",
+    request_snapshot_digest: str | None = None,
+    typed_confirmation_digest: str | None = None,
 ) -> InteractiveApprovalDecisionCommand:
     return InteractiveApprovalDecisionCommand(
         context=_context(harness, request_id=request_id),
         request_id=request_id,
         actor_id="user-1",
         confirmation_text=phrase,
-        ui_operator=_operator(request_id, nonce=nonce),
+        ui_operator=_operator(
+            harness,
+            request_id,
+            action=action,
+            nonce=nonce,
+            request_snapshot_digest=request_snapshot_digest,
+            typed_confirmation_digest=typed_confirmation_digest,
+        ),
     )
 
 
@@ -125,11 +166,16 @@ def test_approve_mints_only_one_shot_authority_and_returns_no_material(
     assert pending.state == "pending"
     assert approved.state == "approved"
     assert approved.typed_confirmation_required is True
+    request, _state = harness.kernel.interactive_approval(pending.request_id)
     assert asdict(approved) == {
         "request_id": "interactive-request-1",
         "state": "approved",
         "expires_at": 1060.0,
         "typed_confirmation_required": True,
+        "request_snapshot_digest": _wire_digest(request.digest),
+        "typed_confirmation_digest": _wire_digest(
+            str(request.typed_confirmation_digest)
+        ),
         "redacted_metadata": {
             "action": "restart",
             "confirmation_phrase": "APPROVE",
@@ -162,6 +208,73 @@ def test_approve_rejects_wrong_phrase_even_though_decision_has_no_boolean_input(
 
     assert adapter.interactive_approval_status(pending.request_id).state == "pending"
     assert harness.store.get_interactive_approval_decision(pending.request_id) is None
+
+
+@pytest.mark.parametrize(
+    (
+        "operator_action",
+        "request_snapshot_digest",
+        "typed_confirmation_digest",
+        "match",
+    ),
+    [
+        ("deny", None, None, "decision mismatch"),
+        ("approve", "0" * 64, None, "request snapshot mismatch"),
+        ("approve", None, "f" * 64, "confirmation mismatch"),
+    ],
+)
+def test_approve_rejects_each_tampered_v3_ui_operator_binding(
+    tmp_path,
+    operator_action: str,
+    request_snapshot_digest: str | None,
+    typed_confirmation_digest: str | None,
+    match: str,
+) -> None:
+    """The signed native proof cannot be replayed into a different decision."""
+
+    harness = _Harness(tmp_path)
+    adapter = _adapter(harness)
+    with bind_host_contract(_CONTRACT):
+        pending = adapter.request_interactive_approval(_request_command(harness))
+        with pytest.raises(AuthorityDenied, match=match):
+            adapter.approve_interactive_approval(
+                _decision_command(
+                    harness,
+                    pending.request_id,
+                    action=operator_action,
+                    request_snapshot_digest=request_snapshot_digest,
+                    typed_confirmation_digest=typed_confirmation_digest,
+                )
+            )
+
+    assert adapter.interactive_approval_status(pending.request_id).state == "pending"
+    assert harness.store.get_interactive_approval_decision(pending.request_id) is None
+
+
+def test_failed_confirmation_does_not_consume_proof_but_settlement_does(
+    tmp_path,
+) -> None:
+    """A transient local failure may retry, while a settled request rejects reuse."""
+
+    harness = _Harness(tmp_path)
+    adapter = _adapter(harness)
+    with bind_host_contract(_CONTRACT):
+        pending = adapter.request_interactive_approval(_request_command(harness))
+        command = _decision_command(
+            harness,
+            pending.request_id,
+            phrase="wrong phrase",
+            nonce="interactive-retry-proof",
+        )
+        with pytest.raises(AuthorityDenied, match="typed confirmation"):
+            adapter.approve_interactive_approval(command)
+
+        approved = adapter.approve_interactive_approval(
+            replace(command, confirmation_text="APPROVE")
+        )
+        assert approved.state == "approved"
+        with pytest.raises(AuthorityDenied, match="unavailable"):
+            adapter.approve_interactive_approval(command)
 
 
 def test_typed_confirmation_requires_the_exact_display_phrase_in_metadata(
@@ -334,6 +447,7 @@ def test_approve_and_deny_race_has_exactly_one_durable_winner(tmp_path) -> None:
                 harness,
                 request.context.request_id,
                 nonce=f"interactive-race-{action}",
+                action=action,
             )
             try:
                 if action == "approve":

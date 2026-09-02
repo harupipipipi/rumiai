@@ -29,7 +29,7 @@
     {
       "path": "packs/rumi-host-authority-bridge.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:f08482b976d1a5face17a8ae3daab886d7943787525b6d70f758907e2e7a691f"
+      "digest": "sha256:8951967a46e82417d264d2ac554d36516242033b21b3cab6a9fc3e385d570973"
     },
     {
       "path": "packs/rumi-workspace-mount.pack.v4.json",
@@ -244,12 +244,12 @@
     {
       "path": "packs/rumi_git_publish_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:f8c5c288195c78688d70cb86b225c27a9e46bbe824ebe7e6aaf6eeb181a4a9da"
+      "digest": "sha256:1f6bafadce9c2e65c7dc5128faefc1512ded1dd4cdb0679662614079b9e3da02"
     },
     {
       "path": "packs/rumi_git_publish_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:25284257623df4d30c51c05738744b7c07a83e7c57d8a795f838b6c2c2f10571"
+      "digest": "sha256:e47b76b4a283196354251652b3682726d7bd08266442fcde36a594b658ac94ef"
     },
     {
       "path": "packs/rumi_git_read_pack.executables.v4.json",
@@ -274,7 +274,7 @@
     {
       "path": "packs/rumi_host_authority_bridge_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:2b94e1d232839e879e7bbd8bee289c6f62aad980572bca41da26941d9c1ee11f"
+      "digest": "sha256:64846fc2333274c139baedd84739cd31c3add113457c426722661c1d558a7338"
     },
     {
       "path": "packs/rumi_http_api_connector_pack.executables.v4.json",
@@ -694,7 +694,7 @@
     {
       "path": "defaults.profile.v4.json",
       "kind": "profile",
-      "digest": "sha256:0669c8f68a791c0cb4ba15975263781ca83c571cdb5c5ef3979165ac03b111b5"
+      "digest": "sha256:e758a97578b314a210d00b1b90e0af9c4a6a97778e9d0877374dde9cc0d43a8d"
     }
   ]
 }

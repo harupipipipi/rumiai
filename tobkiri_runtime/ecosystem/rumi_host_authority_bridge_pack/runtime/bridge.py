@@ -896,6 +896,8 @@ def _redacted_status(status: InteractiveApprovalStatus) -> dict[str, Any]:
         "state": status.state,
         "expires_at": status.expires_at,
         "typed_confirmation_required": status.typed_confirmation_required,
+        "request_snapshot_digest": status.request_snapshot_digest,
+        "typed_confirmation_digest": status.typed_confirmation_digest,
         "redacted_metadata": dict(status.redacted_metadata),
     }
 

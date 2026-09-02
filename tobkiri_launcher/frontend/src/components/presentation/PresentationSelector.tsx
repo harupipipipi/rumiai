@@ -18,6 +18,7 @@ import {
 } from '@/src/lib/presentation';
 import { Badge } from '@/src/components/ui/Badge';
 import { Button } from '@/src/components/ui/Button';
+import { CopyErrorButton } from '@/src/components/ui/CopyErrorButton';
 import { Card } from '@/src/components/ui/Card';
 
 export interface PresentationSelectorProps {
@@ -187,7 +188,8 @@ export function PresentationSelector({
       {error ? (
         <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-main">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-          <span>{error}</span>
+          <span className="min-w-0 flex-1 break-words">{error}</span>
+          <CopyErrorButton label="Copy presentation error" text={error} />
         </div>
       ) : null}
 
@@ -278,8 +280,9 @@ export function PresentationSelector({
             );
           })}
           {selectedBase && compatibleShells.length === 0 ? (
-            <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-muted">
-              No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family.
+            <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-muted">
+              <span className="min-w-0 flex-1">No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family.</span>
+              <CopyErrorButton label="Copy Shell Provider error" text="No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family." />
             </div>
           ) : null}
         </div>

@@ -239,6 +239,22 @@ pub fn ensure_python_env_with_progress<F>(config: &AppConfig, progress: F) -> Re
 where
     F: Fn(&str),
 {
+    #[cfg(not(windows))]
+    if config.is_dev_workspace() {
+        let venv_python = config.venv_python();
+        if !venv_python.is_file() {
+            return Err(typed_error(
+                PythonProvisioningCode::InvalidArtifact,
+                format!(
+                    "development venv is missing {}; create tobkiri_runtime/.venv before starting Tobkiri Launcher",
+                    venv_python.display()
+                ),
+            ));
+        }
+        progress("Using the repository development Python environment...");
+        return Ok(());
+    }
+
     if !config.is_dev_workspace() {
         // `spawn_packaged_role` is the single authority for the outer-runtime
         // and sealed-environment verification immediately before execution.
@@ -247,6 +263,7 @@ where
         progress("Packaged Python will be verified immediately before the runtime starts...");
         return Ok(());
     }
+
     let options = ProvisionOptions::production();
     let lock_path = provision_lock_path(config);
     let lock = acquire_provision_lock(&lock_path, options.lock_wait)?;
@@ -306,6 +323,13 @@ where
 
 pub use crate::sealed_python::{PythonChild, PythonRole, RoleArguments, RoleCommand};
 
+// `-I` deliberately removes the current directory from `sys.path`.  The
+// developer checkout is still an explicit, Launcher-selected root, so the
+// kernel bootstrap adds only that root before executing its fixed entrypoint.
+// Keep this separate from packaged startup: packaged roles remain bound to the
+// verified sealed interpreter and bootstrap in `sealed_python`.
+const DEVELOPMENT_KERNEL_RUNNER: &str = "import runpy,sys;root,script,*args=sys.argv[1:];sys.path.insert(0,root);sys.argv=[script,*args];runpy.run_path(script,run_name='__main__')";
+
 /// Spawn one fixed Python role. Packaged mode accepts only the build-bound
 /// sealed environment; development mode is explicitly segregated and may use
 /// the externally provisioned developer venv.
@@ -324,7 +348,11 @@ where
     let mut command = process_utils::isolated_python(config.venv_python());
     match role {
         PythonRole::Kernel => {
-            command.args(["-m", "app"]);
+            command
+                .arg("-c")
+                .arg(DEVELOPMENT_KERNEL_RUNNER)
+                .arg(&config.app_dir)
+                .arg(config.app_dir.join("app.py"));
         }
         PythonRole::Defaultspack => {
             command

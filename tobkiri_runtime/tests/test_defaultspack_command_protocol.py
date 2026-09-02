@@ -104,7 +104,10 @@ def test_all_command_bindings_are_concretely_probed_and_pack_blocks_execute(
     assert by_id["deepthink"]["presentation"]["input"]["kind"] == "toggle"
     assert by_id["deepthink"]["execution"]["kind"] == "state_mutation"
     assert by_id["model"]["presentation"]["input"]["kind"] == "search_select"
-    assert by_id["model"]["presentation"]["input"]["datasource_ref"] == "tobkiri:model_catalog"
+    assert (
+        by_id["model"]["presentation"]["input"]["datasource_ref"]
+        == "tobkiri:model_catalog"
+    )
     assert by_id["home_title"]["execution"]["operation_ref"] == "host:set_home_title"
     assert by_id["home_title"]["presentation"]["input"]["kind"] == "form"
     assert by_id["home_title"]["presentation"]["input"]["fields"][0]["placeholder"] == {
@@ -142,16 +145,28 @@ def test_owner_scope_comes_only_from_trusted_context() -> None:
         )
 
 
-def test_resolved_catalog_never_silently_exposes_missing_frontend_handler() -> None:
+def test_resolved_catalog_exposes_high_risk_commands_to_the_host_adapter() -> None:
     catalog = CommandProtocolRegistry(DEFAULTSPACK_ROOT).catalog()
     unavailable = [
-        item for item in catalog["commands"] if item["availability"]["status"] == "unavailable"
+        item
+        for item in catalog["commands"]
+        if item["availability"]["status"] == "unavailable"
+    ]
+    high_risk = [
+        item
+        for item in catalog["commands"]
+        if item["authorization"]["approval_required"]
     ]
 
-    assert len(unavailable) == 5
-    assert {item["availability"]["reason_code"] for item in unavailable} == {
-        "host_interactive_approval_unavailable"
+    assert unavailable == []
+    assert {item["identity"]["id"] for item in high_risk} == {
+        "commit",
+        "patch",
+        "push",
+        "restore",
+        "terminal",
     }
+    assert all(item["availability"] == {"status": "available"} for item in high_risk)
     assert not any(item["code"] == "handler_missing" for item in catalog["diagnostics"])
 
 
@@ -165,7 +180,9 @@ def test_all_55_commands_have_authority_and_completion_conformance() -> None:
     high_risk = [item for item in matrix if item["authority"]["approval_required"]]
     assert len(high_risk) == 5
     assert all(item["authority"]["permissions"] for item in high_risk)
-    assert all(item["completion_semantics"] == "backend_side_effect" for item in high_risk)
+    assert all(
+        item["completion_semantics"] == "backend_side_effect" for item in high_risk
+    )
 
 
 def test_protocol_deepthink_invocation_returns_authoritative_state(
@@ -311,10 +328,16 @@ def test_settings_registered_command_is_resolved_and_invoked_through_protocol(
     protocol = CommandProtocolRegistry(DEFAULTSPACK_ROOT)
 
     command = next(
-        item for item in protocol.catalog()["commands"] if item["identity"]["name"] == "go"
+        item
+        for item in protocol.catalog()["commands"]
+        if item["identity"]["name"] == "go"
     )
     result = protocol.invoke(
-        {"command_ref": command["canonical_id"], "args": {"enabled": True}, "mode": "chat"}
+        {
+            "command_ref": command["canonical_id"],
+            "args": {"enabled": True},
+            "mode": "chat",
+        }
     )
 
     legacy = next(
@@ -329,7 +352,7 @@ def test_settings_registered_command_is_resolved_and_invoked_through_protocol(
     assert result["legacy_result"]["action"] == "toggle_yolo"
 
 
-def test_high_risk_command_refuses_removed_runtime_authority(
+def test_high_risk_command_requires_the_captured_host_adapter(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -379,12 +402,12 @@ def test_high_risk_command_refuses_removed_runtime_authority(
     result = protocol.invoke(payload, trusted_context)
 
     assert result["status"] == "failed"
-    assert result["error"]["code"] == "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
+    assert result["error"]["code"] == "HIGH_RISK_COMMAND_ADAPTER_REQUIRED"
     assert "approval" not in result
     assert durable_secret not in json.dumps(result, sort_keys=True)
 
 
-def test_high_risk_executor_policy_refuses_removed_runtime_authority(
+def test_high_risk_executor_policy_requires_the_captured_host_adapter(
     tmp_path: Path,
 ) -> None:
     protocol = CommandProtocolRegistry(DEFAULTSPACK_ROOT)
@@ -406,7 +429,7 @@ def test_high_risk_executor_policy_refuses_removed_runtime_authority(
 
     assert result is not None
     assert result["status"] == "failed"
-    assert result["error"]["code"] == "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
+    assert result["error"]["code"] == "HIGH_RISK_COMMAND_ADAPTER_REQUIRED"
 
 
 def test_high_risk_operation_plan_binds_workspace_and_git_state(
@@ -647,17 +670,23 @@ def test_windows_host_process_gets_required_curated_environment(
     assert environment["system_root"] == str(Path(os.environ["SystemRoot"]).resolve())
     path_entries = environment["path"].split(os.pathsep)
     assert path_entries
-    assert all(entry and entry != "." and Path(entry).is_absolute() for entry in path_entries)
+    assert all(
+        entry and entry != "." and Path(entry).is_absolute() for entry in path_entries
+    )
 
 
 def test_only_captured_command_protocol_route_is_not_legacy_transport() -> None:
     legacy_specs = canonical_http_route_specs(include_always_available=True)
     bindings = load_current_signed_application_bindings()
 
-    assert not any(route_pattern_exposes_command_protocol(spec.pattern) for spec in legacy_specs)
+    assert not any(
+        route_pattern_exposes_command_protocol(spec.pattern) for spec in legacy_specs
+    )
     assert command_protocol_binding_findings(bindings) == []
 
-    high_risk = next(binding for binding in bindings if "command-protocol" in binding.path)
+    high_risk = next(
+        binding for binding in bindings if "command-protocol" in binding.path
+    )
     assert command_protocol_binding_findings(
         (replace(high_risk, path="/api/command-protocol/v1/invoke"),)
     )
@@ -665,10 +694,70 @@ def test_only_captured_command_protocol_route_is_not_legacy_transport() -> None:
         (
             replace(
                 high_risk,
-                targets=(replace(high_risk.targets[0], function_id="untrusted.function"),),
+                targets=(
+                    replace(high_risk.targets[0], function_id="untrusted.function"),
+                ),
             ),
         )
     )
+
+
+def test_interactive_command_routes_are_captured_host_contract_operations() -> None:
+    """The Composer's adapter calls resolve only through the signed map."""
+
+    bindings = load_current_signed_application_bindings()
+    expected = {
+        ("GET", "/api/interactive-approval/v1/list"): (
+            "tobkiri.service.interactive-approval.v1",
+            "interactive_approval.list",
+            "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+            frozenset(),
+        ),
+        ("POST", "/api/interactive-approval/v1/get"): (
+            "tobkiri.service.interactive-approval.v1",
+            "interactive_approval.get",
+            "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+            frozenset({"request_id"}),
+        ),
+        ("POST", "/api/interactive-approval/v1/approve"): (
+            "tobkiri.service.interactive-approval.v1",
+            "interactive_approval.approve",
+            "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+            frozenset({"request_id", "confirmation_text", "ui_operator"}),
+        ),
+        ("POST", "/api/interactive-approval/v1/deny"): (
+            "tobkiri.service.interactive-approval.v1",
+            "interactive_approval.deny",
+            "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+            frozenset({"request_id", "ui_operator"}),
+        ),
+        ("POST", "/api/command-protocol/v1/high-risk"): (
+            "tobkiri.service.command.high-risk.v1",
+            "high_risk_command.manage",
+            "rumi_command_protocol_pack.high-risk-command.service",
+            frozenset(
+                {"phase", "invocation_id", "command_ref", "arguments", "presentation"}
+            ),
+        ),
+    }
+
+    captured = {
+        (binding.method, binding.path): binding
+        for binding in bindings
+        if binding.path.startswith("/api/interactive-approval/")
+        or binding.path == "/api/command-protocol/v1/high-risk"
+    }
+
+    assert set(captured) == set(expected)
+    for key, (contract_id, operation_id, function_id, allowed_keys) in expected.items():
+        binding = captured[key]
+        assert binding.presentation == "broker_result"
+        assert len(binding.targets) == 1
+        target = binding.targets[0]
+        assert target.contract_id == contract_id
+        assert target.operation_id == operation_id
+        assert target.function_id == function_id
+        assert target.allowed_payload_keys == allowed_keys
 
 
 def test_invocation_id_is_idempotent_and_conflict_safe(

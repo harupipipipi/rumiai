@@ -88,10 +88,10 @@ def _read_yaml(path: Path) -> dict:
 def test_tauri_hooks_prepare_runtime_for_dev_and_release():
     config = _read_json(TAURI_CONFIG)
 
-    assert (
-        "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev"
-        in config["build"]["beforeDevCommand"]
-    )
+    before_dev = config["build"]["beforeDevCommand"]
+    assert isinstance(before_dev, dict)
+    assert before_dev["wait"] is True
+    assert "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev" in before_dev["script"]
     assert (
         "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release"
         in config["build"]["beforeBuildCommand"]
@@ -111,6 +111,24 @@ def test_local_startup_splash_has_progress_authority_and_visible_failures():
     assert 'commands.allow = ["get_setup_progress"]' in permission
     assert "Launcher progress unavailable. Retrying…" in splash
     assert ".catch(function () {})" not in splash
+
+
+def test_local_startup_splash_copies_visible_startup_failures_without_react():
+    splash = STARTUP_SPLASH.read_text(encoding="utf-8")
+
+    assert 'id="copy-error"' in splash
+    assert 'copyButton.hidden = type !== \'error\';' in splash
+    assert "function copyStartupError()" in splash
+    assert "navigator.clipboard.writeText(errorMessage)" in splash
+    assert "function fallbackCopy(text)" in splash
+    assert "document.execCommand('copy')" in splash
+    assert "Startup error copied to the clipboard." in splash
+    assert "Could not copy the startup error." in splash
+    assert 'class="copy-icon"' in splash
+    assert '<svg aria-hidden="true" class="copy-icon"' in splash
+    assert "copyButton.textContent" not in splash
+    assert "⧉" not in splash
+    assert "copyButton.textContent = copied ? '✓' : '!';" not in splash
 
 
 def test_shell_runtime_is_presentation_only_and_cannot_inherit_launcher_authority():

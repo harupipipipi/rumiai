@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from email.message import Message
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -19,6 +20,7 @@ import math
 import os
 from pathlib import Path
 import re
+import secrets
 import socket
 import ssl
 import subprocess
@@ -34,6 +36,10 @@ from core_runtime.authority.v4 import (
     AuthorityStore,
     FunctionPrincipal,
     LeaseState,
+)
+from core_runtime.executable_trust import (
+    ExecutableTrustError,
+    trusted_executable_path,
 )
 from tobkiri_host.broker import RequestEnvelope
 
@@ -86,8 +92,21 @@ class CredentialMaterialStore(Protocol):
         profile_id: str,
         key_version: str = "",
         purpose: str = "provider.invoke",
+        expected_resource_binding: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Resolve material only inside the Host transport boundary."""
+
+    def select(
+        self,
+        *,
+        consumer_pack_id: str,
+        provider_instance_id: str,
+        scope: str,
+        profile_id: str,
+        resource_binding: Mapping[str, Any],
+        purpose: str = "provider.invoke",
+    ) -> dict[str, Any] | None:
+        """Return one exact opaque handle record without secret material."""
 
 
 @dataclass(frozen=True)
@@ -99,8 +118,10 @@ class CredentialMaterialStoreBinding:
 
     def __post_init__(self) -> None:
         """Reject an incomplete factory result before provider dispatch."""
-        if not callable(getattr(self.store, "resolve", None)) or not _safe_text(
-            self.key_version
+        if (
+            not callable(getattr(self.store, "resolve", None))
+            or not callable(getattr(self.store, "select", None))
+            or not _safe_text(self.key_version)
         ):
             raise ValueError("credential material store binding is invalid")
 
@@ -183,6 +204,7 @@ class HostBoundCredentialTransport:
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
         monotonic_clock: Callable[[], float] = time.monotonic,
+        expected_resource_binding: Mapping[str, Any] | None = None,
     ) -> None:
         self._store = store
         self._authority_store = authority_store
@@ -193,6 +215,11 @@ class HostBoundCredentialTransport:
         self._audit_sink = audit_sink
         self._clock = clock
         self._monotonic_clock = monotonic_clock
+        self._expected_resource_binding = (
+            dict(expected_resource_binding)
+            if expected_resource_binding is not None
+            else None
+        )
         self._consumed = False
         self._lock = RLock()
 
@@ -215,6 +242,7 @@ class HostBoundCredentialTransport:
         audit_sink: Callable[[Mapping[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.time,
         monotonic_clock: Callable[[], float] = time.monotonic,
+        expected_resource_binding: Mapping[str, Any] | None = None,
     ) -> "HostBoundCredentialTransport":
         """Capture a transport lease from the Broker-authenticated envelope."""
         bound_origin = _credential_origin(endpoint_origin)
@@ -271,6 +299,7 @@ class HostBoundCredentialTransport:
             audit_sink=audit_sink,
             clock=clock,
             monotonic_clock=monotonic_clock,
+            expected_resource_binding=expected_resource_binding,
         )
 
     @property
@@ -357,6 +386,7 @@ class HostBoundCredentialTransport:
                     scope=self._binding.credential_scope,
                     key_version=self._binding.credential_key_version,
                     purpose=self._binding.credential_purpose,
+                    expected_resource_binding=self._expected_resource_binding,
                 )
             except Exception:
                 raise CredentialTransportDenied("store_failure") from None
@@ -455,6 +485,7 @@ class HostBoundCredentialTransport:
         self,
         *,
         git_executable: str,
+        git_executable_identity: Mapping[str, Any],
         bare_repository: str,
         remote_url: str,
         refspec: str,
@@ -472,6 +503,18 @@ class HostBoundCredentialTransport:
         an askpass environment, or a reusable process handle.
         """
 
+        expected_resource = self._expected_resource_binding
+        if (
+            not isinstance(expected_resource, Mapping)
+            or dict(expected_resource)
+            != {
+                "endpoint_origin": _credential_origin(remote_url),
+                "workspace_id": str(expected_resource.get("workspace_id") or ""),
+            }
+            or not _safe_text(expected_resource.get("workspace_id"))
+        ):
+            raise CredentialTransportDenied("binding_invalid")
+
         self._consume_once(
             endpoint=remote_url,
             credential_handle=credential_handle,
@@ -484,7 +527,10 @@ class HostBoundCredentialTransport:
         secret_text = ""
         audit_status = "failed"
         try:
-            executable = _trusted_git_executable(git_executable)
+            executable = _trusted_git_executable(
+                git_executable,
+                expected_identity=git_executable_identity,
+            )
             repository = _bare_repository(bare_repository, executable)
             origin = _credential_origin(remote_url)
             if not origin or _git_push_arguments_are_invalid(
@@ -502,6 +548,7 @@ class HostBoundCredentialTransport:
                     scope=self._binding.credential_scope,
                     key_version=self._binding.credential_key_version,
                     purpose=self._binding.credential_purpose,
+                    expected_resource_binding=self._expected_resource_binding,
                 )
             except Exception:
                 raise CredentialTransportDenied("store_failure") from None
@@ -639,7 +686,87 @@ class AuthorizedEnvelopeCredentialTransport:
         self._clock = clock
         self._monotonic_clock = monotonic_clock
         self._used = False
+        self._selection_used = False
+        self._git_selection: dict[str, Any] | None = None
         self._lock = RLock()
+
+    def select_git_https_credential(
+        self,
+        *,
+        workspace_id: str,
+        endpoint_origin: str,
+        provider_instance_id: str,
+        credential_scope: str,
+    ) -> Mapping[str, Any] | None:
+        """Select one Host-bound opaque Git credential without resolving it."""
+
+        origin = _credential_origin(endpoint_origin)
+        if (
+            not origin
+            or origin != endpoint_origin
+            or not _safe_text(workspace_id)
+            or not _safe_text(provider_instance_id)
+            or not _safe_text(credential_scope)
+        ):
+            raise CredentialTransportDenied("binding_invalid")
+        with self._lock:
+            if self._selection_used:
+                raise CredentialTransportDenied("binding_invalid")
+            self._selection_used = True
+        try:
+            selected = self._store.select(
+                consumer_pack_id=self._consumer_pack_id,
+                provider_instance_id=provider_instance_id,
+                scope=credential_scope,
+                profile_id=self._envelope.context.profile_id,
+                resource_binding={
+                    "endpoint_origin": origin,
+                    "workspace_id": workspace_id,
+                },
+                purpose="provider.invoke",
+            )
+        except Exception:
+            raise CredentialTransportDenied("store_failure") from None
+        if selected is None:
+            return None
+        identity = {
+            "handle": str(selected.get("handle") or ""),
+            "key_version": str(selected.get("key_version") or ""),
+            "consumer_pack_id": str(selected.get("consumer_pack_id") or ""),
+            "provider_instance_id": str(
+                selected.get("provider_instance_id") or ""
+            ),
+            "profile_id": str(selected.get("profile_id") or ""),
+            "scope": credential_scope,
+            "purpose": str(selected.get("purpose") or ""),
+            "resource_binding": dict(selected.get("resource_binding") or {}),
+        }
+        expected = {
+            "handle": identity["handle"],
+            "key_version": self._credential_key_version,
+            "consumer_pack_id": self._consumer_pack_id,
+            "provider_instance_id": provider_instance_id,
+            "profile_id": self._envelope.context.profile_id,
+            "scope": credential_scope,
+            "purpose": "provider.invoke",
+            "resource_binding": {
+                "endpoint_origin": origin,
+                "workspace_id": workspace_id,
+            },
+        }
+        if (
+            identity != expected
+            or not identity["handle"].startswith(("credential:", "opaque:"))
+        ):
+            raise CredentialTransportDenied("binding_invalid")
+        identity["binding_digest"] = _credential_selection_digest(identity)
+        receipt = f"credential-selection:{secrets.token_urlsafe(32)}"
+        with self._lock:
+            self._git_selection = {
+                "credential_identity": dict(identity),
+                "selection_receipt": receipt,
+            }
+        return {**identity, "selection_receipt": receipt}
 
     def post_json(
         self,
@@ -690,6 +817,7 @@ class AuthorizedEnvelopeCredentialTransport:
         self,
         *,
         git_executable: str,
+        git_executable_identity: Mapping[str, Any],
         bare_repository: str,
         remote_url: str,
         refspec: str,
@@ -697,11 +825,52 @@ class AuthorizedEnvelopeCredentialTransport:
         credential_handle: str,
         provider_instance_id: str,
         credential_scope: str,
+        workspace_id: str,
+        selection_receipt: str,
     ) -> str:
         """Construct and consume one envelope-bound HTTPS Git transport."""
 
         with self._lock:
-            if self._used:
+            selection = self._git_selection
+            self._git_selection = None
+            selected_identity = (
+                selection.get("credential_identity")
+                if isinstance(selection, Mapping)
+                else None
+            )
+            selected_resource = (
+                selected_identity.get("resource_binding")
+                if isinstance(selected_identity, Mapping)
+                else None
+            )
+            expected_resource = {
+                "endpoint_origin": _credential_origin(remote_url),
+                "workspace_id": workspace_id,
+            }
+            valid_selection = (
+                isinstance(selection, Mapping)
+                and selection_receipt == selection.get("selection_receipt")
+                and isinstance(selected_identity, Mapping)
+                and selected_identity.get("handle") == credential_handle
+                and selected_identity.get("consumer_pack_id")
+                == self._consumer_pack_id
+                and selected_identity.get("provider_instance_id")
+                == provider_instance_id
+                and selected_identity.get("profile_id")
+                == self._envelope.context.profile_id
+                and selected_identity.get("scope") == credential_scope
+                and selected_identity.get("purpose") == "provider.invoke"
+                and isinstance(selected_resource, Mapping)
+                and dict(selected_resource) == expected_resource
+            )
+            if self._used or not valid_selection:
+                self._used = True
+                raise CredentialTransportDenied("binding_invalid")
+            if not _safe_text(selection_receipt) or not _safe_text(workspace_id):
+                self._used = True
+                raise CredentialTransportDenied("binding_invalid")
+            if not selection_receipt.startswith("credential-selection:"):
+                self._used = True
                 raise CredentialTransportDenied("binding_invalid")
             self._used = True
         transport = HostBoundCredentialTransport.from_authorized_envelope(
@@ -717,12 +886,14 @@ class AuthorizedEnvelopeCredentialTransport:
             endpoint_origin=_credential_origin(remote_url),
             current_security_epoch=self._current_security_epoch,
             consumer_pack_id=self._consumer_pack_id,
+            expected_resource_binding=expected_resource,
             audit_sink=self._audit_sink,
             clock=self._clock,
             monotonic_clock=self._monotonic_clock,
         )
         return transport.push_git_https(
             git_executable=git_executable,
+            git_executable_identity=git_executable_identity,
             bare_repository=bare_repository,
             remote_url=remote_url,
             refspec=refspec,
@@ -758,6 +929,19 @@ def _remaining_deadline_budget(
 def _safe_text(value: object) -> bool:
     text = str(value or "")
     return bool(text and "\x00" not in text and "\n" not in text and "\r" not in text)
+
+
+def _credential_selection_digest(value: Mapping[str, Any]) -> str:
+    """Bind the exact secret-free handle identity into a prepared Git plan."""
+
+    encoded = json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def _origin(value: str) -> str:
@@ -961,19 +1145,17 @@ _GIT_OID = r"[0-9a-f]{40}(?:[0-9a-f]{24})?"
 _GIT_REF = r"refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}"
 
 
-def _trusted_git_executable(value: str) -> Path:
-    """Resolve one owner-safe Git executable supplied by the Host Provider."""
+def _trusted_git_executable(
+    value: str,
+    *,
+    expected_identity: Mapping[str, Any],
+) -> Path:
+    """Revalidate one Git executable against the Provider capture identity."""
 
-    path = Path(str(value or "")).resolve(strict=True)
-    metadata = path.stat()
-    if (
-        not path.is_file()
-        or path.is_symlink()
-        or metadata.st_mode & 0o022
-        or not os.access(path, os.X_OK)
-    ):
-        raise CredentialTransportDenied("binding_invalid")
-    return path
+    try:
+        return trusted_executable_path(value, expected_identity=expected_identity)
+    except (ExecutableTrustError, OSError, ValueError, TypeError):
+        raise CredentialTransportDenied("binding_invalid") from None
 
 
 def _bare_repository(value: str, executable: Path) -> Path:

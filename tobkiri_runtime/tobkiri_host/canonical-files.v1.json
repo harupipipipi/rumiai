@@ -15,6 +15,7 @@
     "effects.py",
     "errors.py",
     "extension_sdk.py",
+    "interactive_effects.py",
     "macos_vz_supervisor.py",
     "materialization.py",
     "models.py",

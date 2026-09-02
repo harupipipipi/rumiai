@@ -5,6 +5,61 @@ import Testing
 
 struct LaunchAssetsTests {
     @Test
+    func debugSerialCaptureIsPrivateAndBounded() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            ".tobkiri-packvm-vz-test-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let diagnostics = try DirectSerialDiagnostics.create(runRoot: root.path)
+        diagnostics.record("HOST_VM_START_SUCCEEDED")
+        let writer = FileHandle(fileDescriptor: diagnostics.writeFD, closeOnDealloc: false)
+        writer.write(Data(repeating: 0x61, count: 132 * 1024))
+        diagnostics.close()
+
+        let capture = root.appendingPathComponent("serial-console.log")
+        let content = try Data(contentsOf: capture)
+        #expect(content.count == 128 * 1024)
+        #expect(content.starts(with: Data("TOBKIRI_HOST:HOST_VM_START_SUCCEEDED\n".utf8)))
+        var metadata = stat()
+        #expect(lstat(capture.path, &metadata) == 0)
+        #expect(metadata.st_mode & 0o777 == 0o600)
+    }
+
+    @Test
+    func preparesAndRemovesRegularEFIStoreInsidePrivateRunRoot() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+            ".tobkiri-packvm-vz-test-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("prepared-efi-variable-store.bin")
+
+        let prepared = try SecureLaunchAssetValidator.prepareEFIStore(
+            runRoot: root.path,
+            path: path.path
+        )
+
+        #expect(prepared.descriptor.path == path.path)
+        #expect(FileManager.default.fileExists(atPath: path.path))
+        try SecureLaunchAssetValidator.removePreparedEFIStore(
+            prepared,
+            runRoot: root.path
+        )
+        #expect(!FileManager.default.fileExists(atPath: path.path))
+    }
+
+    @Test
     func rejectsWorldWritableLaunchAsset() throws {
         let fixture = try LaunchFixture()
         defer { fixture.cleanup() }

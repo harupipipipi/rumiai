@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from core_runtime.authority.v4 import AuthorityStore
+from core_runtime.credential_transport import CredentialMaterialStoreBinding
 from core_runtime.pack_api_server import RuntimeCaptureInputs
 from tobkiri_host.backends import ExecutionBackend
 
@@ -96,6 +97,24 @@ def defaultspack_runtime_capture_inputs(
             if packvm_provisioner is not None
             else None
         ),
+        credential_store_factory=defaultspack_credential_store_factory,
+    )
+
+
+def defaultspack_credential_store_factory(
+    *,
+    user_data_root: Path,
+) -> CredentialMaterialStoreBinding:
+    """Bind the Host transport to Defaultspack's encrypted credential store."""
+
+    from ecosystem.rumi_credential_broker_pack.runtime.store import (
+        KEY_VERSION,
+        CredentialBrokerStore,
+    )
+
+    return CredentialMaterialStoreBinding(
+        store=CredentialBrokerStore(user_data_root=user_data_root),
+        key_version=KEY_VERSION,
     )
 
 
@@ -225,6 +244,7 @@ def _contract_context(active: object | None) -> dict[str, str]:
 __all__ = [
     "defaultspack_activation_snapshot_loader",
     "create_defaultspack_kernel",
+    "defaultspack_credential_store_factory",
     "defaultspack_packvm_backend_factory",
     "defaultspack_runtime_capture_inputs",
 ]

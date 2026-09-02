@@ -166,6 +166,8 @@ class InteractiveApprovalStatus:
     state: str
     expires_at: float
     typed_confirmation_required: bool
+    request_snapshot_digest: str
+    typed_confirmation_digest: str | None
     redacted_metadata: Mapping[str, str]
 
 

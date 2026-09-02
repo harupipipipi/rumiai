@@ -5,7 +5,10 @@
   "identifier": "dev.rumiai.app",
   "build": {
     "beforeBuildCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release",
-    "beforeDevCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev",
+    "beforeDevCommand": {
+      "script": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev",
+      "wait": true
+    },
     "frontendDist": "./splash"
   },
   "app": {

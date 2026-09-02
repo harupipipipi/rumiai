@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:8f556faa1b434e98b217cc951f78424f73e961489164a942066bc84014b9a46c",
+  "catalog_digest": "sha256:60491b53db177378c90003f8b03eab5f36bfa67ff88ce268ae9362d4343c1fd2",
   "pack_id": "rumi_git_publish_pack",
-  "source_identity": "sha256:5b84f2b06db0d832d0c9b5e1b765a6ae7b133a865bdf10515f2fffcce28e9395",
+  "source_identity": "sha256:f220407c03fc5da9cdf27a44f1ee1e8a9a338949847893d669390c74362cc5d5",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_publish_pack.git-publish.service",
-      "implementation_digest": "sha256:e431719aae0fb9bd5195405f3ca257a2be0807b1c11e1720e682a0821694b5f9",
+      "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
       "implementation_path": "runtime/publish.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -26,9 +26,6 @@
             "additionalProperties": false,
             "properties": {
               "branch": {
-                "type": "string"
-              },
-              "credential_handle": {
                 "type": "string"
               },
               "force_with_lease": {
@@ -53,7 +50,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb",
+          "revision_digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }
@@ -68,7 +65,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_publish_pack.git-push-prepare.service",
-      "implementation_digest": "sha256:e431719aae0fb9bd5195405f3ca257a2be0807b1c11e1720e682a0821694b5f9",
+      "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
       "implementation_path": "runtime/publish.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -84,9 +81,6 @@
             "additionalProperties": false,
             "properties": {
               "branch": {
-                "type": "string"
-              },
-              "credential_handle": {
                 "type": "string"
               },
               "force_with_lease": {
@@ -111,7 +105,7 @@
           "output_schema": {
             "type": "object"
           },
-          "revision_digest": "sha256:1063327692106907b73e4992e29d469e653bd36452d3e07aaa9f3dd05039bacb",
+          "revision_digest": "sha256:b2699757006625a794cf2fc94e525b53e526471e96b544bb885c24cb06200b6c",
           "timeout_default_ms": 30000,
           "timeout_hard_max_ms": 300000
         }

@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Button } from '@/src/components/ui/Button';
+import { CopyErrorButton } from '@/src/components/ui/CopyErrorButton';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
@@ -376,9 +377,10 @@ export function PackDetail() {
             ) : frontendCatalogLoading ? (
               <p className="text-sm text-text-muted" role="status">Loading the verified capability catalog…</p>
             ) : frontendCatalogError ? (
-              <p className="text-sm text-destructive" role="alert">
-                {userSafePackVMError(frontendCatalogError)}
-              </p>
+              <div className="flex items-start gap-2 text-sm text-destructive" role="alert">
+                <p className="min-w-0 flex-1 break-words">{userSafePackVMError(frontendCatalogError)}</p>
+                <CopyErrorButton label="Copy PackVM catalog error" text={userSafePackVMError(frontendCatalogError)} />
+              </div>
             ) : operations.length === 0 ? (
               <p className="text-sm text-text-muted">No operations declared by this Pack.</p>
             ) : (

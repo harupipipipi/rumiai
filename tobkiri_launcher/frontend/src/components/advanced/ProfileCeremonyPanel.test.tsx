@@ -300,6 +300,40 @@ test('Profile closure candidates come from the authoritative catalog and execute
   }
 });
 
+test('Profile ceremony does not offer an error-copy action while its catalog is loading', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  const surface = surfaceState();
+  const selection = authoritativeSelection(catalogEntry(['provider-pack']));
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCeremonyPanel
+          surface={surface.state}
+          packs={[pack('provider-pack')]}
+          loadPacks={async () => undefined}
+          authoritativeSelection={selection}
+          catalogSurface={{
+            ...catalogSurfaceState(selection.entry),
+            status: 'loading',
+          }}
+        />,
+      );
+    });
+    assert.match(container.textContent ?? '', /The authoritative Profile catalog is loading/);
+    assert.equal(
+      container.querySelector('button[aria-label="Copy Profile catalog warning"]'),
+      null,
+    );
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
 test('a non-active Profile can stage and review a successor closure without activation', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;

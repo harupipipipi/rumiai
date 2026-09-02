@@ -82,6 +82,34 @@ test('verification banner keeps the recovery link visible without exposing runti
   assert.match(html, /Complete setup to continue/);
   assert.match(html, /Open Setup/);
   assert.match(html, /href="\/setup"/);
+  assert.doesNotMatch(html, /Copy setup verification error/);
+});
+
+test('only a failed setup verification gets an error-copy action', () => {
+  const needsReconfirm = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationGate
+        {...gateProps({
+          isSetupDone: true,
+          runtimeReady: false,
+          runtimeStatus: 'panel_ready',
+          defaultsBootstrapRequired: true,
+        })}
+      >
+        <p>unsafe runtime page</p>
+      </SetupVerificationGate>
+    </MemoryRouter>,
+  );
+  const denied = renderToStaticMarkup(
+    <MemoryRouter>
+      <SetupVerificationGate {...gateProps({runtimeStatus: 'error'})}>
+        <p>unsafe runtime page</p>
+      </SetupVerificationGate>
+    </MemoryRouter>,
+  );
+
+  assert.doesNotMatch(needsReconfirm, /Copy setup verification error/);
+  assert.match(denied, /Copy setup verification error/);
 });
 
 test('empty bootstrap keeps Home recovery-gated even when generic runtime health is ready', () => {

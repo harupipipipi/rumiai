@@ -2619,9 +2619,11 @@ test("interactive approval helpers use fixed tokenless routes and exact bodies",
   };
   const redacted = {
     request_id: "interactive-1",
+    request_snapshot_digest: "a".repeat(64),
     state: "pending",
     expires_at: 1700000300,
     typed_confirmation_required: true,
+    typed_confirmation_digest: "b".repeat(64),
     redacted_metadata: { summary: "Run the prepared effect" },
   };
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {

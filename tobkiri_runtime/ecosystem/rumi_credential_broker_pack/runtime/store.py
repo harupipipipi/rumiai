@@ -6,6 +6,7 @@ import builtins
 import json
 import hashlib
 import hmac
+import math
 import os
 import stat
 import subprocess
@@ -44,6 +45,7 @@ class CredentialBrokerStore:
         provider_instance_id: str,
         scopes: list[str],
         profile_id: str,
+        resource_binding: Mapping[str, Any] | None = None,
         purpose: str = "provider.invoke",
         label: str = "",
         expires_at: float | None = None,
@@ -58,6 +60,8 @@ class CredentialBrokerStore:
         profile_id = _identifier(profile_id, "profile_id")
         purpose = _identifier(purpose, "purpose")
         normalized_scopes = _scopes(scopes)
+        normalized_resource_binding = _resource_binding(resource_binding)
+        normalized_expires_at = _expiration(expires_at)
         if not normalized_scopes:
             raise ValueError("at least one credential scope is required")
         if not isinstance(secret_material, Mapping) or not secret_material:
@@ -73,8 +77,9 @@ class CredentialBrokerStore:
                 "key_version": KEY_VERSION,
                 "purpose": purpose,
                 "scopes": normalized_scopes,
+                "resource_binding": normalized_resource_binding,
                 "label": str(label)[:160],
-                "expires_at": expires_at,
+                "expires_at": normalized_expires_at,
                 "created_at": _now(),
                 "updated_at": _now(),
                 "ciphertext": self._fernet()
@@ -83,6 +88,7 @@ class CredentialBrokerStore:
                         dict(secret_material),
                         ensure_ascii=False,
                         separators=(",", ":"),
+                        allow_nan=False,
                     ).encode("utf-8")
                 )
                 .decode("ascii"),
@@ -92,6 +98,63 @@ class CredentialBrokerStore:
             state["revision"] += 1
             self._write(state)
         return self._public(state["credentials"][handle])
+
+    def select(
+        self,
+        *,
+        consumer_pack_id: str,
+        provider_instance_id: str,
+        scope: str,
+        profile_id: str,
+        resource_binding: Mapping[str, Any],
+        purpose: str = "provider.invoke",
+    ) -> dict[str, Any] | None:
+        """Select one exact opaque handle without decrypting credential material.
+
+        Selection is deliberately equality-only and fails on ambiguity.  The
+        returned public record contains no ciphertext or secret material; the
+        one-shot Host transport repeats every binding before it resolves the
+        selected handle.
+        """
+
+        self._prepare_storage()
+        consumer = _identifier(consumer_pack_id, "consumer_pack_id")
+        provider = _identifier(provider_instance_id, "provider_instance_id")
+        selected_scope = _identifier(scope, "scope")
+        selected_profile = _identifier(profile_id, "profile_id")
+        selected_purpose = _identifier(purpose, "purpose")
+        selected_binding = _resource_binding(resource_binding)
+        if not selected_binding:
+            raise ValueError("credential resource binding is required")
+        now = time.time()
+        with NamedLock(self.lock_root, "credential-broker"):
+            state = self._read()
+            matches: list[dict[str, Any]] = []
+            for record in state["credentials"].values():
+                if not isinstance(record, dict):
+                    continue
+                if not hmac.compare_digest(
+                    str(record.get("record_mac") or ""),
+                    self._record_mac(record),
+                ):
+                    raise PermissionError("credential record integrity check failed")
+                expires_at = record.get("expires_at")
+                if (
+                    record.get("consumer_pack_id") != consumer
+                    or record.get("provider_instance_id") != provider
+                    or record.get("profile_id") != selected_profile
+                    or str(record.get("purpose") or "provider.invoke")
+                    != selected_purpose
+                    or selected_scope not in set(record.get("scopes") or ())
+                    or _resource_binding(record.get("resource_binding"))
+                    != selected_binding
+                    or _expiration_is_invalid_or_expired(expires_at, now=now)
+                ):
+                    continue
+                matches.append(self._public(record))
+            if len(matches) > 1:
+                raise PermissionError("credential selection is ambiguous")
+            return matches[0] if matches else None
 
     def resolve(
         self,
@@ -103,6 +166,7 @@ class CredentialBrokerStore:
         profile_id: str,
         key_version: str = "",
         purpose: str = "provider.invoke",
+        expected_resource_binding: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Decrypt only when caller, provider, scope, and expiry all match."""
         self._prepare_storage()
@@ -115,6 +179,7 @@ class CredentialBrokerStore:
                 scope=scope,
                 key_version=key_version,
                 purpose=purpose,
+                expected_resource_binding=expected_resource_binding,
             )
 
     def _resolve_unlocked(
@@ -127,6 +192,7 @@ class CredentialBrokerStore:
         scope: str,
         key_version: str,
         purpose: str,
+        expected_resource_binding: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         state = self._read()
         record = state["credentials"].get(str(handle))
@@ -144,10 +210,18 @@ class CredentialBrokerStore:
             raise PermissionError("credential key version is not bound")
         if str(record.get("purpose") or "provider.invoke") != purpose:
             raise PermissionError("credential purpose is not bound")
+        if expected_resource_binding is not None:
+            expected_binding = _resource_binding(expected_resource_binding)
+            if (
+                not expected_binding
+                or _resource_binding(record.get("resource_binding"))
+                != expected_binding
+            ):
+                raise PermissionError("credential resource is not bound")
         if scope not in set(record.get("scopes") or []):
             raise PermissionError("credential scope is denied")
         expires_at = record.get("expires_at")
-        if isinstance(expires_at, (int, float)) and float(expires_at) <= time.time():
+        if _expiration_is_invalid_or_expired(expires_at, now=time.time()):
             raise PermissionError("credential handle expired")
         try:
             plaintext = self._fernet().decrypt(str(record.get("ciphertext") or "").encode("ascii"))
@@ -202,6 +276,8 @@ class CredentialBrokerStore:
         source = {"records": [dict(item) for item in records]}
         if _hash(source) != expected_source_hash:
             raise ValueError("credential migration source changed")
+        for item in records:
+            _expiration(item.get("expires_at"))
         with NamedLock(self.lock_root, "credential-broker"):
             state = self._read()
             if state.get("migration") is not None:
@@ -231,8 +307,11 @@ class CredentialBrokerStore:
                     "key_version": KEY_VERSION,
                     "purpose": str(item.get("purpose") or "provider.invoke"),
                     "scopes": scopes,
+                    "resource_binding": _resource_binding(
+                        item.get("resource_binding")
+                    ),
                     "label": str(item.get("label") or "legacy migration")[:160],
-                    "expires_at": item.get("expires_at"),
+                    "expires_at": _expiration(item.get("expires_at")),
                     "created_at": _now(),
                     "updated_at": _now(),
                     "ciphertext": self._fernet()
@@ -241,6 +320,7 @@ class CredentialBrokerStore:
                             dict(material),
                             ensure_ascii=False,
                             separators=(",", ":"),
+                            allow_nan=False,
                         ).encode("utf-8")
                     )
                     .decode("ascii"),
@@ -313,6 +393,7 @@ class CredentialBrokerStore:
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
+            allow_nan=False,
         ).encode("utf-8")
         return hmac.new(self._fernet()._signing_key, raw, hashlib.sha256).hexdigest()
 
@@ -325,7 +406,10 @@ class CredentialBrokerStore:
                 "migration": None,
             }
         self._require_owner_file(self.path, "credential store")
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            self.path.read_text(encoding="utf-8"),
+            parse_constant=_reject_json_constant,
+        )
         if not isinstance(payload, dict) or payload.get("version") != STORE_VERSION:
             raise ValueError("credential store version is invalid")
         if not isinstance(payload.get("credentials"), dict):
@@ -336,7 +420,8 @@ class CredentialBrokerStore:
         self._prepare_storage()
         temporary = self.path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(state, ensure_ascii=False, indent=2, allow_nan=False)
+            + "\n",
             encoding="utf-8",
         )
         os.chmod(temporary, 0o600)
@@ -348,7 +433,8 @@ class CredentialBrokerStore:
         os.chmod(path.parent, 0o700)
         temporary = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temporary.write_text(
-            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(state, ensure_ascii=False, indent=2, allow_nan=False)
+            + "\n",
             encoding="utf-8",
         )
         os.chmod(temporary, 0o600)
@@ -364,6 +450,7 @@ class CredentialBrokerStore:
             "key_version": record.get("key_version", KEY_VERSION),
             "purpose": record.get("purpose", "provider.invoke"),
             "scopes": list(record.get("scopes") or []),
+            "resource_binding": dict(record.get("resource_binding") or {}),
             "label": record.get("label"),
             "expires_at": record.get("expires_at"),
             "created_at": record.get("created_at"),
@@ -497,6 +584,58 @@ def _scopes(values: list[str]) -> list[str]:
     return sorted({_identifier(value, "scope") for value in values if str(value or "").strip()})
 
 
+def _resource_binding(value: Mapping[str, Any] | None) -> dict[str, str]:
+    """Return one finite, exact-match-only public credential resource binding."""
+
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping) or len(value) > 8:
+        raise ValueError("credential resource binding is invalid")
+    normalized: dict[str, str] = {}
+    for key, item in value.items():
+        name = _identifier(key, "resource binding key")
+        text = str(item or "").strip()
+        if (
+            not text
+            or len(text) > 512
+            or any(character in text for character in ("\x00", "\r", "\n"))
+        ):
+            raise ValueError("credential resource binding is invalid")
+        normalized[name] = text
+    return {key: normalized[key] for key in sorted(normalized)}
+
+
+def _expiration(value: Any) -> float | None:
+    """Normalize one finite timestamp and reject bool/non-JSON numbers."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("credential expiration is invalid")
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ValueError("credential expiration is invalid")
+    return normalized
+
+
+def _reject_json_constant(_value: str) -> None:
+    """Reject NaN and infinities accepted by Python's permissive decoder."""
+
+    raise ValueError("credential store JSON is non-standard")
+
+
+def _expiration_is_invalid_or_expired(value: Any, *, now: float) -> bool:
+    """Fail closed for malformed, non-finite, or elapsed expiration values."""
+
+    if value is None:
+        return False
+    try:
+        normalized = _expiration(value)
+    except ValueError:
+        return True
+    return normalized is None or normalized <= now
+
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -507,5 +646,6 @@ def _hash(value: Any) -> str:
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(raw).hexdigest()

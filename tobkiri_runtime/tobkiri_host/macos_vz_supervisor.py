@@ -61,6 +61,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 
+from .artifact_materialization import MaterializedPackArtifact
 from .effects import ProviderOutcome
 from .errors import BackendUnavailableError
 from .models import require_digest
@@ -248,7 +249,11 @@ class MacOSVZRuntime:
     """Host-selected resource limits for one direct VZ guest."""
 
     cpu_count: int = 1
-    memory_bytes: int = 512 * 1024 * 1024
+    # Debian cloud-init plus the root-owned Python agent cannot reliably
+    # materialize even a small verified seed at the protocol minimum. Keep
+    # 512 MiB valid for explicit constrained callers, but make one GiB the
+    # production default for a fresh direct VZ guest.
+    memory_bytes: int = 1024 * 1024 * 1024
     guest_vsock_port: int = 19001
 
     def __post_init__(self) -> None:
@@ -402,6 +407,7 @@ class MacOSVZDomainAllocator(Protocol):
         artifact_digest: str,
         executable_digest: str,
         materialization_digest: str,
+        artifact: MaterializedPackArtifact,
         channel_key: bytes,
     ) -> MacOSVZDomainAllocation:
         """Return a new allocation with a live FD-enrolled helper channel.
@@ -569,6 +575,7 @@ class MacOSVZSupervisorDriver:
                 artifact_digest=request.artifact_digest,
                 executable_digest=request.executable_digest,
                 materialization_digest=request.artifact.materialization_digest,
+                artifact=request.artifact,
                 channel_key=channel_key,
             )
         except Exception as exc:
@@ -648,8 +655,6 @@ class MacOSVZSupervisorDriver:
             raise BackendUnavailableError("macOS VZ guest artifact identity is invalid")
         try:
             require_digest(guest_artifact_identity, "macOS VZ guest artifact")
-            if guest_artifact_identity != canonical_digest(binding_digests):
-                raise ValueError("guest artifact identity differs from launch binding")
         except Exception as exc:
             self._compromise("macOS VZ guest artifact identity is invalid")
             self._release_unlaunched_allocation(allocation, transport)
@@ -1393,10 +1398,13 @@ def verify_macos_vz_helper_identity(
         return False, "macOS VZ native helper is not ad-hoc signed"
     entitlement_source = described.stdout + "\n" + described.stderr
     start = entitlement_source.find("<?xml")
-    if start < 0:
+    end = entitlement_source.find("</plist>", start)
+    if start < 0 or end < 0:
         return False, "macOS VZ native helper virtualization entitlement is missing"
     try:
-        entitlements = plistlib.loads(entitlement_source[start:].encode("utf-8"))
+        entitlements = plistlib.loads(
+            entitlement_source[start : end + len("</plist>")].encode("utf-8")
+        )
     except (ValueError, TypeError):
         return False, "macOS VZ native helper virtualization entitlement is invalid"
     if entitlements != {"com.apple.security.virtualization": True}:

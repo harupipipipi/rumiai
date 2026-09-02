@@ -1,7 +1,6 @@
 """Generated from command-protocol-v1.schema.json; do not edit."""
 
 from typing import Any, Literal, TypedDict
-
 from typing_extensions import NotRequired
 
 CommandMode = Literal['chat', 'coding', 'agent']

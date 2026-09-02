@@ -4,6 +4,7 @@ import { useT } from '@/src/lib/i18n';
 import { viewerLayers } from '@/src/lib/layers';
 import { cn } from '@/src/lib/utils';
 import { Button } from './Button';
+import {CopyErrorButton} from './CopyErrorButton';
 import { formatUserFacingError } from '@/src/lib/userFacingError';
 
 export function DialogContainer() {
@@ -121,14 +122,15 @@ export function DialogContainer() {
         <h2 id="dialog-title" className="text-lg font-semibold text-text-main">{dialog.title}</h2>
         <p id="dialog-description" className="mt-2 text-sm text-text-muted">{dialog.message}</p>
         {confirmationError ? (
-          <p
+          <div
             id="dialog-error"
             role="alert"
             aria-live="assertive"
-            className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
+            className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
           >
-            {confirmationError}
-          </p>
+            <span className="min-w-0 flex-1 break-words">{confirmationError}</span>
+            <CopyErrorButton label="Copy confirmation error" text={confirmationError} />
+          </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="outline" onClick={handleClose} disabled={isConfirming}>

@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:017fc82088ef137d39a79c496e30ec3a2bad084d80f937a8ca984503fabe22f8",
+  "catalog_digest": "sha256:126241b0403f5cf77f5d1c2f377901a40bc08d58afbf54921e903c516355bda1",
   "pack_id": "rumi_host_authority_bridge_pack",
-  "source_identity": "sha256:f1ebfa4897a580514b9a56d54e90d7a66efe9ec7db77a83ebd64a1e7211b966a",
+  "source_identity": "sha256:69bd8b371bcf1ba91476cc125aec5182c3cfb78345cd8243d21109f05a68958b",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "implementation_path": "runtime/bridge.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -62,7 +62,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "implementation_path": "runtime/bridge.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -209,7 +209,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "implementation_path": "runtime/bridge.py",
       "materialization_mode": "on_demand",
       "operations": [

@@ -4,6 +4,7 @@ import {AlertTriangle, CheckCircle2, Database, FileKey2, MessageSquare, PackageC
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {ProfileCeremonyPanel} from '@/src/components/advanced/ProfileCeremonyPanel';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
@@ -69,6 +70,9 @@ function OptionalConversationCapability({
     ? resolveConversationCapabilityForProfile(catalog, entry.profile_id)
     : null;
   const catalogBelongsToProfile = catalog?.profile_id === entry.profile_id;
+  const capabilityErrorDiagnostic = error || (catalog && !catalogBelongsToProfile)
+    ? 'No accepted capability snapshot is bound to this active Profile.'
+    : null;
 
   return (
     <section
@@ -118,14 +122,30 @@ function OptionalConversationCapability({
           </div>
         </dl>
       ) : (
-        <p className="mt-4 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role={error || (catalog && !catalogBelongsToProfile) ? 'alert' : 'status'}>
-          {error || (catalog && !catalogBelongsToProfile)
-            ? 'No accepted capability snapshot is bound to this active Profile.'
-            : 'No verified conversation capability is published for this Profile.'}
-        </p>
+        <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role={capabilityErrorDiagnostic ? 'alert' : 'status'}>
+          <p className="min-w-0 flex-1">{capabilityErrorDiagnostic ?? 'No verified conversation capability is published for this Profile.'}</p>
+          {capabilityErrorDiagnostic ? <CopyErrorButton label="Copy Profile capability error" text={capabilityErrorDiagnostic} /> : null}
+        </div>
       )}
     </section>
   );
+}
+
+function profileCatalogFailureDiagnostic(
+  catalogInvalid: boolean,
+  error: RuntimeSurfaceState<RuntimeProfileCatalogProjection>['error'],
+  stale: boolean,
+): string {
+  const detail = catalogInvalid
+    ? 'The Broker response failed exact v4 validation.'
+    : error?.message ?? 'No accepted catalog snapshot is available.';
+  return [
+    'Authoritative Profile catalog is locked',
+    detail,
+    ...(stale
+      ? ['The last accepted definitions remain read-only until the catalog refreshes.']
+      : []),
+  ].join('\n');
 }
 
 function ProfileDefinitionDetails({
@@ -164,9 +184,9 @@ function ProfileDefinitionDetails({
         {entry.diagnostics.length > 0 ? (
           <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm" role="alert">
             <p className="flex items-center gap-2 font-medium text-text-main"><AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />Profile is unavailable in the verified catalog.</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-text-muted">
+            <div className="mt-2 flex items-start gap-2"><ul className="min-w-0 flex-1 list-disc space-y-1 pl-5 text-text-muted">
               {entry.diagnostics.map((diagnostic) => <li key={`${diagnostic.code}:${diagnostic.subject}`}>{diagnostic.code}: {diagnostic.subject}</li>)}
-            </ul>
+            </ul><CopyErrorButton label="Copy Profile catalog diagnostics" text={entry.diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.subject}`).join('\n')} /></div>
           </div>
         ) : null}
       </section>
@@ -327,6 +347,11 @@ export function ProfileCatalogSelector({
   const showLoading = (catalogSurface.status === 'idle' || catalogSurface.status === 'loading') && !catalogSurface.data;
   const catalogInvalid = Boolean(catalogSurface.data && !catalogProjection);
   const showFailure = catalogInvalid || Boolean(catalogSurface.error) || catalogSurface.status !== 'ready' && !showLoading;
+  const catalogFailure = profileCatalogFailureDiagnostic(
+    catalogInvalid,
+    catalogSurface.error,
+    catalogSurface.stale,
+  );
 
   return (
     <>
@@ -352,12 +377,13 @@ export function ProfileCatalogSelector({
             <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-4" role="alert">
               <div className="flex min-w-0 items-start gap-3 text-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-text-main">Authoritative Profile catalog is locked</p>
                   <p className="mt-1 text-text-muted">{catalogInvalid ? 'The Broker response failed exact v4 validation.' : catalogSurface.error?.message ?? 'No accepted catalog snapshot is available.'}</p>
                   {catalogSurface.stale ? <p className="mt-1 text-xs text-text-muted">The last accepted definitions remain read-only until the catalog refreshes.</p> : null}
                 </div>
               </div>
+              <CopyErrorButton label="Copy Profile catalog error" text={catalogFailure} />
               <Button type="button" variant="outline" size="sm" onClick={() => void catalogSurface.refresh(true)} disabled={catalogSurface.status === 'loading'}>
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Refresh catalog

@@ -188,6 +188,9 @@ class Kernel:
                             capability_binding_selector=(
                                 inputs.capability_binding_selector
                             ),
+                            credential_store_factory=(
+                                inputs.credential_store_factory
+                            ),
                         )
                     except Exception:
                         authority_store.close()

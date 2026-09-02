@@ -1,12 +1,12 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:2b94e1d232839e879e7bbd8bee289c6f62aad980572bca41da26941d9c1ee11f",
+      "digest": "sha256:64846fc2333274c139baedd84739cd31c3add113457c426722661c1d558a7338",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
     {
-      "digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "kind": "executable",
       "path": "runtime/bridge.py"
     }
@@ -41,7 +41,7 @@
     {
       "contract_revision_digest": "sha256:36943db633d4f0681bde085b2264c4a8611487a7c86ce9dcd9120fa0a7883329",
       "id": "rumi_host_authority_bridge_pack.host-authority.authorize",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "isolation": "dedicated_process",
       "operations": [
         "rumi_host_authority_bridge_pack.host-authority"
@@ -51,7 +51,7 @@
     {
       "contract_revision_digest": "sha256:97d719fe044cc98a6cc621936418d14768e84189bdf607375718110393756c4b",
       "id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "isolation": "dedicated_process",
       "operations": [
         "interactive_approval.get",
@@ -64,7 +64,7 @@
     {
       "contract_revision_digest": "sha256:326adb19001054eab62ac043a0d8b2aaac9544ca41c697f985682deb96a6c628",
       "id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
-      "implementation_digest": "sha256:a583e922e8d25f109802ea2ee354d58792ad58c405f8ed99ca3e4c12c6e9f1e1",
+      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
       "isolation": "dedicated_process",
       "operations": [
         "interactive_effect.manage"
@@ -73,8 +73,8 @@
     }
   ],
   "integrity": {
-    "source_identity": "sha256:c26c8a97e499be60dc571115e3e3a6c0c0b8688112aee0ee1be2e200909d1893",
-    "artifact_set_digest": "sha256:a2116a905ee086f7b58024073984cf46b6d47cc525490557d4e0add74c991a0b",
+    "source_identity": "sha256:13c720e5e6fc13981b5c0d5bd76de22fadb9451e59a42967256af9e8c9af7c86",
+    "artifact_set_digest": "sha256:815a9a1f8f8a9b86035871b660a80140cdeab77c2302bb3bfc83d23b599b5249",
     "contract_catalog_digest": "sha256:3d4e5a122b2a64663d55b65a1c2524c96e7a2c4dbadc916f08d4e50170136017"
   },
   "migration": {
@@ -138,7 +138,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:a718eec0c83b4117a7bd03fc1690dad8dd6bc877582bd1dea63891f1a16336be",
+    "artifact_digest": "sha256:8137143b7c3aba557b6b672fec50aa4592af2d9a5b6e38bb5b994c9ad72666e2",
     "display_name": "Rumi Host Authority Bridge",
     "id": "rumi_host_authority_bridge_pack",
     "kind": "host_extension",
@@ -149,15 +149,15 @@
     "schema": "io.tobkiri.provenance.v2",
     "source_kind": "generated",
     "source_path": "ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
-    "source_digest": "sha256:c26c8a97e499be60dc571115e3e3a6c0c0b8688112aee0ee1be2e200909d1893",
+    "source_digest": "sha256:13c720e5e6fc13981b5c0d5bd76de22fadb9451e59a42967256af9e8c9af7c86",
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_commit_trusted": false,
-    "content_root_digest": "sha256:2f04a159694b733e261a99d139e6f191249b01f0b4f8538f7150168a9c0f5bb0",
+    "content_root_digest": "sha256:8cc9d434db866a639f2900b2ec011b7fe9ba35bd16159ba024143aa5eda51f91",
     "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
     "generator_version": "2.1.0",
     "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
     "generator_digest": "sha256:ed6a2e262033b2b38866fe48da557c3f02382df037ad3b57902af3d484630a2a",
-    "input_inventory_digest": "sha256:9b43533d6736d97acc241a4ac9dbc3b4ade7d8b5f0864bb11ce493b27bcb183d",
+    "input_inventory_digest": "sha256:206ee47c4258047ac2d92482e4c66cbfd05d2df6a5a1b48ecbb55fd9bafb9d1d",
     "normative": true,
     "evidence": [
       {
@@ -168,7 +168,7 @@
       {
         "path": "ecosystem/rumi_host_authority_bridge_pack/pack.v4.json",
         "rule_id": "normative-input-bytes",
-        "digest": "sha256:c26c8a97e499be60dc571115e3e3a6c0c0b8688112aee0ee1be2e200909d1893"
+        "digest": "sha256:13c720e5e6fc13981b5c0d5bd76de22fadb9451e59a42967256af9e8c9af7c86"
       }
     ]
   },

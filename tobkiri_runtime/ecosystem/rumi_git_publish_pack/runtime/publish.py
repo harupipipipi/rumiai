@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
 
+from core_runtime.executable_trust import (
+    ExecutableTrustError,
+    capture_trusted_executable,
+    trusted_executable_path,
+)
 from core_runtime.host_provider_backend_v4 import (
     CapturedHostProviderV4,
     HostProviderCaptureContextV4,
@@ -44,7 +49,12 @@ _CLIENT_AUTHORITY_FIELDS = frozenset(
         "approval_token",
         "authority_receipt",
         "authority_token",
+        "credential",
+        "credential_handle",
+        "credential_secret",
+        "password",
         "receipt",
+        "secret",
         "token",
     }
 )
@@ -63,7 +73,13 @@ _DANGEROUS_LOCAL_CONFIG = re.compile(
 
 
 class GitPushProviderV4:
-    """Prepare and execute one exact Git push through a canonical CAS plan."""
+    """Prepare and execute one exact Git push through a canonical CAS plan.
+
+    The Git Publish Pack remains present in the default Profile, but the
+    machine-local Git executable is an optional provider dependency.  A
+    missing or untrusted executable leaves only this provider unavailable;
+    it must never abort Profile capture for unrelated local-first features.
+    """
 
     def __init__(self, capture: HostProviderCaptureContextV4) -> None:
         self._profile_id = capture.profile_id
@@ -71,7 +87,10 @@ class GitPushProviderV4:
         self._security_epoch = capture.security_epoch
         self._state_root = capture.state_root.resolve(strict=True)
         self._state_root_identity = _directory_identity(self._state_root)
-        self._toolchain = _git_toolchain_identity()
+        try:
+            self._toolchain: dict[str, Any] | None = _git_toolchain_identity()
+        except (ExecutableTrustError, OSError, RuntimeError, ValueError):
+            self._toolchain = None
 
     def close(self) -> None:
         """Close the stateless provider; Broker grants own one-shot replay state."""
@@ -92,15 +111,18 @@ class GitPushProviderV4:
             or context.security_epoch != self._security_epoch
         ):
             raise PermissionError("Git publication Host binding changed")
-        self._assert_host_execution_identity()
+        toolchain = self._require_toolchain()
         client = invocation.contract_client(
             allowed_contract_ids=frozenset({WORKSPACE}),
             consumer_pack_id=SERVICE_PACK_ID,
         )
-        if operation_id == PREPARE_OPERATION:
-            return self._prepare(payload, context, client)
-        if operation_id == PUSH_OPERATION:
-            return self._push(payload, context, client)
+        try:
+            if operation_id == PREPARE_OPERATION:
+                return self._prepare(payload, context, client, toolchain=toolchain)
+            if operation_id == PUSH_OPERATION:
+                return self._push(payload, context, client, toolchain=toolchain)
+        except ExecutableTrustError:
+            raise PermissionError("GIT_EXECUTABLE_UNAVAILABLE") from None
         raise ValueError("Git publication operation is unavailable")
 
     def _prepare(
@@ -108,6 +130,8 @@ class GitPushProviderV4:
         payload: Mapping[str, Any],
         context: Any,
         client: Any,
+        *,
+        toolchain: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         workspace_id = _required_text(payload.get("workspace_id"), "workspace_id")
         remote = _remote_name(payload.get("remote") or "origin")
@@ -118,13 +142,16 @@ class GitPushProviderV4:
             payload.get("force_with_lease", False),
             "force_with_lease",
         )
-        credential_handle = _optional_credential_handle(
-            payload.get("credential_handle")
-        )
         root, repository, mount_revision = _v4_repository(
             client,
             profile_id=context.profile_id,
             workspace_id=workspace_id,
+        )
+        push_url = _push_url(repository, remote)
+        credential_identity, _selection_receipt = _select_git_https_credential(
+            client,
+            workspace_id=workspace_id,
+            push_url=push_url,
         )
         public_plan = _build_plan(
             root=root,
@@ -136,8 +163,9 @@ class GitPushProviderV4:
             allow_non_fast_forward=allow_non_fast_forward,
             context=context,
             state_root_identity=self._state_root_identity,
-            toolchain=self._toolchain,
-            credential_handle=credential_handle,
+            toolchain=toolchain,
+            push_url=push_url,
+            credential_identity=credential_identity,
         )
         plan_digest = canonical_digest(public_plan)
         return {"plan": dict(public_plan), "plan_digest": plan_digest}
@@ -147,6 +175,8 @@ class GitPushProviderV4:
         payload: Mapping[str, Any],
         context: Any,
         client: Any,
+        *,
+        toolchain: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         plan_digest = _required_text(payload.get("plan_digest"), "plan_digest")
         supplied = payload.get("plan")
@@ -166,7 +196,7 @@ class GitPushProviderV4:
             allow_non_fast_forward,
             "force_with_lease.allow_non_fast_forward",
         )
-        credential_handle = _credential_handle_from_plan(plan)
+        _credential_handle_from_plan(plan)
         root, repository, mount_revision = _v4_repository(
             client,
             profile_id=context.profile_id,
@@ -176,6 +206,12 @@ class GitPushProviderV4:
             raise PermissionError(
                 "workspace mount revision changed after Git push prepare"
             )
+        push_url = _push_url(repository, remote)
+        credential_identity, selection_receipt = _select_git_https_credential(
+            client,
+            workspace_id=workspace_id,
+            push_url=push_url,
+        )
         rebuilt = _build_plan(
             root=root,
             repository=repository,
@@ -186,8 +222,9 @@ class GitPushProviderV4:
             allow_non_fast_forward=allow_non_fast_forward,
             context=context,
             state_root_identity=self._state_root_identity,
-            toolchain=self._toolchain,
-            credential_handle=credential_handle,
+            toolchain=toolchain,
+            push_url=push_url,
+            credential_identity=credential_identity,
         )
         if rebuilt != plan or canonical_digest(rebuilt) != plan_digest:
             raise PermissionError(
@@ -200,8 +237,9 @@ class GitPushProviderV4:
             plan=plan,
             state_root=self._state_root,
             state_root_identity=self._state_root_identity,
-            toolchain=self._toolchain,
+            toolchain=toolchain,
             client=client,
+            selection_receipt=selection_receipt,
         )
         return {
             "plan_digest": plan_digest,
@@ -217,11 +255,27 @@ class GitPushProviderV4:
         }
 
     def _assert_host_execution_identity(self) -> None:
+        """Reject a changed Host state after a Git toolchain was captured."""
+
+        if self._toolchain is None:
+            raise PermissionError("GIT_EXECUTABLE_UNAVAILABLE")
+        try:
+            current_toolchain = _git_toolchain_identity()
+        except (ExecutableTrustError, OSError, RuntimeError, ValueError):
+            raise PermissionError("GIT_EXECUTABLE_UNAVAILABLE") from None
         if (
             _directory_identity(self._state_root) != self._state_root_identity
-            or _git_toolchain_identity() != self._toolchain
+            or current_toolchain != self._toolchain
         ):
             raise PermissionError("Git Host execution identity changed")
+
+    def _require_toolchain(self) -> dict[str, Any]:
+        """Return the captured Git toolchain or one operation-level denial."""
+
+        if self._toolchain is None:
+            raise PermissionError("GIT_EXECUTABLE_UNAVAILABLE")
+        self._assert_host_execution_identity()
+        return dict(self._toolchain)
 
 
 class GitPublishHostFactoryV4:
@@ -440,35 +494,152 @@ def _strict_bool(value: Any, field: str) -> bool:
     return value
 
 
-def _optional_credential_handle(value: Any) -> str | None:
-    """Accept only a Host-resolved opaque Git credential reference."""
-
-    if value is None:
-        return None
-    normalized = _required_text(value, "credential_handle")
-    if not normalized.startswith(("credential:", "opaque:")):
-        raise ValueError("Git credential_handle must be opaque")
-    return normalized
-
-
 def _credential_handle_from_plan(plan: Mapping[str, Any]) -> str | None:
     """Validate the immutable credential binding included in a push plan."""
 
     binding = plan.get("credential_transport")
     if not isinstance(binding, Mapping):
         raise PermissionError("Git credential transport binding is unavailable")
-    handle = _optional_credential_handle(binding.get("credential_handle"))
-    expected = {
-        "mode": "host-bound-https" if handle is not None else "anonymous-https-only",
-        "credential_handle": handle,
-        "credential_scope": GIT_CREDENTIAL_SCOPE if handle is not None else None,
-        "provider_instance_id": (
-            GIT_CREDENTIAL_PROVIDER_INSTANCE_ID if handle is not None else None
-        ),
+    mode = str(binding.get("mode") or "")
+    identity = binding.get("credential_identity")
+    if mode == "anonymous-https-only" and identity is None:
+        if dict(binding) != {
+            "mode": "anonymous-https-only",
+            "credential_identity": None,
+        }:
+            raise PermissionError(
+                "Git credential transport binding changed after prepare"
+            )
+        return None
+    if mode != "host-bound-https" or not isinstance(identity, Mapping):
+        raise PermissionError("Git credential transport binding changed after prepare")
+    public_identity = dict(identity)
+    binding_digest = str(public_identity.pop("binding_digest", ""))
+    resource_binding = public_identity.get("resource_binding")
+    handle = str(public_identity.get("handle") or "")
+    expected_resource_binding = {
+        "endpoint_origin": _https_origin(str(plan.get("push_url") or "")),
+        "workspace_id": str(plan.get("workspace_id") or ""),
     }
-    if dict(binding) != expected:
+    if (
+        set(public_identity)
+        != {
+            "consumer_pack_id",
+            "handle",
+            "key_version",
+            "profile_id",
+            "provider_instance_id",
+            "purpose",
+            "resource_binding",
+            "scope",
+        }
+        or not handle.startswith(("credential:", "opaque:"))
+        or not str(public_identity.get("key_version") or "")
+        or public_identity.get("consumer_pack_id") != SERVICE_PACK_ID
+        or public_identity.get("provider_instance_id")
+        != GIT_CREDENTIAL_PROVIDER_INSTANCE_ID
+        or public_identity.get("scope") != GIT_CREDENTIAL_SCOPE
+        or public_identity.get("purpose") != "provider.invoke"
+        or not isinstance(resource_binding, Mapping)
+        or dict(resource_binding) != expected_resource_binding
+        or public_identity.get("profile_id")
+        != dict(plan.get("authority_binding") or {}).get("profile_id")
+        or binding_digest != canonical_digest(public_identity)
+        or dict(binding)
+        != {
+            "mode": "host-bound-https",
+            "credential_identity": dict(identity),
+        }
+    ):
         raise PermissionError("Git credential transport binding changed after prepare")
     return handle
+
+
+def _https_origin(remote_url: str) -> str | None:
+    """Return the canonical TLS origin for a validated Git remote URL."""
+
+    parsed = urlparse(remote_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise PermissionError("Git remote port is invalid") from exc
+    host = parsed.hostname.lower()
+    rendered_host = f"[{host}]" if ":" in host else host
+    port_text = "" if port in {None, 443} else f":{port}"
+    return f"https://{rendered_host}{port_text}"
+
+
+def _select_git_https_credential(
+    client: Any,
+    *,
+    workspace_id: str,
+    push_url: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Select an exact Host-owned credential identity for one remote."""
+
+    endpoint_origin = _https_origin(push_url)
+    if endpoint_origin is None:
+        return None, None
+    selected = client.select_git_https_credential(
+        workspace_id=workspace_id,
+        endpoint_origin=endpoint_origin,
+        provider_instance_id=GIT_CREDENTIAL_PROVIDER_INSTANCE_ID,
+        credential_scope=GIT_CREDENTIAL_SCOPE,
+    )
+    if selected is None:
+        return None, None
+    if not isinstance(selected, Mapping):
+        raise PermissionError("Git credential selection is invalid")
+    identity = dict(selected)
+    selection_receipt = str(identity.pop("selection_receipt", ""))
+    resource_binding = identity.get("resource_binding")
+    expected_binding = {
+        "endpoint_origin": endpoint_origin,
+        "workspace_id": workspace_id,
+    }
+    public_identity = dict(identity)
+    binding_digest = str(public_identity.pop("binding_digest", ""))
+    if (
+        set(public_identity)
+        != {
+            "consumer_pack_id",
+            "handle",
+            "key_version",
+            "profile_id",
+            "provider_instance_id",
+            "purpose",
+            "resource_binding",
+            "scope",
+        }
+        or not str(public_identity.get("handle") or "").startswith(
+            ("credential:", "opaque:")
+        )
+        or not str(public_identity.get("key_version") or "")
+        or public_identity.get("consumer_pack_id") != SERVICE_PACK_ID
+        or public_identity.get("provider_instance_id")
+        != GIT_CREDENTIAL_PROVIDER_INSTANCE_ID
+        or not str(public_identity.get("profile_id") or "")
+        or public_identity.get("scope") != GIT_CREDENTIAL_SCOPE
+        or public_identity.get("purpose") != "provider.invoke"
+        or not isinstance(resource_binding, Mapping)
+        or dict(resource_binding) != expected_binding
+        or binding_digest != canonical_digest(public_identity)
+        or not selection_receipt.startswith("credential-selection:")
+    ):
+        raise PermissionError("Git credential selection is invalid")
+    return identity, selection_receipt
+
+
+def _push_url(repository: Path, remote: str) -> str:
+    """Read one actual push URL through the hardened captured Git toolchain."""
+
+    return _git(
+        repository,
+        ["remote", "get-url", "--push", remote],
+        hardened=True,
+    ).strip()
 
 
 def _remote_name(value: Any) -> str:
@@ -601,17 +772,13 @@ def _build_plan(
     context: Any,
     state_root_identity: str,
     toolchain: Mapping[str, Any],
-    credential_handle: str | None,
+    push_url: str,
+    credential_identity: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     _assert_safe_local_git_config(repository)
     source_oid = _git(
         repository,
         ["rev-parse", "--verify", f"refs/heads/{branch}"],
-        hardened=True,
-    ).strip()
-    push_url = _git(
-        repository,
-        ["remote", "get-url", "--push", remote],
         hardened=True,
     ).strip()
     remote_host = _remote_host(push_url)
@@ -659,16 +826,12 @@ def _build_plan(
         "credential_transport": {
             "mode": (
                 "host-bound-https"
-                if credential_handle is not None
+                if credential_identity is not None
                 else "anonymous-https-only"
             ),
-            "credential_handle": credential_handle,
-            "credential_scope": (
-                GIT_CREDENTIAL_SCOPE if credential_handle is not None else None
-            ),
-            "provider_instance_id": (
-                GIT_CREDENTIAL_PROVIDER_INSTANCE_ID
-                if credential_handle is not None
+            "credential_identity": (
+                dict(credential_identity)
+                if credential_identity is not None
                 else None
             ),
         },
@@ -785,17 +948,22 @@ def _revalidate_plan(
     allow_non_fast_forward = (
         lease.get("allow_non_fast_forward") if isinstance(lease, Mapping) else None
     )
-    if not isinstance(allow_non_fast_forward, bool) or dict(lease) != {
-        "mode": "exact-remote-oid",
-        "allow_non_fast_forward": allow_non_fast_forward,
-        "argument": f"--force-with-lease={destination_ref}:{remote_oid}",
-    }:
+    if (
+        not isinstance(lease, Mapping)
+        or not isinstance(allow_non_fast_forward, bool)
+        or dict(lease)
+        != {
+            "mode": "exact-remote-oid",
+            "allow_non_fast_forward": allow_non_fast_forward,
+            "argument": f"--force-with-lease={destination_ref}:{remote_oid}",
+        }
+    ):
         raise PermissionError("Git force-with-lease policy changed after prepare")
     _assert_prepared_fast_forward_policy(
         repository,
         remote_oid=remote_oid,
         source_oid=source_oid,
-        allow_non_fast_forward=lease["allow_non_fast_forward"],
+        allow_non_fast_forward=allow_non_fast_forward,
     )
 
 
@@ -828,6 +996,7 @@ def _execute_force_with_lease(
     state_root_identity: str,
     toolchain: Mapping[str, Any],
     client: Any,
+    selection_receipt: str | None,
 ) -> str:
     """Run the sole V4 mutation command after Broker-authorized plan replay."""
 
@@ -900,9 +1069,12 @@ def _execute_force_with_lease(
                     raise PermissionError("HOST_CREDENTIAL_PORT_UNAVAILABLE") from None
                 raise RuntimeError("Git publication failed") from None
         else:
+            if not selection_receipt:
+                raise PermissionError("HOST_CREDENTIAL_TRANSPORT_FAILED")
             try:
                 client.push_git_https_with_credential(
                     git_executable=_git_executable(),
+                    git_executable_identity=dict(toolchain["git"]),
                     bare_repository=str(bare),
                     remote_url=str(plan["push_url"]),
                     refspec=str(plan["refspec"]),
@@ -910,6 +1082,8 @@ def _execute_force_with_lease(
                     credential_handle=credential_handle,
                     provider_instance_id=GIT_CREDENTIAL_PROVIDER_INSTANCE_ID,
                     credential_scope=GIT_CREDENTIAL_SCOPE,
+                    workspace_id=str(plan["workspace_id"]),
+                    selection_receipt=selection_receipt,
                 )
             except Exception:
                 raise PermissionError("HOST_CREDENTIAL_TRANSPORT_FAILED") from None
@@ -1026,21 +1200,16 @@ def _assert_non_force_fast_forward(
     expected_remote_oid = arguments["expected_remote_oid"]
     if _is_zero_oid(expected_remote_oid):
         return
-    completed = subprocess.run(
+    completed = _run_git(
+        repository,
         [
-            "git",
-            "-C",
-            str(repository),
             "merge-base",
             "--is-ancestor",
             expected_remote_oid,
             arguments["expected_source_oid"],
         ],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
         timeout=30,
-        check=False,
+        hardened=True,
     )
     if completed.returncode != 0:
         raise PermissionError(
@@ -1120,37 +1289,14 @@ def _directory_identity(path: Path) -> str:
     )
 
 
-def _assert_nonwritable_executable_ancestry(path: Path) -> None:
-    current = path.parent
-    while True:
-        if current.stat().st_mode & 0o022:
-            raise PermissionError("Git executable has a writable ancestor")
-        if current == current.parent:
-            return
-        current = current.parent
-
-
 def _executable_identity(path: Path) -> dict[str, Any]:
-    resolved = path.resolve(strict=True)
-    if not resolved.is_file():
-        raise PermissionError("Git executable identity is unavailable")
-    info = resolved.stat()
-    if info.st_mode & 0o022:
-        raise PermissionError("Git executable is writable by an untrusted principal")
-    _assert_nonwritable_executable_ancestry(resolved)
-    digest = hashlib.sha256()
-    with resolved.open("rb") as executable:
-        for chunk in iter(lambda: executable.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return {
-        "path": str(resolved),
-        "device": str(info.st_dev),
-        "inode": str(info.st_ino),
-        "mode": str(info.st_mode),
-        "size": str(info.st_size),
-        "mtime_ns": str(info.st_mtime_ns),
-        "sha256": digest.hexdigest(),
-    }
+    """Capture POSIX or Windows executable trust evidence for one binary."""
+
+    try:
+        _resolved, identity = capture_trusted_executable(path)
+    except PermissionError as exc:
+        raise ExecutableTrustError("Git executable identity is unavailable") from exc
+    return identity
 
 
 def _trusted_executable(name: str, fixed_paths: tuple[Path, ...]) -> Path | None:
@@ -1160,13 +1306,12 @@ def _trusted_executable(name: str, fixed_paths: tuple[Path, ...]) -> Path | None
     ]
     for candidate in candidates:
         if candidate is not None and candidate.is_file():
-            resolved = candidate.resolve(strict=True)
-            if resolved.stat().st_mode & 0o022:
-                raise PermissionError(
+            try:
+                return trusted_executable_path(candidate)
+            except ExecutableTrustError as exc:
+                raise ExecutableTrustError(
                     "Git executable is writable by an untrusted principal"
-                )
-            _assert_nonwritable_executable_ancestry(resolved)
-            return resolved
+                ) from exc
     return None
 
 
@@ -1227,20 +1372,24 @@ def _git_executable() -> str:
     fixed = [Path("/usr/bin/git")]
     program_files = os.environ.get("ProgramFiles")
     if program_files:
-        fixed.append(Path(program_files) / "Git" / "cmd" / "git.exe")
+        fixed.extend(
+            (
+                Path(program_files) / "Git" / "bin" / "git.exe",
+                Path(program_files) / "Git" / "cmd" / "git.exe",
+            )
+        )
     candidates = [
         *fixed,
         Path(found) if (found := shutil.which("git", path=os.defpath)) else None,
     ]
     for candidate in candidates:
         if candidate is not None and candidate.is_file():
-            resolved = candidate.resolve(strict=True)
-            _assert_nonwritable_executable_ancestry(resolved)
-            if resolved.stat().st_mode & 0o022:
-                raise PermissionError(
+            try:
+                return str(trusted_executable_path(candidate))
+            except ExecutableTrustError as exc:
+                raise ExecutableTrustError(
                     "Git executable is writable by an untrusted principal"
-                )
-            return str(resolved)
+                ) from exc
     raise RuntimeError("trusted Git executable is unavailable")
 
 

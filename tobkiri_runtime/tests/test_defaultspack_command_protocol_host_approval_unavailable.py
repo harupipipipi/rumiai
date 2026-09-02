@@ -41,25 +41,25 @@ def _protocol(tmp_path: Path) -> CommandProtocolRegistry:
     )
 
 
-def test_catalog_marks_high_risk_host_commands_unavailable(tmp_path):
+def test_catalog_exposes_high_risk_host_commands_to_the_signed_adapter(tmp_path):
     protocol = _protocol(tmp_path)
-    terminal = next(
+    high_risk = [
         command
         for command in protocol.catalog()["commands"]
-        if command["canonical_id"] == "defaultspack:terminal"
-    )
+        if command["authorization"]["approval_required"]
+    ]
 
-    assert terminal["availability"] == {
-        "status": "unavailable",
-        "reason_code": "host_interactive_approval_unavailable",
-        "reason": (
-            "The captured Production V4 Host has no interactive approval "
-            "request/token port for this high-risk command."
-        ),
+    assert {command["canonical_id"] for command in high_risk} == {
+        "defaultspack:commit",
+        "defaultspack:patch",
+        "defaultspack:push",
+        "defaultspack:restore",
+        "defaultspack:terminal",
     }
+    assert all(command["availability"] == {"status": "available"} for command in high_risk)
 
 
-def test_real_production_wiring_rejects_supplied_tokens_before_effect(
+def test_generic_command_route_rejects_supplied_tokens_before_effect(
     tmp_path,
     monkeypatch,
 ):
@@ -91,6 +91,6 @@ def test_real_production_wiring_rejects_supplied_tokens_before_effect(
     )
 
     assert result["status"] == "failed"
-    assert result["error"]["code"] == "HOST_INTERACTIVE_APPROVAL_UNAVAILABLE"
+    assert result["error"]["code"] == "HIGH_RISK_COMMAND_ADAPTER_REQUIRED"
     assert "approval" not in result
     assert effects == []

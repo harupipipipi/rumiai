@@ -6,6 +6,7 @@ import {OperationInputForm} from '@/src/components/advanced/OperationInputForm';
 import {OperationInvocationMetadata} from '@/src/components/advanced/OperationInvocationMetadata';
 import {RuntimeEvidenceCard} from '@/src/components/advanced/RuntimeEvidenceCard';
 import {Badge} from '@/src/components/ui/Badge';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardDescription, CardHeader, CardTitle} from '@/src/components/ui/Card';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {useRuntimeOperationInvocation} from '@/src/hooks/useRuntimeOperationInvocation';
@@ -101,7 +102,8 @@ export function AiInput() {
               {invocation.error ? (
                 <div className="mb-4 flex items-start gap-3 rounded-lg border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm dark:border-amber-800/60 dark:bg-amber-950/20" role="alert">
                   <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
-                  <span>{invocation.error.code}: {invocation.error.message}</span>
+                  <span className="min-w-0 flex-1 break-words">{invocation.error.code}: {invocation.error.message}</span>
+                  <CopyErrorButton label="Copy AI Input operation error" text={`${invocation.error.code}: ${invocation.error.message}`} />
                 </div>
               ) : null}
               {invocation.state === 'unknown' ? (

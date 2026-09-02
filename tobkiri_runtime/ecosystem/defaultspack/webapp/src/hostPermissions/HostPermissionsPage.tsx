@@ -24,7 +24,7 @@ export function HostPermissionsPage() {
       setSnapshot(nextSnapshot);
       setLoadState("ready");
       if (nextSnapshot.authorityError) {
-        setMessage(`Rumi approval history is unavailable: ${nextSnapshot.authorityError}`);
+        setMessage(`Tobkiri approval history is unavailable: ${nextSnapshot.authorityError}`);
       }
     } catch (error) {
       setLoadState("error");
@@ -93,7 +93,7 @@ export function HostPermissionsPage() {
             <section className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
               <div className="grid grid-cols-[minmax(190px,1.2fr)_minmax(120px,0.7fr)_minmax(120px,0.7fr)_minmax(78px,0.45fr)_minmax(90px,0.5fr)_minmax(180px,1fr)_minmax(116px,0.55fr)] gap-3 border-b border-zinc-800 bg-zinc-900/50 px-3 py-2 text-[11px] font-semibold text-zinc-500 max-lg:hidden">
                 <span>Permission</span>
-                <span>Rumi approval</span>
+                <span>Tobkiri approval</span>
                 <span>OS permission</span>
                 <span>Risk</span>
                 <span>Stream</span>
@@ -141,7 +141,7 @@ export function HostPermissionsPage() {
 function StatusStrip({ snapshot, loading }: { snapshot: HostPermissionsSnapshot | null; loading: boolean }) {
   const summary = snapshot?.summary;
   const items = [
-    { label: "Rumi approvals", value: summary ? `${summary.approved}/${summary.total}` : "..." },
+    { label: "Tobkiri approvals", value: summary ? `${summary.approved}/${summary.total}` : "..." },
     { label: "OS ready", value: summary ? `${summary.osReady}/${summary.total}` : "..." },
     { label: "Permission host", value: snapshot?.info?.permission_subject || snapshot?.info?.app_name || "Unknown" },
     { label: "Reliability", value: snapshot?.info ? (snapshot.info.reliable ? "Verified" : "Unverified") : "Unavailable" },
@@ -183,7 +183,7 @@ function HostPermissionListRow({
         </div>
         <p className="mt-1 text-xs leading-5 text-zinc-500 lg:hidden">{row.description}</p>
       </div>
-      <LabeledCell label="Rumi approval">
+      <LabeledCell label="Tobkiri approval">
         <StatusBadge status={row.rumiStatus} />
       </LabeledCell>
       <LabeledCell label="OS permission">

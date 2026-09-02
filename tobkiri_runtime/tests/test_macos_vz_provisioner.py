@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import hmac
+import importlib.util
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 import shutil
 import threading
+import sys
+import textwrap
 from types import SimpleNamespace
 
 import pytest
@@ -26,9 +32,18 @@ from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner impor
 from ecosystem.defaultspack.backend.sandbox.isolation.lima_runtime import (
     PackVMLimaProvisioner,
 )
+from ecosystem.defaultspack.backend.sandbox.isolation.packvm_image_cache import (
+    PackVMPinnedImage,
+    PackVMVerifiedImage,
+)
 from core_runtime.bootstrap.production_v4 import _authenticated_packvm_backend
 from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 from tobkiri_host.errors import BackendUnavailableError
+from tobkiri_host.artifact_materialization import (
+    MaterializedArtifactFile,
+    MaterializedPackArtifact,
+    _materialization_digest,
+)
 from tobkiri_host.macos_vz_supervisor import (
     MacOSVZAgentIdentity,
     MacOSVZHelperIdentity,
@@ -45,6 +60,262 @@ def _private_file(path: Path, payload: bytes, mode: int = 0o600) -> Path:
     path.write_bytes(payload)
     path.chmod(mode)
     return path
+
+
+def test_prelaunch_canonical_json_matches_cross_language_hmac_vector() -> None:
+    """Keep Python prelaunch HMAC bytes aligned with the Swift helper."""
+
+    payload = {"path": "/Users/é"}
+    encoded = macos_vz_provisioner._canonical_bytes(payload)
+
+    assert encoded == b'{"path":"/Users/\xc3\xa9"}'
+    assert hmac.new(
+        b"01234567890123456789012345678901", encoded, hashlib.sha256
+    ).hexdigest() == "fd5fa037f203e451dd633ca6810db1125a6760b57851c0518ff963368d5d36cc"
+
+
+def test_nocloud_network_seed_is_local_only_and_has_no_egress_configuration() -> None:
+    """A local dummy link satisfies cloud-final without attaching a VZ NIC."""
+
+    network_seed = macos_vz_provisioner._NOCLOUD_LOCAL_ONLY_NETWORK_CONFIG
+
+    assert network_seed == (
+        b"version: 2\n"
+        b"renderer: networkd\n"
+        b"dummy-devices:\n"
+        b"  tobkiri0:\n"
+        b"    addresses: [192.0.2.1/32]\n"
+    )
+    for forbidden in (b"gateway", b"routes", b"nameservers", b"dhcp", b"ethernet"):
+        assert forbidden not in network_seed
+
+
+def test_cloud_bootstrap_registers_current_dataclass_runner_before_execution() -> None:
+    """Cloud-init must use importlib's module-registration contract."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    runner_path = (
+        workspace
+        / "tobkiri_runtime"
+        / "ecosystem"
+        / "defaultspack"
+        / "backend"
+        / "sandbox"
+        / "isolation"
+        / "resources"
+        / "packvm_guest_runner.py"
+    )
+    template_path = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    )
+    template = template_path.read_text(encoding="utf-8")
+    assert "sys.modules[runner_spec.name] = runner_module" in template
+    assert "sys.modules.pop(runner_spec.name, None)" in template
+
+    module_name = "_tobkiri_packvm_seed_runner_bootstrap_test"
+    spec = importlib.util.spec_from_file_location(module_name, runner_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        assert callable(module.materialize_seed_artifact)
+    finally:
+        if previous is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous
+
+
+def test_cloud_bootstrap_emits_only_bounded_nonsecret_materialization_markers() -> None:
+    """Debug console milestones identify bootstrap failure without seed/key data."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    template = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert 'phase "bootstrap-exit-${status}"' in template
+    for marker in (
+        "install-dir-ready",
+        "runner-import-begin",
+        "runner-imported",
+        "seed-materialize-begin",
+        "seed-materialize-oserror",
+        "seed-materialize-capacity-rejected",
+        "seed-materialize-validation-rejected",
+        "seed-materialize-memory-rejected",
+        "seed-materialize-unexpected-rejected",
+        "seed-materialized",
+        "service-written",
+    ):
+        assert f'phase("{marker}")' in template
+    assert "os.open(\"/dev/hvc0\", os.O_WRONLY | os.O_CLOEXEC)" in template
+    assert "agent-ed25519.pem" not in template.split("def phase(code: str)", 1)[1].split(
+        "def regular", 1
+    )[0]
+
+
+def test_cloud_bootstrap_python_phase_writes_a_real_newline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rendered CIDATA code emits line-delimited, non-secret hvc0 milestones."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    template = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    ).read_text(encoding="utf-8")
+    start = template.index("      python3 - ")
+    start = template.index("\n", start) + 1
+    end = template.index("      PY\n", start)
+    script = textwrap.dedent(template[start:end])
+    parsed = ast.parse(script)
+    phase = next(
+        node
+        for node in parsed.body
+        if isinstance(node, ast.FunctionDef) and node.name == "phase"
+    )
+    namespace: dict[str, object] = {}
+    exec("import os", namespace)
+    exec(
+        compile(
+            ast.fix_missing_locations(ast.Module(body=[phase], type_ignores=[])),
+            "rendered-cloud-init-phase.py",
+            "exec",
+        ),
+        namespace,
+    )
+    opened: list[int] = []
+    written: list[bytes] = []
+    module_os = namespace["os"]
+    monkeypatch.setattr(module_os, "open", lambda *_args: 41)
+    monkeypatch.setattr(module_os, "write", lambda descriptor, value: written.append(value))
+    monkeypatch.setattr(module_os, "close", lambda descriptor: opened.append(descriptor))
+
+    phase_function = namespace["phase"]
+    assert callable(phase_function)
+    phase_function("seed-materialize-begin")
+
+    assert written == [b"TOBKIRI_BOOTSTRAP:seed-materialize-begin\n"]
+    assert opened == [41]
+
+
+def test_cloud_bootstrap_starts_guest_service_without_multi_user_cycle() -> None:
+    """Cloud-final must not wait on the target that waits on cloud-final."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    template = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    ).read_text(encoding="utf-8")
+    service = json.loads(
+        (
+            workspace
+            / "tobkiri_launcher"
+            / "packvm-vz-helper"
+            / "Provisioning"
+            / "guest_service_template.v1.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    unit = service["service_unit"]
+    assert "After=local-fs.target" in unit
+    assert "After=multi-user.target" not in unit
+    assert "WantedBy=multi-user.target" in unit
+    assert "systemctl enable --now tobkiri-packvm-guest.service" not in template
+    assert "systemctl enable tobkiri-packvm-guest.service" in template
+    assert "systemctl start tobkiri-packvm-guest.service" in template
+
+
+def test_cloud_bootstrap_runner_is_readable_to_the_unprivileged_pack_child() -> None:
+    """The bwrap child must read its separately bound runner after dropping UID."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    template = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert 'install_dir.mkdir(mode=0o700, exist_ok=False)' in template
+    assert (
+        'copy_private(runner_path, install_dir / "packvm_guest_runner.py", 0o755)'
+        in template
+    )
+    assert 'copy_private(agent_config, runtime_dir / "agent-config.json", 0o600)' in template
+    assert 'copy_private(agent_key, runtime_dir / "agent-ed25519.pem", 0o600)' in template
+
+
+def test_cloud_bootstrap_completes_dpkg_triggers_before_auditing() -> None:
+    """The offline package install must not manufacture a pending trigger."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    template = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Provisioning"
+        / "cloud_init_template.yaml"
+    ).read_text(encoding="utf-8")
+
+    install = 'dpkg -i "$agent_mount/bubblewrap_arm64.deb"'
+    audit = 'if [ -n "$(dpkg --audit)" ]; then'
+    assert install in template
+    assert "dpkg --no-triggers" not in template
+    assert template.index(install) < template.index(audit)
+
+
+def _materialized_artifact(seed: str = "fixture") -> MaterializedPackArtifact:
+    """Build one small, fully self-consistent Host-captured artifact."""
+
+    content = f"def tobkiri_packvm_invoke(*_): return {{'seed': '{seed}'}}\n".encode()
+    implementation_digest = _digest(content)
+    artifact_digest = _digest(f"artifact:{seed}".encode())
+    files = (
+        MaterializedArtifactFile(
+            path="runtime/entry.py",
+            digest=implementation_digest,
+            executable=False,
+            content=content,
+        ),
+    )
+    materialization_digest = _materialization_digest(
+        "fixture-pack",
+        artifact_digest,
+        "fixture-pack.entry",
+        implementation_digest,
+        "runtime/entry.py",
+        files,
+    )
+    return MaterializedPackArtifact(
+        pack_id="fixture-pack",
+        artifact_digest=artifact_digest,
+        function_id="fixture-pack.entry",
+        implementation_digest=implementation_digest,
+        implementation_path="runtime/entry.py",
+        materialization_digest=materialization_digest,
+        root_device=1,
+        root_inode=1,
+        files=files,
+    )
 
 
 def test_packvm_lifecycle_exposes_only_its_verified_backend_registration(
@@ -145,18 +416,21 @@ def test_allocate_creates_per_domain_cow_efi_and_seeds(
     """Each allocation owns generated keys/seeds and cleans all mutable files."""
 
     provisioner, manifest, base = provisioner_fixture
+    artifact = _materialized_artifact()
     allocation = provisioner.allocate(
         domain_id="domain.conversation",
         reservation_id="reservation-1",
         lease_id="lease-1",
         channel_key=b"k" * 32,
-        artifact_digest=_digest(b"artifact"),
-        executable_digest=_digest(b"executable"),
-        materialization_digest=_digest(b"materialization"),
+        artifact_digest=artifact.artifact_digest,
+        executable_digest=artifact.implementation_digest,
+        materialization_digest=artifact.materialization_digest,
+        artifact=artifact,
     )
 
     root = Path(allocation.run_root)
     assert Path(allocation.cow_disk_path).read_bytes() == base.read_bytes()
+    assert Path(allocation.cow_disk_path).stat().st_size == base.stat().st_size
     assert allocation.cow_disk_digest == manifest.image_digest
     assert Path(allocation.efi_store_path).is_file()
     assert Path(allocation.agent_seed_path).stat().st_size % 512 == 0
@@ -168,9 +442,12 @@ def test_allocate_creates_per_domain_cow_efi_and_seeds(
     assert b"bubblewrap_arm64.deb;1" in agent_seed
     assert b"agent-config.json;1" in config_seed
     assert b"agent-ed25519.pem;1" in config_seed
+    assert b"artifact-seed.v1.bin;1" in config_seed
+    assert b"tobkiri-packvm-artifact-seed.v1\0" in config_seed
     assert b"BEGIN PRIVATE KEY" in config_seed
-    assert _digest(b"artifact") in config_seed.decode("latin1")
+    assert artifact.artifact_digest in config_seed.decode("latin1")
     assert allocation.guest_public_key_digest in config_seed.decode("latin1")
+    assert not (root / "artifact-seed.v1.bin").exists()
     assert not (root / "agent-ed25519.pem").exists()
     assert not (root / "agent-config.json").exists()
 
@@ -198,6 +475,132 @@ def test_prepare_declares_three_gib_download_without_downloading(
     assert plan.image_download_required is True
     assert plan.image_download_bytes == VZ_RAW_EFI_IMAGE_DECLARED_BYTES
     assert plan.image_size_bytes == VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+    assert plan.disk_size_bytes == VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+    assert plan.host_free_space_required_bytes == (
+        2 * VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+        + macos_vz_provisioner.VZ_HOST_STORAGE_RESERVE_BYTES
+        + macos_vz_provisioner.VZ_ARTIFACT_SEED_PEAK_RESERVE_BYTES
+    )
+
+
+def test_prepare_reserves_exact_raw_cow_size_when_the_image_is_cached(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A verified 3 GiB raw image gets a 3 GiB clone, never a 4 GiB sparse disk."""
+
+    provisioner, manifest, _base = provisioner_fixture
+    required = (
+        VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+        + macos_vz_provisioner.VZ_HOST_STORAGE_RESERVE_BYTES
+        + macos_vz_provisioner.VZ_ARTIFACT_SEED_PEAK_RESERVE_BYTES
+    )
+    monkeypatch.setattr(provisioner, "_load_manifest_for_plan", lambda: (manifest, None))
+    monkeypatch.setattr(
+        provisioner.image_cache,
+        "status",
+        lambda _authority: ("verified_source", None),
+    )
+    monkeypatch.setattr(
+        provisioner,
+        "_disk_usage",
+        lambda _path: SimpleNamespace(free=required),
+    )
+
+    plan = provisioner.prepare()
+
+    assert plan.launcher_reason is None
+    assert plan.image_download_required is False
+    assert plan.disk_size_bytes == VZ_RAW_EFI_IMAGE_DECLARED_BYTES
+    assert plan.host_free_space_required_bytes == required
+
+
+def test_allocate_rechecks_exact_artifact_peak_capacity_before_mutation(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid large seed cannot fail midway after a stale generic preflight."""
+
+    provisioner, _manifest, _base = provisioner_fixture
+    artifact = _materialized_artifact("capacity")
+    required = provisioner._required_allocation_space(artifact)
+    monkeypatch.setattr(
+        provisioner,
+        "_disk_usage",
+        lambda _path: SimpleNamespace(free=required - 1),
+    )
+
+    with pytest.raises(ValueError, match="provisioning requires at least"):
+        provisioner.allocate(
+            domain_id="domain.capacity",
+            reservation_id="reservation-capacity",
+            lease_id="lease-capacity",
+            channel_key=b"k" * 32,
+            artifact_digest=artifact.artifact_digest,
+            executable_digest=artifact.implementation_digest,
+            materialization_digest=artifact.materialization_digest,
+            artifact=artifact,
+        )
+
+    domains = provisioner._state_dir / "domains"
+    assert not domains.exists()
+
+
+def test_direct_terminate_keeps_domain_owned_until_stop_and_diagnostics_close() -> None:
+    """Binding failures and VZ stop failures must leave termination retryable."""
+
+    workspace = Path(__file__).resolve().parents[2]
+    source = (
+        workspace
+        / "tobkiri_launcher"
+        / "packvm-vz-helper"
+        / "Sources"
+        / "PackVMVZCore"
+        / "VZSupervisor.swift"
+    ).read_text(encoding="utf-8")
+    body = source.split("public func directTerminate(", 1)[1].split(
+        "public func invoke(", 1
+    )[0]
+
+    assert body.index("activeDirectDomain(domainID)") < body.index(
+        "DOMAIN_BINDING_MISMATCH"
+    )
+    assert body.index("DOMAIN_BINDING_MISMATCH") < body.index("try stop(")
+    assert body.index("try stop(") < body.index("domain.diagnostics.close()")
+    assert body.index("domain.diagnostics.close()") < body.index(
+        "removeDirectDomain(domainID)"
+    )
+
+
+def test_instance_creation_compares_descriptor_bare_sha512(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+) -> None:
+    """The image descriptor's SHA-512 value has no ``sha512:`` prefix."""
+
+    provisioner, manifest, base = provisioner_fixture
+    metadata = base.stat()
+    image = PackVMPinnedImage(
+        verified=PackVMVerifiedImage(
+            path=base,
+            digest=manifest.image_digest,
+            size_bytes=metadata.st_size,
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+            source_url=manifest.image_source,
+        ),
+        descriptor=-1,
+    )
+    with_sha512 = replace(
+        manifest,
+        image_sha512=hashlib.sha512(base.read_bytes()).hexdigest(),
+    )
+
+    provisioner._create_instance(
+        provisioner._state_dir / "sha512-instance",
+        image,
+        with_sha512,
+        None,
+    )
 
 
 def test_doctor_reports_bounded_reason_before_provisioning(tmp_path: Path) -> None:
@@ -223,14 +626,16 @@ def test_seed_and_template_tampering_are_rejected_separately(
     """Generated CIDATA and immutable cloud-init are independently measured."""
 
     provisioner, manifest, base = provisioner_fixture
+    artifact = _materialized_artifact("first")
     allocation = provisioner.allocate(
         domain_id="domain.first",
         reservation_id="reservation-1",
         lease_id="lease-1",
         channel_key=b"k" * 32,
-        artifact_digest=_digest(b"artifact"),
-        executable_digest=_digest(b"executable"),
-        materialization_digest=_digest(b"materialization"),
+        artifact_digest=artifact.artifact_digest,
+        executable_digest=artifact.implementation_digest,
+        materialization_digest=artifact.materialization_digest,
+        artifact=artifact,
     )
     driver = MacOSVZSupervisorDriver(
         transport_factory=lambda _allocation: None,
@@ -262,14 +667,16 @@ def test_seed_and_template_tampering_are_rejected_separately(
     manifest.config_path.chmod(0o600)
     _private_file(manifest.config_path, b"#cloud-config\ntampered\n", 0o444)
     with pytest.raises(ValueError, match="asset changed"):
+        second = _materialized_artifact("second")
         provisioner.allocate(
             domain_id="domain.second",
             reservation_id="reservation-2",
             lease_id="lease-2",
             channel_key=b"l" * 32,
-            artifact_digest=_digest(b"artifact-2"),
-            executable_digest=_digest(b"executable-2"),
-            materialization_digest=_digest(b"materialization-2"),
+            artifact_digest=second.artifact_digest,
+            executable_digest=second.implementation_digest,
+            materialization_digest=second.materialization_digest,
+            artifact=second,
         )
 
 

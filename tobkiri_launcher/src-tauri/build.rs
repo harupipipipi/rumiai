@@ -41,6 +41,7 @@ const MACOS_ARTIFACT_POLICY_ENV: &str = "TOBKIRI_MACOS_ARTIFACT_POLICY";
 const MACOS_CI_CERT_SHA256_ENV: &str = "TOBKIRI_MACOS_CI_CERT_SHA256";
 const MACOS_CI_PUBLIC_KEY_ENV: &str = "TOBKIRI_MACOS_CI_PUBLIC_KEY";
 const APPLE_TEAM_ID_ENV: &str = "APPLE_TEAM_ID";
+const LOCAL_DEVELOPMENT_LAUNCHER_IDENTIFIER: &str = "dev.tobkiri.local-launcher";
 #[cfg(target_os = "macos")]
 const MACOS_XATTR_PATH: &str = "/usr/bin/xattr";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
@@ -215,9 +216,20 @@ fn main() {
 
     bind_macos_artifact_policy().expect("failed to bind macOS artifact policy");
     warn_legacy_defaultspack_app_bundle();
-    stage_runtime_bundle().expect("failed to stage runtime bundle");
-    reset_tauri_macos_resource_copy()
-        .expect("failed to reset the manifest-bound Tauri resource copy");
+    let unbundled_local_development = is_unbundled_local_development_build();
+    if unbundled_local_development {
+        println!("cargo:rustc-env=TOBKIRI_LOCAL_DEV_WORKSPACE=1");
+        println!(
+            "cargo:warning=using the local development workspace runtime; sealed runtime staging is release-only"
+        );
+    } else {
+        println!("cargo:rustc-env=TOBKIRI_LOCAL_DEV_WORKSPACE=0");
+        stage_runtime_bundle().expect("failed to stage runtime bundle");
+    }
+    if !unbundled_local_development {
+        reset_tauri_macos_resource_copy()
+            .expect("failed to reset the manifest-bound Tauri resource copy");
+    }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_setup_progress",
@@ -225,6 +237,9 @@ fn main() {
             "arm_debug_approval",
             "revoke_debug_approval",
             "coding_approval_operator",
+            "open_authority_approval_window",
+            "authority_approval_context",
+            "close_current_window",
             "get_presentation_catalog",
             "select_presentation",
             "launch_selected_presentation",
@@ -2476,6 +2491,36 @@ fn is_intermediate_shell_build() -> bool {
             == Some("tobkiri-shell")
 }
 
+/// Whether this is the explicit debug-only local Launcher configuration.
+///
+/// It deliberately removes `gen/app` from the Tauri resource map. The debug
+/// binary resolves its runtime from the local development workspace, so asking
+/// it to create the production sealed runtime would both require the formal
+/// packaging inputs and race the development resource preparation hook. The
+/// distinct CI/E2E configuration retains `gen/app`; every release-profile
+/// build always takes the sealed staging path.
+fn is_unbundled_local_development_build() -> bool {
+    if required_cargo_profile().ok().as_deref() != Some("debug") {
+        return false;
+    }
+    let Ok(raw_config) = std::env::var("TAURI_CONFIG") else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw_config) else {
+        return false;
+    };
+    if config.get("identifier").and_then(serde_json::Value::as_str)
+        != Some(LOCAL_DEVELOPMENT_LAUNCHER_IDENTIFIER)
+    {
+        return false;
+    }
+    config
+        .get("bundle")
+        .and_then(|bundle| bundle.get("resources"))
+        .and_then(|resources| resources.get("./gen/app"))
+        .map_or(true, serde_json::Value::is_null)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoreBuildStage {
     IntermediateShell,
@@ -2801,9 +2846,16 @@ fn create_staged_runtime_root(path: &Path) -> io::Result<()> {
     let encoded = CString::new(name.as_bytes())
         .map_err(|_| invalid_release("staged runtime root name contains NUL"))?;
     if unsafe { libc::mkdirat(parent.as_raw_fd(), encoded.as_ptr(), 0o755) } == -1 {
-        return Err(io::Error::last_os_error());
+        return Err(invalid_release(format!(
+            "failed to create new staged runtime root: {}",
+            io::Error::last_os_error()
+        )));
     }
-    let root = core_openat(&parent, name, true)?;
+    let root = core_openat(&parent, name, true).map_err(|error| {
+        invalid_release(format!(
+            "new staged runtime root disappeared before it could be opened: {error}"
+        ))
+    })?;
     let metadata = root.metadata()?;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(invalid_release(
@@ -6499,6 +6551,64 @@ mod tests {
     }
 
     #[test]
+    fn dev_runtime_preparation_completes_before_cargo_staging() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("tauri.conf.json"))
+            .expect("Tauri configuration must remain valid JSON");
+        let before_dev = config
+            .get("build")
+            .and_then(|build| build.get("beforeDevCommand"))
+            .and_then(serde_json::Value::as_object)
+            .expect("beforeDevCommand must use the waiting command form");
+
+        assert_eq!(
+            before_dev
+                .get("script")
+                .and_then(serde_json::Value::as_str),
+            Some("cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev")
+        );
+        assert_eq!(
+            before_dev
+                .get("wait")
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "Cargo staging reads the generated control-panel/runtime resources, so Tauri must not run it concurrently with their preparation"
+        );
+    }
+
+    #[test]
+    fn only_debug_local_configuration_uses_the_unbundled_development_runtime() {
+        let _environment = environment_lock();
+        let _profile = EnvironmentGuard::set_value("PROFILE", "debug");
+        let _config = EnvironmentGuard::set_value(
+            "TAURI_CONFIG",
+            r#"{
+                "identifier":"dev.tobkiri.local-launcher",
+                "bundle":{"resources":{}}
+            }"#,
+        );
+        assert!(is_unbundled_local_development_build());
+
+        let _production_profile = EnvironmentGuard::set_value("PROFILE", "release");
+        assert!(
+            !is_unbundled_local_development_build(),
+            "release artifacts must retain sealed runtime staging"
+        );
+        drop(_production_profile);
+
+        let _sealed_resource_config = EnvironmentGuard::set_value(
+            "TAURI_CONFIG",
+            r#"{
+                "identifier":"dev.tobkiri.local-launcher",
+                "bundle":{"resources":{"./gen/app":"app"}}
+            }"#,
+        );
+        assert!(
+            !is_unbundled_local_development_build(),
+            "a configuration that packages the runtime must use sealed staging"
+        );
+    }
+
+    #[test]
     fn final_generated_closure_is_resealed_before_runtime_manifest() {
         let source = include_str!("build.rs");
         let stage = &source[source.find("fn stage_runtime_bundle").unwrap()
@@ -7729,6 +7839,35 @@ mod tests {
             .expect("nested fixture should be restored for cleanup");
         fs::set_permissions(&resource, fs::Permissions::from_mode(0o755))
             .expect("resource fixture should be restored for cleanup");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_creates_a_missing_host_owned_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-new-root");
+        let staged = tree.path().join("gen/app");
+
+        reset_staged_runtime(&staged)
+            .expect("an absent generated runtime root should be created safely");
+
+        assert!(staged.is_dir());
+        assert_eq!(
+            fs::metadata(&staged)
+                .expect("new staged root should have metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert!(
+            fs::read_dir(&staged)
+                .expect("new staged root should be readable")
+                .next()
+                .is_none(),
+            "new staging must have no inherited content"
+        );
     }
 
     #[cfg(target_os = "macos")]

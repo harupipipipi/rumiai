@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 const UV_PATH_ENV: &str = "RUMI_UV_PATH";
+const LOCAL_DEV_WORKSPACE_BUILD: Option<&str> = option_env!("TOBKIRI_LOCAL_DEV_WORKSPACE");
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -54,8 +55,14 @@ impl AppConfig {
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
         let staged_app_dir = resource_dir.join("app");
         let detected_workspace_root = find_dev_workspace_root(&resource_dir);
-        let prefer_dev_runtime =
-            cfg!(debug_assertions) && is_cargo_debug_resource_dir(&resource_dir);
+        // The explicit local-development marker is only authoritative while
+        // there is no packaged runtime beside the binary.  A staged app is a
+        // concrete bundle boundary and must never be shadowed by an ancestor
+        // checkout, even when unit tests were compiled with the developer
+        // configuration.
+        let prefer_dev_runtime = cfg!(debug_assertions)
+            && (is_cargo_debug_resource_dir(&resource_dir)
+                || (is_explicit_local_development_workspace_build() && !staged_app_dir.exists()));
         let dev_workspace_root = if prefer_dev_runtime {
             detected_workspace_root
         } else if staged_app_dir.exists() {
@@ -79,7 +86,10 @@ impl AppConfig {
         } else {
             app_data_dir.join("uv")
         };
-        let venv_dir = app_data_dir.join("venv");
+        let venv_dir = dev_workspace_root
+            .as_ref()
+            .map(|workspace_root| workspace_root.join("tobkiri_runtime").join(".venv"))
+            .unwrap_or_else(|| app_data_dir.join("venv"));
         let user_data_dir = app_data_dir.join("user_data");
         let log_dir = app_data_dir.join("logs");
 
@@ -99,13 +109,17 @@ impl AppConfig {
     /// Rebase every writable Viewer runtime path into an owned state root.
     ///
     /// Debug parallel instances use this after validating their supervisor
-    /// root. Keeping Python, the virtual environment, logs, secrets, and user
-    /// data together prevents a debug process from mutating production app
-    /// data or another concurrently running Viewer.
+    /// root. Packaged runtimes keep their managed Python environment together
+    /// with logs, secrets, and user data. A development workspace instead
+    /// reads its already-validated repository venv: creating or provisioning
+    /// an isolated replacement would both duplicate dependencies and violate
+    /// the development Python policy.
     pub fn isolate_writable_state(&mut self, state_root: &Path, user_data_dir: PathBuf) {
         self.python_dir = state_root.join("python");
         self.uv_path = state_root.join(uv_binary_name());
-        self.venv_dir = state_root.join("venv");
+        if !self.is_dev_workspace() {
+            self.venv_dir = state_root.join("venv");
+        }
         self.user_data_dir = user_data_dir;
         self.log_dir = state_root.join("logs");
     }
@@ -269,6 +283,10 @@ fn is_cargo_debug_resource_dir(resource_dir: &Path) -> bool {
     )
 }
 
+fn is_explicit_local_development_workspace_build() -> bool {
+    LOCAL_DEV_WORKSPACE_BUILD == Some("1")
+}
+
 fn configured_uv_path() -> Option<PathBuf> {
     std::env::var_os(UV_PATH_ENV)
         .filter(|value| !value.is_empty())
@@ -352,6 +370,30 @@ mod tests {
     }
 
     #[test]
+    fn isolated_writable_state_keeps_the_development_workspace_venv() {
+        let workspace_root = PathBuf::from("/tmp/tobkiri-workspace");
+        let workspace_venv = workspace_root.join("tobkiri_runtime/.venv");
+        let mut config = AppConfig {
+            app_dir: workspace_root.join("tobkiri_runtime"),
+            rumi_home: workspace_root.join("tobkiri_runtime"),
+            python_dir: PathBuf::from("/tmp/shared-app-data/python"),
+            uv_path: PathBuf::from("/tmp/shared-app-data/uv"),
+            venv_dir: workspace_venv.clone(),
+            user_data_dir: PathBuf::from("/tmp/shared-app-data/user_data"),
+            log_dir: PathBuf::from("/tmp/shared-app-data/logs"),
+            kernel_port: 8765,
+            dev_workspace_root: Some(workspace_root),
+        };
+        let state_root = PathBuf::from("/tmp/owned-debug-supervisor");
+
+        config.isolate_writable_state(&state_root, state_root.join("viewer_user_data"));
+
+        assert_eq!(config.venv_dir, workspace_venv);
+        assert_eq!(config.python_dir, state_root.join("python"));
+        assert_eq!(config.uv_path, state_root.join(uv_binary_name()));
+    }
+
+    #[test]
     fn venv_python_path_is_reasonable() {
         let resource = PathBuf::from("/tmp/res");
         let appdata = PathBuf::from("/tmp/data");
@@ -395,6 +437,7 @@ mod tests {
 
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
         assert_eq!(config.app_dir, root.join("tobkiri_runtime"));
+        assert_eq!(config.venv_dir, root.join("tobkiri_runtime/.venv"));
         assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
@@ -456,6 +499,7 @@ mod tests {
 
         assert_eq!(config.app_dir, root.join("tobkiri_runtime"));
         assert_eq!(config.dev_workspace_root, Some(root.clone()));
+        assert_eq!(config.venv_dir, root.join("tobkiri_runtime/.venv"));
         assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();

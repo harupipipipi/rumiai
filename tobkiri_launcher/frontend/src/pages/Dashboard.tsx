@@ -3,7 +3,6 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useSearchParams} from 'react-router';
 import {
   AlertCircle,
-  Copy,
   Monitor,
   Package,
   Plus,
@@ -14,6 +13,7 @@ import {
 
 import {ProfileCard} from '@/src/components/dashboard/ProfileCard';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Badge} from '@/src/components/ui/Badge';
 import {TobkiriLoader, TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {
@@ -48,21 +48,7 @@ const defaultDashboard: DashboardData = {
   supervisor: null,
 };
 
-export async function copyTextToClipboard(
-  text: string,
-  clipboard: Pick<Clipboard, 'writeText'> | undefined = typeof navigator === 'undefined'
-    ? undefined
-    : navigator.clipboard,
-): Promise<boolean> {
-  if (!clipboard) return false;
-
-  try {
-    await clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export {copyTextToClipboard} from '@/src/lib/clipboard';
 
 export function nextDuplicateProfileId(
   profileId: string,
@@ -360,15 +346,6 @@ export function Dashboard() {
     }
   };
 
-  const copyRuntimeError = async () => {
-    const message = runtimeError || 'The control panel opened, but the background runtime startup failed.';
-    const copied = await copyTextToClipboard(message);
-    addToast(
-      copied ? 'Error copied to clipboard.' : 'Could not copy the error. Please select and copy it manually.',
-      copied ? 'success' : 'error',
-    );
-  };
-
   if (dashboardLoading && !registry && !profileError) {
     return <DashboardSkeleton />;
   }
@@ -413,6 +390,7 @@ export function Dashboard() {
           <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
             <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
             <span className="flex-1">{dashboardError}</span>
+            <CopyErrorButton text={dashboardError} label="Copy dashboard error" />
             <Button onClick={() => void refreshDashboard()} size="sm" type="button" variant="ghost">
               Retry
             </Button>
@@ -426,17 +404,10 @@ export function Dashboard() {
               <span className="font-medium">Runtime could not finish starting.</span>
               <span>{runtimeError || 'Launch surfaces remain unavailable until runtime readiness returns.'}</span>
             </div>
-            <Button
-              aria-label="Copy runtime error message"
-              className="h-7 w-7 shrink-0 p-0"
-              onClick={() => void copyRuntimeError()}
-              size="icon"
-              title="Copy runtime error message"
-              type="button"
-              variant="ghost"
-            >
-              <Copy aria-hidden="true" className="h-3.5 w-3.5" />
-            </Button>
+            <CopyErrorButton
+              label="Copy runtime error message"
+              text={runtimeError || 'Launch surfaces remain unavailable until runtime readiness returns.'}
+            />
           </div>
         )}
 
@@ -572,6 +543,7 @@ export function Dashboard() {
             <div aria-live="assertive" className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
               <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
               <span className="flex-1">{profileError}</span>
+              <CopyErrorButton text={profileError} label="Copy Profile error" />
               <Button
                 onClick={() => {
                   if (profileLoadError) {

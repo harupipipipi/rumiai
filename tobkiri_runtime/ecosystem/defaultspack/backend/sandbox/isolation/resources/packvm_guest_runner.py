@@ -8,7 +8,9 @@ import binascii
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass
+import errno
 import fcntl
 import hashlib
 import hmac
@@ -26,7 +28,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Protocol
+from typing import Mapping, Protocol
 
 
 PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
@@ -40,6 +42,11 @@ MAX_TOTAL_BYTES = 512 * 1024 * 1024
 MAX_ARTIFACT_STORAGE_BYTES = 768 * 1024 * 1024
 MIN_GUEST_FREE_RESERVE_BYTES = 512 * 1024 * 1024
 MAX_ARTIFACT_METADATA_BYTES = 16 * 1024 * 1024
+ARTIFACT_SEED_SCHEMA = "io.tobkiri.packvm-artifact-seed.v1"
+ARTIFACT_SEED_MAGIC = b"tobkiri-packvm-artifact-seed.v1\0"
+MAX_ARTIFACT_SEED_BYTES = (
+    MAX_TOTAL_BYTES + MAX_ARTIFACT_METADATA_BYTES + len(ARTIFACT_SEED_MAGIC) + 8
+)
 MAX_RESULT_BYTES = 16 * 1024 * 1024
 CANCEL_GRACE_SECONDS = 0.25
 PACK_UID = 65534
@@ -56,6 +63,7 @@ PACKVM_BRIDGE_TARGET = {
 }
 MAX_BRIDGE_REQUEST_BYTES = 64 * 1024
 MAX_BRIDGE_RESULT_BYTES = 512 * 1024
+MAX_CHILD_REQUEST_BYTES = 1024 * 1024
 PACKVM_GUEST_AGENT_PORT = 19001
 PACKVM_GUEST_AGENT_CONFIG = Path("/run/tobkiri-packvm/agent-config.json")
 PACKVM_GUEST_AGENT_KEY = Path("/run/tobkiri-packvm/agent-ed25519.pem")
@@ -67,6 +75,8 @@ PACKVM_GUEST_AGENT_VERSION = 1
 MAX_AGENT_REQUEST_BYTES = 1024 * 1024
 MAX_AGENT_RESPONSE_BYTES = MAX_RESULT_BYTES
 AGENT_IO_TIMEOUT_SECONDS = 30.0
+MAX_ACTIVE_AGENT_REQUESTS = 8
+MAX_DEADLINE_TEXT_BYTES = 32
 MAX_PENDING_BRIDGES = 64
 MAX_SEEN_AGENT_CHALLENGES = 256
 PENDING_BRIDGE_TTL_SECONDS = 60.0
@@ -74,17 +84,71 @@ _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _BRIDGE_NONCE = re.compile(r"^[a-f0-9]{48}$")
 _AGENT_CHALLENGE = re.compile(r"^[a-f0-9]{64}$")
+_CANONICAL_DEADLINE = re.compile(
+    r"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e[+-][0-9]{2,3})?$"
+)
+_SCMP_ACT_ALLOW = 0x7FFF0000
+_SCMP_ACT_ERRNO = 0x00050000
+# ``fork`` and ``vfork`` are not native syscalls on every architecture; on
+# arm64 their libc implementations use ``clone``.  Process creation and image
+# replacement remain mandatory, while architecture-absent aliases are optional.
+_REQUIRED_CHILD_PROCESS_SYSCALLS = (
+    b"clone",
+    b"execve",
+    # A new network namespace is not, by itself, a VSOCK boundary: Linux may
+    # place child namespaces in global VSOCK mode.  Pack code has no socket ABI,
+    # so deny every socket endpoint before import rather than trying to maintain
+    # an address-family allowlist that could expose the root guest agent or a
+    # future Host listener.
+    b"socket",
+    b"socketpair",
+)
+_OPTIONAL_CHILD_PROCESS_SYSCALLS = (b"clone3", b"execveat", b"fork", b"vfork")
+_VSOCK_CONSOLE_PHASES = frozenset(
+    {
+        "vsock-service-start",
+        "vsock-config-loaded",
+        "vsock-listening",
+        "vsock-accepted",
+        "vsock-request-read",
+        "vsock-envelope-validated",
+        "vsock-request-rejected",
+        "vsock-request-dispatched",
+        "vsock-signing-complete",
+        "vsock-signing-failed",
+        "vsock-response-write-failed",
+        "vsock-response-sent",
+        "vsock-startup-oserror",
+        "vsock-startup-validation-rejected",
+    }
+)
 
 
 def main() -> int:
     """Serve one bounded request from stdin and emit one JSON response."""
 
+    # The vsock listener is a long-lived systemd service, rather than the
+    # one-shot stdin/JSON protocol below.  Its startup failures must retain a
+    # non-zero exit status so ``Restart=on-failure`` retries the service.
+    # Returning a JSON error here would incorrectly turn a failed bind or
+    # invalid key/configuration into a successful unit invocation.
+    if sys.argv[1:] == ["--serve-vsock"]:
+        _emit_vsock_console_phase("vsock-service-start")
+        try:
+            return _serve_vsock_agent()
+        except OSError as exc:
+            _emit_vsock_console_phase("vsock-startup-oserror")
+            print(f"PackVM vsock agent startup failed: {exc}", file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            _emit_vsock_console_phase("vsock-startup-validation-rejected")
+            print(f"PackVM vsock agent startup failed: {exc}", file=sys.stderr)
+            return 1
+
     try:
         if sys.argv[1:]:
             if len(sys.argv) == 3 and sys.argv[1] == "--execute":
                 return _execute_staged_module(Path(sys.argv[2]))
-            if len(sys.argv) == 2 and sys.argv[1] == "--serve-vsock":
-                return _serve_vsock_agent()
             raise ValueError("PackVM runner arguments are invalid")
         raw = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
         if len(raw) > MAX_REQUEST_BYTES:
@@ -161,8 +225,7 @@ def _invoke(request: dict[str, object]) -> dict[str, object]:
     if not isinstance(request["payload"], dict):
         raise ValueError("PackVM invocation payload must be an object")
     _digest(request["request_digest"], "request_digest")
-    if not isinstance(request["deadline_monotonic"], (int, float)):
-        raise ValueError("PackVM invocation deadline is invalid")
+    _normalise_bridge_deadline(request["deadline_monotonic"])
     cancel_token = str(request["cancel_token"] or "")
     if len(cancel_token) != 64 or any(value not in "0123456789abcdef" for value in cancel_token):
         raise ValueError("PackVM invocation cancel token is invalid")
@@ -229,10 +292,10 @@ def _communicate_staged_implementation(
     """Run one sandboxed ABI step and return its one bounded object result."""
 
     encoded = _bridge_canonical_json(child_request)
-    if len(encoded) > MAX_REQUEST_BYTES:
+    if len(encoded) > MAX_CHILD_REQUEST_BYTES:
         raise ValueError("PackVM invocation payload exceeds size limit")
     try:
-        stdout, stderr = process.communicate(encoded, timeout=60.0)
+        stdout, _ = process.communicate(encoded, timeout=60.0)
     except subprocess.TimeoutExpired as exc:
         _terminate_process_group(process.pid)
         process.communicate()
@@ -240,11 +303,13 @@ def _communicate_staged_implementation(
     if process.returncode != 0:
         # Child stderr is artifact-controlled.  Do not include it in errors
         # that cross the authenticated supervisor boundary.
-        del stderr
         raise ValueError("PackVM implementation failed")
     if len(stdout) > MAX_RESULT_BYTES:
         raise ValueError("PackVM invocation result exceeds size limit")
-    result = json.loads(stdout)
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError:
+        raise ValueError("PackVM implementation result is invalid") from None
     if not isinstance(result, dict):
         raise ValueError("PackVM implementation result must be an object")
     return result
@@ -583,12 +648,43 @@ def _bounded_bridge_json(value: object, *, depth: int = 0) -> object:
 
 
 def _normalise_bridge_deadline(value: object) -> str:
-    """Encode the Host deadline deterministically without non-finite JSON."""
+    """Validate and retain the exact canonical Host deadline representation.
 
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    Direct-VZ Host envelopes deliberately encode deadlines as ``.17g`` strings:
+    canonical JSON disallows floating-point values.  One-shot stdin requests
+    retain their historical numeric form, but agent/bridge requests must keep
+    the original string rather than round-tripping a parsed float into a
+    different authenticated frame.
+    """
+
+    if isinstance(value, bool):
         raise ValueError("PackVM invocation deadline is invalid")
-    deadline = float(value)
-    if not math.isfinite(deadline):
+    if isinstance(value, str):
+        if (
+            not value
+            or len(value.encode("utf-8")) > MAX_DEADLINE_TEXT_BYTES
+            or _CANONICAL_DEADLINE.fullmatch(value) is None
+        ):
+            raise ValueError("PackVM invocation deadline is invalid")
+        try:
+            parsed = float(value)
+        except ValueError as exc:
+            raise ValueError("PackVM invocation deadline is invalid") from exc
+        if not math.isfinite(parsed) or parsed <= 0:
+            raise ValueError("PackVM invocation deadline is invalid")
+        # Use float only to prove this is exactly the Host's ``format(.17g)``
+        # output.  Return the original bytes-equivalent string so the bridge
+        # never loses precision while normalising an authenticated deadline.
+        if not hmac.compare_digest(format(parsed, ".17g"), value):
+            raise ValueError("PackVM invocation deadline is invalid")
+        return value
+    if not isinstance(value, (int, float)):
+        raise ValueError("PackVM invocation deadline is invalid")
+    try:
+        deadline = float(value)
+    except OverflowError as exc:
+        raise ValueError("PackVM invocation deadline is invalid") from exc
+    if not math.isfinite(deadline) or deadline <= 0:
         raise ValueError("PackVM invocation deadline is invalid")
     return format(deadline, ".17g")
 
@@ -625,6 +721,7 @@ class _VsockAgentConfig:
     domain_id: str
     binding_digests: dict[str, str]
     private_key_path: Path
+    artifact_seed: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -732,8 +829,21 @@ class _OpenSSLAgentSigner:
     def sign(self, payload: bytes) -> bytes:
         """Sign canonical bytes via OpenSSL and return only the detached signature."""
 
+        if not isinstance(payload, bytes) or len(payload) > MAX_AGENT_RESPONSE_BYTES:
+            raise ValueError("PackVM guest agent signing payload is invalid")
         _assert_root_only_regular_file(self._key_path, "PackVM guest agent key")
         try:
+            descriptor = os.memfd_create("tobkiri-packvm-agent-sign", os.MFD_CLOEXEC)
+        except (AttributeError, OSError) as exc:
+            raise ValueError("PackVM guest agent signer is unavailable") from exc
+        try:
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("PackVM guest agent signing write failed")
+                view = view[written:]
+            os.lseek(descriptor, 0, os.SEEK_SET)
             completed = subprocess.run(
                 (
                     "/usr/bin/openssl",
@@ -742,16 +852,22 @@ class _OpenSSLAgentSigner:
                     "-rawin",
                     "-inkey",
                     str(self._key_path),
+                    "-in",
+                    f"/proc/self/fd/{descriptor}",
                 ),
-                input=payload,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 check=False,
                 timeout=5.0,
+                pass_fds=(descriptor,),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ValueError("PackVM guest agent signer is unavailable") from exc
-        if completed.returncode != 0 or len(completed.stdout) != 64:
+        finally:
+            os.close(descriptor)
+        if completed.returncode != 0:
+            raise ValueError("PackVM guest agent signature is invalid")
+        if len(completed.stdout) != 64:
             raise ValueError("PackVM guest agent signature is invalid")
         return completed.stdout
 
@@ -762,6 +878,7 @@ def _serve_vsock_agent() -> int:
     if os.geteuid() != 0:
         raise ValueError("PackVM guest agent requires the root-owned supervisor")
     config = _load_vsock_agent_config(PACKVM_GUEST_AGENT_CONFIG)
+    _emit_vsock_console_phase("vsock-config-loaded")
     vsock_family = getattr(socket, "AF_VSOCK", None)
     vmaddr_any = getattr(socket, "VMADDR_CID_ANY", None)
     if not isinstance(vsock_family, int) or not isinstance(vmaddr_any, int):
@@ -770,6 +887,7 @@ def _serve_vsock_agent() -> int:
     try:
         listener.bind((vmaddr_any, PACKVM_GUEST_AGENT_PORT))
         listener.listen(8)
+        _emit_vsock_console_phase("vsock-listening")
         return _serve_authenticated_guest_agent(
             listener,
             config,
@@ -777,6 +895,21 @@ def _serve_vsock_agent() -> int:
         )
     finally:
         listener.close()
+
+
+def _emit_vsock_console_phase(code: str) -> None:
+    """Emit one fixed, non-secret agent milestone to the optional VZ console."""
+
+    if code not in _VSOCK_CONSOLE_PHASES:
+        return
+    try:
+        descriptor = os.open("/dev/hvc0", os.O_WRONLY | os.O_CLOEXEC)
+        try:
+            os.write(descriptor, b"TOBKIRI_AGENT:" + code.encode("ascii") + b"\n")
+        finally:
+            os.close(descriptor)
+    except OSError:
+        pass
 
 
 def _load_vsock_agent_config(path: Path) -> _VsockAgentConfig:
@@ -787,11 +920,18 @@ def _load_vsock_agent_config(path: Path) -> _VsockAgentConfig:
     if len(raw) > 16 * 1024:
         raise ValueError("PackVM guest agent configuration exceeds the size limit")
     value = json.loads(raw)
-    config = _exact_bridge_object(
-        value,
-        {"version", "domain_id", "binding_digests", "private_key_path"},
-        "PackVM guest agent configuration",
-    )
+    allowed_fields = {
+        "version",
+        "domain_id",
+        "binding_digests",
+        "private_key_path",
+    }
+    if not isinstance(value, dict) or set(value) not in (
+        allowed_fields,
+        {*allowed_fields, "artifact_seed"},
+    ):
+        raise ValueError("PackVM guest agent configuration is invalid")
+    config = value
     if config["version"] != PACKVM_GUEST_AGENT_VERSION:
         raise ValueError("PackVM guest agent configuration version is invalid")
     domain_id = config["domain_id"]
@@ -828,10 +968,16 @@ def _load_vsock_agent_config(path: Path) -> _VsockAgentConfig:
     key_path = Path(key_value)
     if not key_path.is_absolute():
         raise ValueError("PackVM guest agent key path is invalid")
+    artifact_seed = (
+        _validate_artifact_seed_binding(config["artifact_seed"])
+        if "artifact_seed" in config
+        else None
+    )
     return _VsockAgentConfig(
         domain_id=domain_id,
         binding_digests=copied_bindings,
         private_key_path=key_path,
+        artifact_seed=artifact_seed,
     )
 
 
@@ -855,6 +1001,7 @@ def _serve_authenticated_guest_agent(
     signer: _AgentSigner,
     *,
     max_requests: int | None = None,
+    max_active_requests: int = MAX_ACTIVE_AGENT_REQUESTS,
 ) -> int:
     """Serve bounded canonical helper requests with signed bound responses.
 
@@ -862,28 +1009,49 @@ def _serve_authenticated_guest_agent(
     with a local Unix socket and fake signer; production binds AF_VSOCK only.
     """
 
+    if max_requests is not None and max_requests < 0:
+        raise ValueError("PackVM guest agent request limit is invalid")
+    if max_active_requests <= 0 or max_active_requests > MAX_ACTIVE_AGENT_REQUESTS:
+        raise ValueError("PackVM guest agent active request limit is invalid")
+
     ledger = _PendingBridgeLedger()
-    workers: list[threading.Thread] = []
+    worker_state = threading.Condition()
+    active_workers = 0
 
     def serve_connection(connection: socket.socket) -> None:
+        nonlocal active_workers
         try:
             _serve_agent_connection(connection, config, signer, ledger)
         finally:
             connection.close()
+            with worker_state:
+                active_workers -= 1
+                worker_state.notify_all()
 
     served = 0
     while max_requests is None or served < max_requests:
+        with worker_state:
+            worker_state.wait_for(lambda: active_workers < max_active_requests)
         connection, _address = listener.accept()
+        _emit_vsock_console_phase("vsock-accepted")
         worker = threading.Thread(
             target=serve_connection,
             args=(connection,),
             daemon=True,
         )
-        worker.start()
-        workers.append(worker)
+        with worker_state:
+            active_workers += 1
+        try:
+            worker.start()
+        except Exception:
+            connection.close()
+            with worker_state:
+                active_workers -= 1
+                worker_state.notify_all()
+            raise
         served += 1
-    for worker in workers:
-        worker.join()
+    with worker_state:
+        worker_state.wait_for(lambda: active_workers == 0)
     return 0
 
 
@@ -898,14 +1066,28 @@ def _serve_agent_connection(
     request: dict[str, object] | None = None
     try:
         request = _read_agent_request(connection)
+        _emit_vsock_console_phase("vsock-request-read")
         response = _dispatch_agent_request(request, config, ledger)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
+        _emit_vsock_console_phase("vsock-request-rejected")
         response = _safe_agent_error_response(request, exc)
-    signed = _sign_agent_response(response, signer)
+    else:
+        _emit_vsock_console_phase("vsock-request-dispatched")
+    try:
+        signed = _sign_agent_response(response, signer)
+    except (OSError, ValueError):
+        _emit_vsock_console_phase("vsock-signing-failed")
+        raise
+    _emit_vsock_console_phase("vsock-signing-complete")
     encoded = _bridge_canonical_json(signed)
     if len(encoded) > MAX_AGENT_RESPONSE_BYTES:
         raise ValueError("PackVM guest agent response exceeds the size limit")
-    connection.sendall(encoded + b"\n")
+    try:
+        connection.sendall(encoded + b"\n")
+    except OSError:
+        _emit_vsock_console_phase("vsock-response-write-failed")
+        raise
+    _emit_vsock_console_phase("vsock-response-sent")
 
 
 def _read_agent_request(connection: socket.socket) -> dict[str, object]:
@@ -941,6 +1123,7 @@ def _dispatch_agent_request(
     """Verify launch bindings and execute only invoke/cancel/bridge-result."""
 
     base = _validate_agent_envelope(request, config, ledger)
+    _emit_vsock_console_phase("vsock-envelope-validated")
     operation = base["operation"]
     request_id = base["request_id"]
     if operation == "invoke":
@@ -987,7 +1170,7 @@ def _dispatch_agent_request(
                     },
                 },
             )
-        return _agent_success(base, result)
+        return _agent_success(base, _agent_invoke_outcome(result, config))
     if operation == "bridge_result":
         host_bridge_result = base["host_bridge_result"]
         pending = ledger.consume(domain_id=config.domain_id, request_id=request_id)
@@ -1005,15 +1188,17 @@ def _dispatch_agent_request(
             pending.bridge_request,
             bridge_result,
         )
-        return _agent_success(base, result)
+        return _agent_success(base, _agent_invoke_outcome(result, config))
     if operation == "attest":
         if request_id != f"attest-{config.domain_id}":
             raise ValueError("PackVM guest attestation request id is invalid")
         return _agent_success(
             base,
             {
-                "guest_artifact_identity": _bridge_canonical_digest(
-                    config.binding_digests
+                "guest_artifact_identity": (
+                    _seeded_artifact_identity(config.binding_digests)
+                    if config.artifact_seed is not None
+                    else _bridge_canonical_digest(config.binding_digests)
                 ),
             },
         )
@@ -1034,6 +1219,34 @@ def _dispatch_agent_request(
             },
         )
     raise ValueError("PackVM guest agent operation is invalid")
+
+
+def _agent_invoke_outcome(
+    result: object,
+    config: _VsockAgentConfig,
+) -> dict[str, object]:
+    """Unwrap only an exact, launch-bound runner completion for the Host ABI."""
+
+    if not isinstance(result, dict) or set(result) != {
+        "ok",
+        "protocol",
+        "guest_artifact_identity",
+        "payload",
+    }:
+        raise ValueError("PackVM guest invocation completion is invalid")
+    expected_identity = (
+        _seeded_artifact_identity(config.binding_digests)
+        if config.artifact_seed is not None
+        else _bridge_canonical_digest(config.binding_digests)
+    )
+    if (
+        result["ok"] is not True
+        or result["protocol"] != PROTOCOL
+        or result["guest_artifact_identity"] != expected_identity
+        or not isinstance(result["payload"], dict)
+    ):
+        raise ValueError("PackVM guest invocation completion is invalid")
+    return dict(result["payload"])
 
 
 def _cancel_agent_execution(domain_id: str, request_id: str) -> list[str]:
@@ -1322,7 +1535,15 @@ def _execute_staged_module(path: Path) -> int:
     try:
         if os.geteuid() == 0:
             raise ValueError("PackVM implementation may not execute as root")
-        request = json.loads(sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
+        # This entrypoint is unit-tested on the Host, but a production Pack
+        # child is always inside the Linux guest.  Do not pretend macOS has a
+        # Linux syscall boundary; enforce it before importing Pack code there.
+        if sys.platform.startswith("linux"):
+            _install_child_process_seccomp_filter()
+        raw_request = sys.stdin.buffer.read(MAX_CHILD_REQUEST_BYTES + 1)
+        if len(raw_request) > MAX_CHILD_REQUEST_BYTES:
+            raise ValueError("PackVM child request exceeds size limit")
+        request = json.loads(raw_request)
         if not isinstance(request, dict) or set(request) != {
             "contract_id",
             "operation_id",
@@ -1348,6 +1569,56 @@ def _execute_staged_module(path: Path) -> int:
     except Exception as error:
         sys.stderr.write(f"{type(error).__name__}: {error}\n")
         return 1
+
+
+def _install_child_process_seccomp_filter() -> None:
+    """Deny child processes, image replacement, and sockets before Pack import."""
+
+    if not sys.platform.startswith("linux"):
+        raise ValueError("PackVM child process policy requires Linux seccomp")
+    try:
+        seccomp = ctypes.CDLL("libseccomp.so.2", use_errno=True)
+    except OSError as exc:
+        raise ValueError("PackVM child process policy is unavailable") from exc
+
+    seccomp.seccomp_init.argtypes = [ctypes.c_uint32]
+    seccomp.seccomp_init.restype = ctypes.c_void_p
+    seccomp.seccomp_rule_add.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    seccomp.seccomp_rule_add.restype = ctypes.c_int
+    seccomp.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    seccomp.seccomp_syscall_resolve_name.restype = ctypes.c_int
+    seccomp.seccomp_load.argtypes = [ctypes.c_void_p]
+    seccomp.seccomp_load.restype = ctypes.c_int
+    seccomp.seccomp_release.argtypes = [ctypes.c_void_p]
+    seccomp.seccomp_release.restype = None
+
+    context = seccomp.seccomp_init(_SCMP_ACT_ALLOW)
+    if not context:
+        raise ValueError("PackVM child process policy initialization failed")
+    deny_action = _SCMP_ACT_ERRNO | errno.EPERM
+    try:
+        resolved: dict[bytes, int] = {}
+        for name in (
+            *_REQUIRED_CHILD_PROCESS_SYSCALLS,
+            *_OPTIONAL_CHILD_PROCESS_SYSCALLS,
+        ):
+            syscall = seccomp.seccomp_syscall_resolve_name(name)
+            if syscall >= 0:
+                resolved[name] = syscall
+        if any(name not in resolved for name in _REQUIRED_CHILD_PROCESS_SYSCALLS):
+            raise ValueError("PackVM child process policy is incomplete")
+        for syscall in set(resolved.values()):
+            if seccomp.seccomp_rule_add(context, deny_action, syscall, 0) != 0:
+                raise ValueError("PackVM child process policy rule failed")
+        if seccomp.seccomp_load(context) != 0:
+            raise ValueError("PackVM child process policy could not be loaded")
+    finally:
+        seccomp.seccomp_release(context)
 
 
 def _sandbox_argv(target: Path, implementation: Path) -> tuple[str, ...]:
@@ -1747,6 +2018,392 @@ def _materialize_locked(request: dict[str, object]) -> dict[str, object]:
     }
 
 
+def materialize_seed_artifact(
+    seed_path: Path,
+    seed_binding: object,
+    binding_digests: object,
+) -> str:
+    """Stage one Host-bound binary seed before the guest agent starts.
+
+    This is deliberately separate from the vsock protocol: a direct VZ domain
+    receives exactly one artifact at allocation time, on its verified CIDATA
+    disk.  The function streams that disk input into the normal immutable
+    artifact namespace without a Host path, network share, or base64 copy.
+    """
+
+    if os.geteuid() != 0:
+        raise ValueError("artifact seed materialization requires the root-owned supervisor")
+    expected_seed = _validate_artifact_seed_binding(seed_binding)
+    checked_bindings = _validate_seed_binding_digests(binding_digests)
+    with _artifact_storage_lock():
+        return _materialize_seed_artifact_locked(
+            Path(seed_path),
+            expected_seed,
+            checked_bindings,
+        )
+
+
+def _validate_artifact_seed_binding(value: object) -> dict[str, object]:
+    """Validate the CIDATA-local identity for one allocation-bound seed."""
+
+    if not isinstance(value, dict) or set(value) != {"format", "digest", "size_bytes"}:
+        raise ValueError("PackVM artifact seed binding is invalid")
+    if value.get("format") != ARTIFACT_SEED_SCHEMA:
+        raise ValueError("PackVM artifact seed format is invalid")
+    digest = _digest(value.get("digest"), "artifact seed digest")
+    size = value.get("size_bytes")
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or size < len(ARTIFACT_SEED_MAGIC) + 8
+        or size > MAX_ARTIFACT_SEED_BYTES
+    ):
+        raise ValueError("PackVM artifact seed size is invalid")
+    return {"format": ARTIFACT_SEED_SCHEMA, "digest": digest, "size_bytes": size}
+
+
+def _validate_seed_binding_digests(value: object) -> dict[str, str]:
+    """Return the exact launch facts a CIDATA seed must materialize."""
+
+    required = {
+        "domain",
+        "lease",
+        "reservation",
+        "image",
+        "agent",
+        "config",
+        "disk",
+        "guest_public_key",
+        "efi_variable_store",
+        "artifact",
+        "executable",
+        "materialization",
+    }
+    optional_linux = {"kernel", "initrd"}
+    if not isinstance(value, dict) or set(value) not in (
+        required,
+        {*required, *optional_linux},
+    ):
+        raise ValueError("PackVM artifact seed bindings are invalid")
+    return {key: _digest(item, f"artifact seed {key}") for key, item in value.items()}
+
+
+def _materialize_seed_artifact_locked(
+    seed_path: Path,
+    expected_seed: dict[str, object],
+    binding_digests: dict[str, str],
+) -> str:
+    """Stream an exact seed archive into the normal artifact tree under lock."""
+
+    descriptor = os.open(
+        seed_path,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    temporary: Path | None = None
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size != expected_seed["size_bytes"]
+        ):
+            raise ValueError("PackVM artifact seed is unsafe")
+        seed_digest = hashlib.sha256()
+
+        def read_exact(length: int) -> bytes:
+            if length < 0:
+                raise ValueError("PackVM artifact seed length is invalid")
+            remaining = length
+            chunks: list[bytes] = []
+            while remaining:
+                chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError("PackVM artifact seed ended early")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+            seed_digest.update(data)
+            return data
+
+        if read_exact(len(ARTIFACT_SEED_MAGIC)) != ARTIFACT_SEED_MAGIC:
+            raise ValueError("PackVM artifact seed format is invalid")
+        manifest_size = int.from_bytes(read_exact(8), "big")
+        if manifest_size < 1 or manifest_size > MAX_ARTIFACT_METADATA_BYTES:
+            raise ValueError("PackVM artifact seed manifest exceeds its bound")
+        try:
+            manifest = json.loads(read_exact(manifest_size))
+        except json.JSONDecodeError as exc:
+            raise ValueError("PackVM artifact seed manifest is invalid") from exc
+        parsed = _validate_artifact_seed_manifest(manifest, binding_digests)
+        artifact_digest = parsed["artifact_digest"]
+        materialization_digest = parsed["materialization_digest"]
+        files = parsed["files"]
+        assert isinstance(artifact_digest, str)
+        assert isinstance(materialization_digest, str)
+        assert isinstance(files, list)
+        total = sum(int(item["size"]) for item in files)
+        parent = ARTIFACT_ROOT / artifact_digest.removeprefix("sha256:")
+        parent.mkdir(mode=0o700, exist_ok=True)
+        parent_metadata = parent.lstat()
+        if parent.is_symlink() or not stat.S_ISDIR(parent_metadata.st_mode):
+            raise ValueError("artifact staging parent is symlinked")
+        target = parent / materialization_digest.removeprefix("sha256:")
+        target_exists = target.exists()
+        if target_exists:
+            _verify_staged_artifact(target, artifact_digest, materialization_digest)
+        else:
+            stored_bytes = _artifact_storage_bytes()
+            projected_bytes = stored_bytes + total + MAX_ARTIFACT_METADATA_BYTES
+            if projected_bytes > MAX_ARTIFACT_STORAGE_BYTES:
+                raise ValueError(
+                    "PackVM artifact storage quota exceeded: "
+                    f"{projected_bytes} bytes projected, "
+                    f"{MAX_ARTIFACT_STORAGE_BYTES} bytes allowed"
+                )
+            free_bytes = int(shutil.disk_usage(ARTIFACT_ROOT).free)
+            required_free = total + MAX_ARTIFACT_METADATA_BYTES + MIN_GUEST_FREE_RESERVE_BYTES
+            if free_bytes < required_free:
+                raise ValueError(
+                    "PackVM guest free space is insufficient: "
+                    f"{required_free} bytes required, {free_bytes} bytes available"
+                )
+            nonce = str(expected_seed["digest"]).removeprefix("sha256:")
+            temporary = parent / f".{materialization_digest.removeprefix('sha256:')}.{nonce}.tmp"
+            if temporary.exists() or temporary.is_symlink():
+                raise ValueError("artifact staging temporary path already exists")
+            temporary.mkdir(mode=0o700)
+
+        for item in files:
+            path = str(item["path"])
+            expected_digest = str(item["digest"])
+            executable = bool(item["executable"])
+            remaining = int(item["size"])
+            destination: Path | None = None
+            output: int | None = None
+            file_digest = hashlib.sha256()
+            if temporary is not None:
+                destination = _seed_destination(temporary, path)
+                output = os.open(
+                    destination,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o555 if executable else 0o444,
+                )
+            try:
+                while remaining:
+                    chunk = os.read(descriptor, min(1024 * 1024, remaining))
+                    if not chunk:
+                        raise ValueError("PackVM artifact seed ended early")
+                    seed_digest.update(chunk)
+                    file_digest.update(chunk)
+                    if output is not None:
+                        _write_all(output, chunk)
+                    remaining -= len(chunk)
+            finally:
+                if output is not None:
+                    os.fsync(output)
+                    os.close(output)
+            if "sha256:" + file_digest.hexdigest() != expected_digest:
+                raise ValueError("PackVM artifact seed file digest mismatch")
+            if destination is not None:
+                os.chmod(destination, 0o555 if executable else 0o444)
+
+        if os.read(descriptor, 1):
+            raise ValueError("PackVM artifact seed contains trailing bytes")
+        after = os.fstat(descriptor)
+        if (
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            or "sha256:" + seed_digest.hexdigest() != expected_seed["digest"]
+        ):
+            raise ValueError("PackVM artifact seed changed while materializing")
+
+        if temporary is not None:
+            _write_seed_materialization_manifest(temporary, parsed, str(expected_seed["digest"]))
+            for current, directories, _names in os.walk(temporary, topdown=False):
+                for directory in directories:
+                    os.chmod(Path(current) / directory, 0o555)
+                if Path(current) != temporary:
+                    os.chmod(current, 0o555)
+            os.replace(temporary, target)
+            temporary = None
+            os.chmod(target, 0o555)
+        return _verify_staged_artifact(target, artifact_digest, materialization_digest)
+    finally:
+        os.close(descriptor)
+        if temporary is not None and temporary.exists():
+            _make_tree_writable(temporary)
+            shutil.rmtree(temporary)
+
+
+def _validate_artifact_seed_manifest(
+    value: object,
+    binding_digests: dict[str, str],
+) -> dict[str, object]:
+    """Validate seed metadata before trusting any archive payload bytes."""
+
+    required = {
+        "schema",
+        "pack_id",
+        "artifact_digest",
+        "function_id",
+        "implementation_digest",
+        "implementation_path",
+        "materialization_digest",
+        "files",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        raise ValueError("PackVM artifact seed manifest is invalid")
+    if value.get("schema") != ARTIFACT_SEED_SCHEMA:
+        raise ValueError("PackVM artifact seed format is invalid")
+    pack_id = _identifier(value.get("pack_id"), "artifact seed pack_id")
+    function_id = _identifier(value.get("function_id"), "artifact seed function_id")
+    artifact_digest = _digest(value.get("artifact_digest"), "artifact seed artifact")
+    implementation_digest = _digest(
+        value.get("implementation_digest"), "artifact seed implementation"
+    )
+    materialization_digest = _digest(
+        value.get("materialization_digest"), "artifact seed materialization"
+    )
+    implementation_path = _relative_path(value.get("implementation_path"))
+    if (
+        artifact_digest != binding_digests["artifact"]
+        or implementation_digest != binding_digests["executable"]
+        or materialization_digest != binding_digests["materialization"]
+    ):
+        raise ValueError("PackVM artifact seed binding mismatch")
+    raw_files = value.get("files")
+    if not isinstance(raw_files, list) or not raw_files or len(raw_files) > MAX_FILES:
+        raise ValueError("PackVM artifact seed inventory is invalid")
+    files: list[dict[str, object]] = []
+    seen: set[str] = set()
+    total = 0
+    for raw_file in raw_files:
+        if not isinstance(raw_file, dict) or set(raw_file) != {
+            "path",
+            "digest",
+            "executable",
+            "size",
+        }:
+            raise ValueError("PackVM artifact seed file entry is invalid")
+        path = _relative_path(raw_file.get("path"))
+        digest = _digest(raw_file.get("digest"), "artifact seed file digest")
+        executable = raw_file.get("executable")
+        size = raw_file.get("size")
+        if (
+            path in seen
+            or not isinstance(executable, bool)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or size > MAX_FILE_BYTES
+        ):
+            raise ValueError("PackVM artifact seed file entry is invalid")
+        seen.add(path)
+        total += size
+        if total > MAX_TOTAL_BYTES:
+            raise ValueError("PackVM artifact seed exceeds the total size limit")
+        files.append(
+            {"path": path, "digest": digest, "executable": executable, "size": size}
+        )
+    implementations = [item for item in files if item["path"] == implementation_path]
+    if len(implementations) != 1 or implementations[0]["digest"] != implementation_digest:
+        raise ValueError("PackVM artifact seed implementation identity is unavailable")
+    expected_materialization = _canonical_digest(
+        {
+            "pack_id": pack_id,
+            "artifact_digest": artifact_digest,
+            "function_id": function_id,
+            "implementation_digest": implementation_digest,
+            "implementation_path": implementation_path,
+            "files": files,
+        }
+    )
+    if expected_materialization != materialization_digest:
+        raise ValueError("PackVM artifact seed materialization digest mismatch")
+    return {
+        "pack_id": pack_id,
+        "artifact_digest": artifact_digest,
+        "function_id": function_id,
+        "implementation_digest": implementation_digest,
+        "implementation_path": implementation_path,
+        "materialization_digest": materialization_digest,
+        "files": files,
+    }
+
+
+def _seed_destination(root: Path, path: str) -> Path:
+    """Create only no-follow private parent directories for one seed entry."""
+
+    current = root
+    for part in PurePosixPath(path).parts[:-1]:
+        current = current / part
+        if not current.exists():
+            current.mkdir(mode=0o700)
+        metadata = current.lstat()
+        if current.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("PackVM artifact seed destination is unsafe")
+    return root.joinpath(*PurePosixPath(path).parts)
+
+
+def _write_seed_materialization_manifest(
+    root: Path,
+    parsed: dict[str, object],
+    seed_digest: str,
+) -> None:
+    """Write the same read-only manifest verified by every future invoke."""
+
+    manifest = {
+        "version": "io.tobkiri.packvm-materialization.v1",
+        "pack_id": parsed["pack_id"],
+        "artifact_digest": parsed["artifact_digest"],
+        "function_id": parsed["function_id"],
+        "implementation_digest": parsed["implementation_digest"],
+        "implementation_path": parsed["implementation_path"],
+        "materialization_digest": parsed["materialization_digest"],
+        "materialization_nonce": seed_digest.removeprefix("sha256:"),
+        "files": parsed["files"],
+    }
+    encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    path = root / ".tobkiri-materialization.json"
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o444,
+    )
+    try:
+        _write_all(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o444)
+
+
+def _write_all(descriptor: int, payload: bytes) -> None:
+    """Write an exact seed/materialization chunk without short-write loss."""
+
+    view = memoryview(payload)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError("PackVM artifact staging write made no progress")
+        view = view[written:]
+
+
+def _seeded_artifact_identity(binding_digests: Mapping[str, str]) -> str:
+    """Measure the pre-boot seed at the exact path every invoke will use."""
+
+    artifact_digest = _digest(binding_digests.get("artifact"), "artifact binding")
+    materialization_digest = _digest(
+        binding_digests.get("materialization"), "materialization binding"
+    )
+    target = (
+        ARTIFACT_ROOT
+        / artifact_digest.removeprefix("sha256:")
+        / materialization_digest.removeprefix("sha256:")
+    )
+    return _verify_staged_artifact(target, artifact_digest, materialization_digest)
+
+
 @contextmanager
 def _artifact_storage_lock() -> Iterator[None]:
     """Serialize staging and quota accounting without following links."""
@@ -1885,15 +2542,13 @@ def _verify_staged_artifact(
             raise ValueError("staged artifact manifest is invalid")
         relative = _relative_path(item.get("path"))
         candidate = target.joinpath(*PurePosixPath(relative).parts)
-        candidate_metadata = candidate.lstat()
-        if candidate.is_symlink() or not stat.S_ISREG(candidate_metadata.st_mode):
-            raise ValueError("staged artifact contains an unsafe file")
         expected_mode = 0o555 if item.get("executable") is True else 0o444
-        if stat.S_IMODE(candidate_metadata.st_mode) != expected_mode:
-            raise ValueError("staged artifact file is not read-only")
-        content = candidate.read_bytes()
-        if len(content) != item.get("size") or _sha256(content) != item.get("digest"):
-            raise ValueError("staged artifact file digest changed")
+        _verify_staged_artifact_file(
+            candidate,
+            expected_size=item.get("size"),
+            expected_digest=item.get("digest"),
+            expected_mode=expected_mode,
+        )
     return _canonical_digest(
         {
             "artifact_digest": artifact_digest,
@@ -1903,6 +2558,75 @@ def _verify_staged_artifact(
             "implementation_digest": manifest.get("implementation_digest"),
         }
     )
+
+
+def _verify_staged_artifact_file(
+    candidate: Path,
+    *,
+    expected_size: object,
+    expected_digest: object,
+    expected_mode: int,
+) -> None:
+    """Hash one staged file through a stable no-follow descriptor."""
+
+    if (
+        not isinstance(expected_size, int)
+        or isinstance(expected_size, bool)
+        or expected_size < 0
+        or expected_size > MAX_FILE_BYTES
+    ):
+        raise ValueError("staged artifact manifest is invalid")
+    digest = _digest(expected_digest, "staged artifact file digest")
+    initial = candidate.lstat()
+    if (
+        candidate.is_symlink()
+        or not stat.S_ISREG(initial.st_mode)
+        or initial.st_nlink != 1
+        or stat.S_IMODE(initial.st_mode) != expected_mode
+    ):
+        raise ValueError("staged artifact contains an unsafe file")
+    if initial.st_size != expected_size:
+        raise ValueError("staged artifact file digest changed")
+    descriptor = os.open(
+        candidate,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != expected_mode
+            or before.st_size != expected_size
+            or (before.st_dev, before.st_ino, before.st_mtime_ns)
+            != (initial.st_dev, initial.st_ino, initial.st_mtime_ns)
+        ):
+            raise ValueError("staged artifact file changed while opening")
+        hasher = hashlib.sha256()
+        remaining = expected_size
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                raise ValueError("staged artifact file ended early")
+            hasher.update(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ValueError("staged artifact file grew while reading")
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        final = candidate.lstat()
+    except OSError as exc:
+        raise ValueError("staged artifact file changed while reading") from exc
+    if (
+        (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_nlink)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_nlink)
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_nlink)
+        != (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_nlink)
+        or "sha256:" + hasher.hexdigest() != digest
+    ):
+        raise ValueError("staged artifact file digest changed")
 
 
 def _load_manifest(target: Path) -> dict[str, object]:

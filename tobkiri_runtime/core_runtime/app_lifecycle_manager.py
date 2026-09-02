@@ -254,6 +254,7 @@ class AppLifecycleManager:
                 runtime_surface_factory=inputs.runtime_surface_factory,
                 capability_binding_snapshot_factory=(inputs.capability_binding_snapshot_factory),
                 capability_binding_selector=inputs.capability_binding_selector,
+                credential_store_factory=inputs.credential_store_factory,
             )
             install_dispatch_session(get_container(), session)
             mark_runtime_ready()

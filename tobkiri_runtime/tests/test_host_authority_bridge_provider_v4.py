@@ -46,6 +46,8 @@ class _ApprovalPort:
             state=state,
             expires_at=123_456.0,
             typed_confirmation_required=True,
+            request_snapshot_digest="a" * 64,
+            typed_confirmation_digest="b" * 64,
             redacted_metadata={"summary": "Publish branch"},
         )
         self._records[request_id] = (context, status)
@@ -106,6 +108,8 @@ class _ApprovalPort:
             state=state,
             expires_at=status.expires_at,
             typed_confirmation_required=status.typed_confirmation_required,
+            request_snapshot_digest=status.request_snapshot_digest,
+            typed_confirmation_digest=status.typed_confirmation_digest,
             redacted_metadata=status.redacted_metadata,
         )
         self._records[command.request_id] = (record[0], next_status)
@@ -343,6 +347,8 @@ def test_decisions_forward_authenticated_context_and_return_only_redacted_status
         "state",
         "expires_at",
         "typed_confirmation_required",
+        "request_snapshot_digest",
+        "typed_confirmation_digest",
         "redacted_metadata",
     }
     assert not {

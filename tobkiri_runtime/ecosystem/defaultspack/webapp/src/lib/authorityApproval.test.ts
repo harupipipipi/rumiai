@@ -136,6 +136,18 @@ test("interactive approval window is tokenless and uses the dedicated resource",
   assert.doesNotMatch(resourceSource, /sendMessage|approveAuthorityApproval|denyAuthorityApproval|AuthorityApprovalDecision/);
 });
 
+test("interactive approval errors use one stable accessible copy action", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /import \{[\s\S]*Copy,[\s\S]*\} from "lucide-react"/);
+  assert.match(source, /function ApprovalError\([\s\S]*role="alert"/);
+  assert.match(source, /aria-live="assertive"/);
+  assert.match(source, /<Copy aria-hidden="true" size=\{14\} \/>/);
+  assert.match(source, /<ApprovalError message="request_id が見つかりません。" \/>/);
+  assert.match(source, /<ApprovalError message="この承認に必要な確認情報を取得できませんでした。安全のため操作できません。" \/>/);
+  assert.doesNotMatch(source, /feedback === "copied"[^\n]*\? <Check/);
+});
+
 test("interactive approval API exposes only the redacted projection and exact decision bodies", () => {
   const apiSource = readFileSync(resolve(SRC_ROOT, "lib", "api.ts"), "utf8");
   const typeStart = apiSource.indexOf("export type InteractiveApprovalRequest = {");
@@ -143,15 +155,19 @@ test("interactive approval API exposes only the redacted projection and exact de
   const typeSource = apiSource.slice(typeStart, typeEnd + 3);
 
   assert.match(typeSource, /request_id: string;/);
+  assert.match(typeSource, /request_snapshot_digest: string;/);
   assert.match(typeSource, /state: string;/);
   assert.match(typeSource, /expires_at: number;/);
   assert.match(typeSource, /typed_confirmation_required: boolean;/);
+  assert.match(typeSource, /typed_confirmation_digest: string \| null;/);
   assert.match(typeSource, /redacted_metadata: Record<string, string>;/);
   assert.doesNotMatch(typeSource, /token|grant|receipt|scope|resource|config|approval_id/i);
   assert.match(apiSource, /defaultspackContractRoute\("api\/interactive-approval\/v1\/list"\)/);
   assert.match(apiSource, /defaultspackContractRoute\("api\/interactive-approval\/v1\/get"\)[\s\S]*body: JSON\.stringify\(\{ request_id: requestId \}\)/);
   assert.match(apiSource, /defaultspackContractRoute\("api\/interactive-approval\/v1\/approve"\)[\s\S]*request_id: requestId,[\s\S]*confirmation_text: options\.confirmation_text,[\s\S]*ui_operator: options\.ui_operator/);
   assert.match(apiSource, /defaultspackContractRoute\("api\/interactive-approval\/v1\/deny"\)[\s\S]*request_id: requestId,[\s\S]*ui_operator: options\.ui_operator/);
+  assert.match(authorityApprovalWindowSource(), /getAuthorityApprovalContext\(requestId, \{[\s\S]*decision: "approve",[\s\S]*requestSnapshotDigest: current\.request_snapshot_digest,[\s\S]*typedConfirmationDigest: current\.typed_confirmation_digest/);
+  assert.match(authorityApprovalWindowSource(), /getAuthorityApprovalContext\(requestId, \{[\s\S]*decision: "deny",[\s\S]*requestSnapshotDigest: current\.request_snapshot_digest,[\s\S]*typedConfirmationDigest: null/);
 });
 
 test("pending authority approval detects persisted assistant metadata", () => {

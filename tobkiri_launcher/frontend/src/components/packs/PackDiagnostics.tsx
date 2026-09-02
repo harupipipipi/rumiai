@@ -1,6 +1,7 @@
 import type {ApiFrontendDiagnostic} from '@/src/lib/apiTypes';
 import {userSafePackVMError} from '@/src/lib/packvmLifecycle';
 import {Badge} from '@/src/components/ui/Badge';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Card, CardContent, CardHeader, CardTitle} from '@/src/components/ui/Card';
 
 type DiagnosticSeverity = 'error' | 'warning' | 'info';
@@ -23,6 +24,25 @@ export interface PackDiagnosticsProps {
   title?: string;
 }
 
+function diagnosticText(diagnostic: ApiFrontendDiagnostic): string {
+  const owner = diagnostic.owner_pack_id ?? diagnostic.pack_id;
+  const recovery = diagnostic.code === 'production_backend_unavailable'
+    ? 'Invocation remains unavailable until Tobkiri reports a healthy verified backend.'
+    : null;
+  return [
+    userSafePackVMError(diagnostic.code),
+    userSafePackVMError(diagnostic.message),
+    ...(recovery ? [recovery] : []),
+    `Owner: ${owner ? userSafePackVMError(owner) : 'Catalog'}`,
+    `Contribution: ${diagnostic.contribution_id
+      ? userSafePackVMError(diagnostic.contribution_id)
+      : '—'}`,
+    `Operation: ${diagnostic.operation_id
+      ? userSafePackVMError(diagnostic.operation_id)
+      : '—'}`,
+  ].join('\n');
+}
+
 export function PackDiagnostics({diagnostics, title = 'Capability diagnostics'}: PackDiagnosticsProps) {
   if (diagnostics.length === 0) return null;
 
@@ -43,6 +63,7 @@ export function PackDiagnostics({diagnostics, title = 'Capability diagnostics'}:
             const location = diagnostic.contribution_id
               ?? diagnostic.operation_id
               ?? owner;
+            const copiedDiagnostic = diagnosticText(diagnostic);
             return (
               <li
                 key={`${diagnostic.code}:${location ?? 'catalog'}:${index}`}
@@ -55,7 +76,10 @@ export function PackDiagnostics({diagnostics, title = 'Capability diagnostics'}:
                     {userSafePackVMError(diagnostic.code)}
                   </span>
                 </div>
-                <p className="mt-2 text-text-muted">{userSafePackVMError(diagnostic.message)}</p>
+                <div className="mt-2 flex items-start gap-2">
+                  <p className="min-w-0 flex-1 break-words text-text-muted">{userSafePackVMError(diagnostic.message)}</p>
+                  {blocking ? <CopyErrorButton label="Copy Pack diagnostic" text={copiedDiagnostic} /> : null}
+                </div>
                 {diagnostic.code === 'production_backend_unavailable' ? (
                   <p className="mt-2 text-xs text-text-muted">
                     Invocation remains unavailable until Tobkiri reports a healthy verified backend.

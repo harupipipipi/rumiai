@@ -15,6 +15,7 @@ from core_runtime.interactive_effect_coordinator import (
     INTERACTIVE_EFFECT_SPECS,
     InteractiveEffectUnavailable,
     _execute_payload,
+    _presentation_metadata,
 )
 from core_runtime.host_provider_backend_v4 import HostProviderCaptureContextV4
 from core_runtime.authority.v4 import AuthorityScope
@@ -25,7 +26,7 @@ from tobkiri_host.ports import InteractiveEffectStatus, OpaqueInvocationLease
 from tobkiri_protocol.canonical import canonical_digest
 
 
-def _git_plan(operation: str) -> dict[str, object]:
+def _git_plan(operation: str, **details: object) -> dict[str, object]:
     """Build one sealed Git prepare response accepted by the fixed transform."""
 
     plan: dict[str, object] = {
@@ -36,6 +37,7 @@ def _git_plan(operation: str) -> dict[str, object]:
         "repository_root": ".",
         "expected_mount_revision": 7,
     }
+    plan.update(details)
     return {**plan, "plan_digest": canonical_digest(plan)}
 
 
@@ -115,6 +117,249 @@ def test_transform_rejects_tampered_git_plan() -> None:
 
     with pytest.raises(InteractiveEffectUnavailable):
         _execute_payload(INTERACTIVE_EFFECT_SPECS["git_commit"], {}, plan)
+
+
+def _prepared_presentation(payload: Mapping[str, Any]) -> Any:
+    """Build a Host-prepared snapshot double for approval-copy coverage."""
+
+    return SimpleNamespace(
+        normalized_payload=payload,
+        request_digest=canonical_digest({"prepared": payload}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("effect_kind", "payload", "expected_action", "expected_detail", "forbidden"),
+    (
+        (
+            "shell_execute",
+            {
+                "redacted_plan": {"plan_version": "tobkiri.shell-execute.plan.v4"},
+                "plan_digest": canonical_digest({"shell": "prepared"}),
+                "arguments": {
+                    "command": ["git", "push", "--token", "token-value"],
+                    "cwd": "packages/app",
+                },
+            },
+            "Run local terminal command",
+            'argv: ["git", "push", "--token", "[REDACTED]"]\ncwd: packages/app',
+            "token-value",
+        ),
+        (
+            "git_commit",
+            {
+                "plan": _git_plan(
+                    "rumi_git_write_pack.git-commit",
+                    message="Fix parser token=secret-value",
+                    expected_head_ref="refs/heads/main",
+                    expected_index_tree="c" * 40,
+                ),
+                "profile_id": "profile.nondefault",
+                "workspace_id": "workspace.primary",
+            },
+            "Create Git commit",
+            (
+                "message: Fix parser [REDACTED]\nrepository: .\n"
+                "branch: refs/heads/main\nstaged tree: " + "c" * 40
+            ),
+            "secret-value",
+        ),
+        (
+            "git_push",
+            {
+                "plan": {
+                    "remote_name": "origin",
+                    "remote_host": "github.com",
+                    "destination_ref": "refs/heads/main",
+                    "force_with_lease": {
+                        "mode": "exact-remote-oid",
+                        "allow_non_fast_forward": False,
+                        "argument": "--force-with-lease=refs/heads/main:012345",
+                    },
+                    "credential_transport": {"credential_handle": "must-not-display"},
+                },
+                "plan_digest": "",  # Filled below so each literal remains readable.
+            },
+            "Push Git branch",
+            (
+                "remote: origin (github.com)\nref: refs/heads/main\n"
+                "lease target: --force-with-lease=refs/heads/main:012345\n"
+                "lease mode: exact-remote-oid\nfast-forward only: yes\n"
+                "non-fast-forward updates: not permitted"
+            ),
+            "must-not-display",
+        ),
+        (
+            "git_apply_patch",
+            {
+                "plan": _git_plan(
+                    "rumi_git_write_pack.git-apply-patch",
+                    paths=["src/main.py", "secrets/token=not-displayed.py"],
+                    stdin_sha256="a" * 64,
+                ),
+                "profile_id": "profile.nondefault",
+                "workspace_id": "workspace.primary",
+                "patch": "raw secret patch bytes must never reach metadata",
+            },
+            "Apply Git patch",
+            "patch: sha256:" + "a" * 64,
+            "raw secret patch bytes",
+        ),
+        (
+            "git_restore",
+            {
+                "plan": _git_plan(
+                    "rumi_git_write_pack.git-restore",
+                    paths=["src/main.py", "bin/tool"],
+                    source_tree="b" * 40,
+                    targets=[
+                        {"path": "src/main.py", "mode": "100644"},
+                        {"path": "bin/tool", "mode": "100755"},
+                    ],
+                ),
+                "profile_id": "profile.nondefault",
+                "workspace_id": "workspace.primary",
+            },
+            "Restore Git paths",
+            "restore mode: working tree from prepared tree " + "b" * 40,
+            "postimages",
+        ),
+    ),
+)
+def test_host_approval_presentation_describes_each_prepared_high_risk_effect(
+    effect_kind: str,
+    payload: Mapping[str, Any],
+    expected_action: str,
+    expected_detail: str,
+    forbidden: str,
+) -> None:
+    """Approval copy comes only from a bounded Host-prepared effect snapshot."""
+
+    mutable_payload = dict(payload)
+    if effect_kind == "git_push":
+        plan = dict(mutable_payload["plan"])
+        mutable_payload["plan"] = plan
+        mutable_payload["plan_digest"] = canonical_digest(plan)
+    metadata = _presentation_metadata(
+        INTERACTIVE_EFFECT_SPECS[effect_kind],
+        _prepared_presentation(mutable_payload),
+    )
+
+    assert metadata["action"] == expected_action
+    assert expected_detail in metadata["detail"]
+    assert forbidden not in "\n".join(metadata.values())
+    assert metadata["confirmation_phrase"] == "EXECUTE"
+    assert all(len(value) <= 2_048 for value in metadata.values())
+
+
+def test_host_approval_presentation_fails_closed_on_an_unsealed_or_malformed_plan() -> None:
+    """A display transform cannot turn a malformed future effect into approval UI."""
+
+    with pytest.raises(InteractiveEffectUnavailable):
+        _presentation_metadata(
+            INTERACTIVE_EFFECT_SPECS["git_push"],
+            _prepared_presentation(
+                {
+                    "plan": {"remote_name": "origin"},
+                    "plan_digest": canonical_digest({"remote_name": "forged"}),
+                }
+            ),
+        )
+
+
+def test_commit_presentation_binds_the_message_to_the_sealed_staged_tree() -> None:
+    """Same commit text with a changed staged tree must produce distinct approval copy."""
+
+    def presentation(index_tree: str) -> Mapping[str, str]:
+        plan = _git_plan(
+            "rumi_git_write_pack.git-commit",
+            message="Ship the prepared change",
+            expected_head_ref="refs/heads/main",
+            expected_index_tree=index_tree,
+        )
+        return _presentation_metadata(
+            INTERACTIVE_EFFECT_SPECS["git_commit"],
+            _prepared_presentation(
+                {
+                    "plan": plan,
+                    "profile_id": "profile.nondefault",
+                    "workspace_id": "workspace.primary",
+                }
+            ),
+        )
+
+    first = presentation("c" * 40)
+    second = presentation("d" * 40)
+    assert "staged tree: " + "c" * 40 in first["detail"]
+    assert "staged tree: " + "d" * 40 in second["detail"]
+    assert first["detail"] != second["detail"]
+
+
+@pytest.mark.parametrize(
+    ("allow_non_fast_forward", "expected_policy", "expected_notice"),
+    (
+        (False, "fast-forward only: yes", "non-fast-forward updates: not permitted"),
+        (
+            True,
+            "fast-forward only: no",
+            "WARNING: non-fast-forward push may overwrite remote history.",
+        ),
+    ),
+)
+def test_push_presentation_discloses_the_sealed_force_with_lease_policy(
+    allow_non_fast_forward: bool,
+    expected_policy: str,
+    expected_notice: str,
+) -> None:
+    """Approval must distinguish safe pushes from remote-history overwrites."""
+
+    plan = {
+        "remote_name": "origin",
+        "remote_host": "github.com",
+        "destination_ref": "refs/heads/main",
+        "force_with_lease": {
+            "mode": "exact-remote-oid",
+            "allow_non_fast_forward": allow_non_fast_forward,
+            "argument": "--force-with-lease=refs/heads/main:012345",
+        },
+    }
+    metadata = _presentation_metadata(
+        INTERACTIVE_EFFECT_SPECS["git_push"],
+        _prepared_presentation(
+            {"plan": plan, "plan_digest": canonical_digest(plan)}
+        ),
+    )
+
+    assert expected_policy in metadata["detail"]
+    assert expected_notice in metadata["detail"]
+
+
+def test_terminal_presentation_defaults_cwd_and_redacts_or_bounds_display_text() -> None:
+    """Valid provider defaults remain visible without leaking unbounded command data."""
+
+    secret = "super-secret-terminal-token"
+    metadata = _presentation_metadata(
+        INTERACTIVE_EFFECT_SPECS["shell_execute"],
+        _prepared_presentation(
+            {
+                "redacted_plan": {
+                    "plan_version": "tobkiri.shell-execute.plan.v4",
+                    "stdout": "must-not-be-presented",
+                    "stderr": "must-not-be-presented",
+                },
+                "plan_digest": canonical_digest({"shell": "prepared"}),
+                "arguments": {
+                    "command": ["git", "--token", secret, "x" * 5_000],
+                },
+            }
+        ),
+    )
+
+    assert "cwd: ." in metadata["detail"]
+    assert secret not in metadata["detail"]
+    assert "must-not-be-presented" not in metadata["detail"]
+    assert "[truncated sha256:" in metadata["detail"]
+    assert len(metadata["detail"]) <= 1_600
 
 
 class _EffectPort:
@@ -345,6 +590,7 @@ class _PreparedBroker:
             request_digest=canonical_digest(
                 {"request_id": context.request_id, "payload": dict(frame.payload)}
             ),
+            normalized_payload=dict(frame.payload),
         )
 
 
@@ -473,7 +719,40 @@ def test_host_service_prepares_execute_snapshot_and_scopes_all_owner_dimensions(
     )
     assert prepared["presentation_owner_principal_id"] == "caller-principal"
     assert prepared["presentation_owner_session_id"] == "session-caller"
+    assert prepared["presentation_metadata"] == {
+        "action": "Run local terminal command",
+        "summary": "Run the prepared local terminal command.",
+        "detail": 'argv: ["git", "status"]\ncwd: .',
+        "confirmation_phrase": "EXECUTE",
+    }
     assert result.effect_id == "pending-effect-1"
+
+
+def test_host_service_rejects_browser_presentation_copy_before_preparing_an_effect() -> None:
+    """The coordinator accepts no browser-controlled approval presentation data."""
+
+    service, broker, _controller, outer = _interactive_service()
+    with pytest.raises(InteractiveEffectUnavailable):
+        service.prepare_interactive_effect(
+            bridge.InteractiveEffectPrepareCommand(
+                context=outer,
+                coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+                effect_kind="shell_execute",
+                payload={
+                    "command": ["git", "status"],
+                    "cwd": ".",
+                    "presentation": {"detail": "client-forged approval copy"},
+                },
+                prepared_result={
+                    "redacted_plan": {
+                        "plan_version": "tobkiri.shell-execute.plan.v4"
+                    },
+                    "plan_digest": canonical_digest({"plan": "shell"}),
+                    "executed": False,
+                },
+            )
+        )
+    assert broker.frames == []
 
 
 def test_host_service_owner_commands_retain_outer_principal_and_session() -> None:

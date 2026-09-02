@@ -15,6 +15,7 @@ import {Link} from 'react-router';
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
 import {Card} from '@/src/components/ui/Card';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {Popover, PopoverContent, PopoverTrigger} from '@/src/components/ui/Popover';
 import type {NamedProfileRecord} from '@/src/lib/profileRegistry';
 import type {NamedProfileView} from '@/src/lib/profileRegistryView';
@@ -89,6 +90,9 @@ export function ProfileCard({
             : null;
   const launchDisabled = Boolean(launchBlockedReason) || isBusy;
   const mutationDisabled = !mutationsAvailable || isBusy;
+  const profileErrorDiagnostic = profileView.status === 'error'
+    ? `${profileView.statusLabel}. ${profileView.statusDescription ?? 'Profile needs attention.'}`
+    : null;
 
   return (
     <Card
@@ -209,15 +213,21 @@ export function ProfileCard({
             <Badge variant="success" className="text-[10px]">Ready</Badge>
           ) : (
             <div
-              aria-label={`${profileView.statusLabel}: ${profileView.statusDescription ?? 'Profile needs attention.'}`}
+              aria-label={profileErrorDiagnostic ?? undefined}
               className="flex w-full items-start gap-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950/20 dark:text-red-300"
-              role="status"
+              role="alert"
             >
               <AlertCircle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="line-clamp-2">
+              <span className="min-w-0 flex-1 line-clamp-2">
                 <span className="font-medium">{profileView.statusLabel}.</span>{' '}
                 {profileView.statusDescription}
               </span>
+              {profileErrorDiagnostic ? (
+                <CopyErrorButton
+                  label={`Copy ${displayName} Profile error`}
+                  text={profileErrorDiagnostic}
+                />
+              ) : null}
             </div>
           )}
         </div>

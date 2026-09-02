@@ -477,6 +477,55 @@ test('selector gives every named Profile the same ceremony and never falls back 
   }
 });
 
+test('Profile catalog failure copies the complete visible diagnostic, not a hidden raw error', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const {dom, container, root} = createDom();
+  let copied = '';
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: {writeText: async (text: string) => { copied = text; }},
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope(), {
+            data: null,
+            status: 'error',
+            stale: true,
+            error: {code: 'FAILED', message: 'The Broker rejected the signed catalog response.'},
+          })}
+          packs={[]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    const copy = buttonByLabel(container, 'Copy Profile catalog error');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    assert.match(container.textContent ?? '', /Authoritative Profile catalog is locked/);
+    assert.match(container.textContent ?? '', /The Broker rejected the signed catalog response\./);
+    assert.match(container.textContent ?? '', /The last accepted definitions remain read-only until the catalog refreshes\./);
+    assert.equal(copied, [
+      'Authoritative Profile catalog is locked',
+      'The Broker rejected the signed catalog response.',
+      'The last accepted definitions remain read-only until the catalog refreshes.',
+    ].join('\n'));
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    Object.defineProperty(globalThis, 'navigator', {value: previousNavigator, configurable: true});
+  }
+});
+
 test('selected Profile shows only its own optional verified capability snapshot', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
@@ -534,6 +583,57 @@ test('selected Profile shows only its own optional verified capability snapshot'
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('Profile capability errors copy the displayed safe diagnostic instead of hidden catalog detail', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createDom();
+  let copied = '';
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: {writeText: async (text: string) => { copied = text; }},
+  });
+  useAppStore.setState({
+    frontendCatalog: null,
+    frontendCatalogLoading: false,
+    frontendCatalogError: 'Host-only catalog transport detail',
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    const capability = container.querySelector<HTMLElement>(
+      '[data-testid="profile-conversation-capability"]',
+    );
+    assert.ok(capability);
+    assert.match(capability.textContent ?? '', /No accepted capability snapshot is bound to this active Profile\./);
+    assert.doesNotMatch(capability.textContent ?? '', /Host-only catalog transport detail/);
+    const copy = buttonByLabel(capability, 'Copy Profile capability error');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    assert.equal(copied, 'No accepted capability snapshot is bound to this active Profile.');
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    Object.defineProperty(globalThis, 'navigator', {value: previousNavigator, configurable: true});
   }
 });
 
@@ -871,6 +971,10 @@ test('Profile catalog remains browseable while runtime ceremony actions are gate
     assert.ok(container.querySelector('a[href="/setup"]'));
     assert.equal([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Resolve candidate')), false);
     assert.ok(container.querySelector('[data-testid="profile-ceremony-gate"]'));
+    assert.equal(
+      container.querySelector('button[aria-label="Copy Profile ceremony gate warning"]'),
+      null,
+    );
   } finally {
     act(() => root.unmount());
     dom.window.close();
