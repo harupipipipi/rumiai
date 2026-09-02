@@ -274,8 +274,11 @@ def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime)
         if item["path"] == "defaultspack/frontend_contract_map.v4.json"
     )
 
-    # The map has 23 logical routes and 32 exact route-to-target bindings.
-    assert len(routes) == 32
+    # The map has 28 logical routes and 37 exact route-to-target bindings.
+    # Interactive approval and command-protocol routes are Host-owned
+    # contributions, but remain digest-pinned Broker targets like every
+    # Defaults surface route.
+    assert len(routes) == 37
     assert all(
         set(route)
         >= {

@@ -60,6 +60,12 @@ def _config() -> runner._VsockAgentConfig:
     )
 
 
+def _guest_artifact_identity(config: runner._VsockAgentConfig) -> str:
+    """Return the launch-bound identity accepted by the guest ABI."""
+
+    return _digest(config.binding_digests)
+
+
 def _bridge_request() -> dict[str, object]:
     request = {
         "messages": [{"role": "user", "content": "hello"}],
@@ -111,7 +117,7 @@ def _invoke_payload(request_id: str) -> dict[str, object]:
         "target_domain": "packvm:domain-1",
         "artifact_digest": "sha256:" + "1" * 64,
         "materialization_digest": "sha256:" + "2" * 64,
-        "guest_artifact_identity": "sha256:" + "3" * 64,
+        "guest_artifact_identity": _guest_artifact_identity(config),
         "contract_id": "tobkiri.service.conversation.turn.v1",
         "contract_version": "1.0.0",
         "operation_id": "defaultspack.conversation.complete",
@@ -214,7 +220,7 @@ def test_guest_agent_persists_only_a_verified_pending_bridge_then_resumes_once(
         lambda _payload: {
             "ok": True,
             "protocol": runner.PROTOCOL,
-            "guest_artifact_identity": "sha256:" + "3" * 64,
+            "guest_artifact_identity": _guest_artifact_identity(config),
             "payload": bridge_request,
         },
     )
@@ -229,7 +235,7 @@ def test_guest_agent_persists_only_a_verified_pending_bridge_then_resumes_once(
         return {
             "ok": True,
             "protocol": runner.PROTOCOL,
-            "guest_artifact_identity": "sha256:" + "3" * 64,
+            "guest_artifact_identity": _guest_artifact_identity(config),
             "payload": {"content": [{"type": "text", "text": "done"}]},
         }
 
@@ -252,7 +258,7 @@ def test_guest_agent_persists_only_a_verified_pending_bridge_then_resumes_once(
     host_request = pending["host_bridge_request"]
     assert host_request["kind"] == "tobkiri.packvm.bridge.host-request.v1"
     assert host_request["target_domain"] == config.domain_id
-    assert host_request["guest_artifact_identity"] == "sha256:" + "3" * 64
+    assert host_request["guest_artifact_identity"] == _guest_artifact_identity(config)
     assert host_request["bridge_request"] == bridge_request
     assert host_request["deadline_monotonic"] == "123.5"
 
@@ -271,7 +277,7 @@ def test_guest_agent_persists_only_a_verified_pending_bridge_then_resumes_once(
         signer,
     )
     assert final["success"] is True
-    assert final["data"]["payload"]["content"][0]["text"] == "done"
+    assert final["data"]["content"][0]["text"] == "done"
     assert resumed[0] == invoked
     assert resumed[1] == bridge_request
     assert resumed[2] == bridge_result
@@ -312,7 +318,7 @@ def test_guest_agent_rejects_swapped_or_replayed_host_result(
         lambda _payload: {
             "ok": True,
             "protocol": runner.PROTOCOL,
-            "guest_artifact_identity": "sha256:" + "3" * 64,
+            "guest_artifact_identity": _guest_artifact_identity(config),
             "payload": bridge_request,
         },
     )

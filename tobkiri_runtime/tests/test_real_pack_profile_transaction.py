@@ -33,7 +33,10 @@ from ecosystem.defaultspack.domain.runtime_v4 import (
 from tobkiri_protocol.canonical import canonical_digest
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET_PACK = "rumi_git_read_pack"
+# ``rumi_git_read_pack`` is now part of the Defaults closure.  Keep this
+# transaction on a genuinely optional PackVM Pack so it still proves that
+# approval/enablement alone cannot mint execution authority.
+TARGET_PACK = "rumi_media_inspect_service_pack"
 BOOTSTRAP_SECRET = "isolated-host-owned-panel-bootstrap-secret"
 NATIVE_PACKVM_ACCEPTANCE_ENV = "TOBKIRI_RUN_NATIVE_PACKVM_ACCEPTANCE"
 
@@ -56,6 +59,24 @@ from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import get_panel_auth_manager
 from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+    install_defaultspack_profile_runtime,
+)
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    defaultspack_activation_snapshot_loader,
+    defaultspack_packvm_backend_factory,
+    defaultspack_runtime_capture_inputs,
+)
+from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+    defaultspack_capability_binding,
+    defaultspack_capability_snapshot_mapping,
+)
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+    create_runtime_surface_services,
+)
+from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+    DefaultspackHTTPPresentation,
+)
 
 
 ROOT = Path(os.environ["TOBKIRI_TEST_RUNTIME_ROOT"])
@@ -63,6 +84,7 @@ BUNDLE_ROOT = Path(sys.argv[1])
 from core_runtime.bootstrap import profile_capture
 
 profile_capture._bundle_root = lambda _base_dir=None: BUNDLE_ROOT
+install_defaultspack_profile_runtime()
 MAP_PATH = (
     ROOT
     / "ecosystem"
@@ -85,6 +107,7 @@ def _capture():
         )
     authority = AuthorityStore(USER_DATA / "authority" / "v4.sqlite3")
     packvm_lifecycle = None
+    packvm_backend_factory = None
     if os.environ.get("TOBKIRI_TEST_NATIVE_PACKVM") == "1":
         from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
         from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
@@ -96,12 +119,17 @@ def _capture():
             raise RuntimeError(
                 "native PackVM acceptance requires provisioned signed direct-VZ facts"
             )
+        packvm_backend_factory = defaultspack_packvm_backend_factory(packvm_lifecycle)
     session = capture_production_dispatch(
         active,
         bundle_root=BUNDLE_ROOT,
         ecosystem_root=ROOT / "ecosystem",
         authority_store=authority,
-        packvm_provisioner=packvm_lifecycle,
+        packvm_provisioner=packvm_backend_factory,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
+        capability_binding_selector=defaultspack_capability_binding,
     )
     catalog = BundledCatalog.load(BUNDLE_ROOT)
     bindings = load_frontend_contract_bindings(
@@ -114,6 +142,13 @@ def _capture():
         panel_auth_manager=manager,
         dispatch_session=session,
         contract_bindings=bindings,
+        application_presentation=DefaultspackHTTPPresentation(),
+        packvm_lifecycle=packvm_lifecycle,
+        runtime_capture_factory=lambda active: defaultspack_runtime_capture_inputs(
+            active,
+            packvm_provisioner=packvm_lifecycle,
+            bundle_root=BUNDLE_ROOT,
+        ),
     )
 
     def publish_current_host_contract() -> None:
@@ -618,6 +653,9 @@ def _exercise_real_pack_profile_transaction(
         )
         assert status == 200, enabled
         assert enabled["data"]["enabled"] is True
+        # A Profile activation publishes a new Host contract/capture and
+        # deliberately invalidates panel sessions bound to the old one.
+        first_auth = _authenticate(int(first_state["port"]))
 
         enabled_catalog = _catalog(int(first_state["port"]), first_auth)
         enabled_disk = _disk_profile_state(user_data)
@@ -652,6 +690,7 @@ def _exercise_real_pack_profile_transaction(
         first_ceremony_disk = _disk_profile_state(user_data)
         assert first_activation["activation_id"] == first_ceremony_disk["activation_id"]
         assert first_ceremony_disk["activation_id"] != enabled_disk["activation_id"]
+        first_auth = _authenticate(int(first_state["port"]))
         second_activation_request, second_activation = _activate_current_profile(
             int(first_state["port"]),
             first_auth,
@@ -668,6 +707,7 @@ def _exercise_real_pack_profile_transaction(
             first_ceremony_disk["effective_pack_set"]
         )
         assert approval_path.read_bytes() == stable_pack_approval
+        first_auth = _authenticate(int(first_state["port"]))
         status, replay = _contract_request(
             int(first_state["port"]),
             first_auth,
@@ -680,6 +720,7 @@ def _exercise_real_pack_profile_transaction(
         assert replay["data"]["activation_id"] == first_activation["activation_id"]
         assert replay["data"]["activation_id"] != second_activation["activation_id"]
         assert second_activation_request != first_activation_request
+        first_auth = _authenticate(int(first_state["port"]))
         enabled_disk = second_ceremony_disk
         enabled_snapshots = _activation_snapshots(user_data)
 
@@ -722,6 +763,7 @@ def _exercise_real_pack_profile_transaction(
         )
         assert status == 200, disabled
         assert disabled["data"]["enabled"] is False
+        second_auth = _authenticate(int(second_state["port"]))
         disabled_catalog = _catalog(int(second_state["port"]), second_auth)
         disabled_disk = _disk_profile_state(user_data)
         disabled_set = {item[0] for item in disabled_disk["effective_pack_set"]}
@@ -756,6 +798,7 @@ def _exercise_real_pack_profile_transaction(
         revoked_payload = json.loads(approval_path.read_text(encoding="utf-8"))
         assert revoked_payload["revoked"] is True
         assert revoked_payload["approval_revision"] == revoked_data["approval_revision"]
+        second_auth = _authenticate(int(second_state["port"]))
 
         status, revoke_replay = _contract_request(
             int(second_state["port"]),

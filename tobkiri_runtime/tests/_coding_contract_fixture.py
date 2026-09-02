@@ -50,6 +50,14 @@ from domain.coding.contract_adapter import (
 )
 
 
+# Service Packs consume the Host-owned workspace resource directly.  The
+# legacy Defaultspack adapter still names its compatibility seam with the old
+# ``rumi`` contract id, so the conformance double must serve both names while
+# exercising the same selected mount.
+_HOST_WORKSPACE_RESOURCE = "tobkiri.resource.workspace.v1"
+_HOST_GIT_READ = "tobkiri.service.git.read.v1"
+
+
 class VerifiedCodingContracts:
     """Bind canonical providers to one exact workspace mount."""
 
@@ -125,7 +133,7 @@ class VerifiedCodingContracts:
     ) -> dict[str, Any]:
         request = dict(payload)
         request["profile_id"] = self.profile_id
-        if contract_id == WORKSPACE_RESOURCE:
+        if contract_id in {WORKSPACE_RESOURCE, _HOST_WORKSPACE_RESOURCE}:
             if operation == "list":
                 return {
                     "selected_workspace_id": self.selected_workspace_id,
@@ -160,7 +168,7 @@ class VerifiedCodingContracts:
             return self.file_mutate.invoke(operation, request)
         if contract_id == FILE_PATCH:
             return self.file_patch.invoke(operation, request)
-        if contract_id == GIT_READ:
+        if contract_id in {GIT_READ, _HOST_GIT_READ}:
             return self.git_read.invoke(operation, request)
         if contract_id == GIT_WRITE:
             return self.git_write.invoke(operation, request)
