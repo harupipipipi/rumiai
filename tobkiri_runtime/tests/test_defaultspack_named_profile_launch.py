@@ -30,7 +30,9 @@ from defaultspack import desktop_app
 from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
     default_packvm_provisioner,
 )
+from tobkiri_host.backends import REQUIRED_PRODUCTION_GATES, BackendStatus
 from tobkiri_host.credential_store import host_credential_store_factory
+from tobkiri_host.models import ExecutionKind
 
 
 BUNDLE_ROOT = Path(sys.argv[1])
@@ -40,6 +42,44 @@ profile_capture._bundle_root = lambda _base_dir=None: BUNDLE_ROOT
 session = None
 server = None
 credential_factory_calls = []
+
+
+class ReadyPackVMBackend:
+    status = BackendStatus(
+        backend_id="tobkiri.python-pack-v4",
+        execution_kind=ExecutionKind.PACK_VM,
+        platform="any",
+        backend_digest="sha256:" + "1" * 64,
+        production_enabled=True,
+        conformance_only=False,
+        satisfied_gates=REQUIRED_PRODUCTION_GATES,
+    )
+
+    def __init__(self):
+        self.artifact_resolver = None
+        self.target_domain_resolver = None
+        self.capability_bridge = None
+
+    def bind_artifact_resolver(self, resolver):
+        self.artifact_resolver = resolver
+
+    def bind_target_domain_resolver(self, resolver):
+        self.target_domain_resolver = resolver
+
+    def bind_capability_bridge(self, callback):
+        self.capability_bridge = callback
+
+    def materialize(self, _binding, _reservation_id):
+        raise AssertionError("named Profile launch must not execute a Pack")
+
+    def invoke(self, _request):
+        raise AssertionError("named Profile launch must not invoke a Pack")
+
+    def cancel(self, _request_id):
+        raise AssertionError("named Profile launch must not cancel a Pack")
+
+    def terminate(self, _domain_id):
+        raise AssertionError("named Profile launch must not terminate a Pack")
 
 
 def credential_store_factory(*, user_data_root):
@@ -52,6 +92,7 @@ try:
     session, bindings = desktop_app._restore_active_profile_contracts(
         lifecycle,
         credential_store_factory=credential_store_factory,
+        packvm_backend_factory=lambda: ReadyPackVMBackend(),
     )
     server = PackAPIServer(
         port=0,

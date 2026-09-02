@@ -166,7 +166,7 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 740,
+        "line": 745,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
@@ -10101,8 +10101,8 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:189ba2d685ab22245c2f88e1e4f58cb269d44f58ee93a41895d87a5412f86971",
-        "line": 740,
+        "evidence_digest": "sha256:647c670f44d63d15441a2c97f343b86376378f9a7bbea7d278cd4ed6bb67ff0a",
+        "line": 745,
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -18403,7 +18403,7 @@
     ]
   },
   "repository": {
-    "commit": "4cce070ba869ec4b9faedcc5bb3f777528366b57",
+    "commit": "76922a116b7d914eb557685e41b23898dbb31f64",
     "tree_digest": "ecc2558f77633a312e85fc823a52ccfe93af905e190da3ac2f7d810de430cef8"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",

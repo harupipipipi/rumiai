@@ -15,11 +15,12 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 if TYPE_CHECKING:
     from core_runtime.credential_transport import CredentialMaterialStoreFactory
     from core_runtime.panel_auth import PanelAuthManager
+    from tobkiri_host.backends import ExecutionBackend
 
 from tobkiri_host.credential_store import host_credential_store_factory
 
@@ -408,6 +409,7 @@ def _restore_active_profile_contracts(
     credential_store_factory: CredentialMaterialStoreFactory = (
         host_credential_store_factory
     ),
+    packvm_backend_factory: Callable[[], ExecutionBackend | None] | None = None,
 ):
     """Capture the active Profile and verify its Application contract map."""
 
@@ -459,7 +461,10 @@ def _restore_active_profile_contracts(
         bundle_root=bundle_root,
         ecosystem_root=ecosystem_root,
         authority_store=AuthorityStore(runtime_user_data_root() / "authority" / "v4.sqlite3"),
-        packvm_provisioner=defaultspack_packvm_backend_factory(packvm_lifecycle),
+        packvm_provisioner=(
+            packvm_backend_factory
+            or defaultspack_packvm_backend_factory(packvm_lifecycle)
+        ),
         packvm_readiness_reader=packvm_lifecycle.readiness_snapshot,
         http_contract_bindings=bindings,
         activation_snapshot_loader=defaultspack_activation_snapshot_loader,
