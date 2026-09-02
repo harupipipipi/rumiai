@@ -7576,7 +7576,7 @@ mod tests {
     }
 
     #[test]
-    fn real_lock_twenty_preserves_catalog_eighteen_and_aliases() {
+    fn real_lock_preserves_catalog_entries_and_aliases() {
         let tree = TestTree::new("real-lock-catalog-binding");
         let bundle = tree.path().join("bundle");
         fs::create_dir_all(&bundle).expect("bundle fixture should exist");
@@ -7612,10 +7612,10 @@ mod tests {
         let selected = catalog["source_manifest_digests"]
             .as_object()
             .expect("canonical selection should exist");
-        assert_eq!(selected.len(), 18);
+        assert_eq!(selected.len(), 24);
         let updated = selected_source_manifest_digests_from_lock(&lock_path, selected)
             .expect("real lock aliases must bind by nested pack.id");
-        assert_eq!(updated.len(), 18);
+        assert_eq!(updated.len(), selected.len());
         for alias in [
             "rumi_file_inspect_pack",
             "rumi_host_authority_bridge_pack",
