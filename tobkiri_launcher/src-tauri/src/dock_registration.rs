@@ -546,6 +546,53 @@ fn recover_stale_defaultspack_listener(metadata: &DefaultspackDesktopMetadata) -
     })
 }
 
+/// Project a verified active Application authority into the Host contract.
+///
+/// The runtime health challenge proves that the running Kernel is reporting
+/// this exact identity.  The separately resolved metadata proves the identity
+/// and contribution values originate from the durable Profile authority; a
+/// bootstrap Host contract is never treated as execution authority here.
+fn publish_active_host_contract(
+    config: &AppConfig,
+    metadata: &DefaultspackDesktopMetadata,
+    panel_bootstrap_secret: &str,
+    desktop_api_token: Option<&str>,
+) -> AnyResult<()> {
+    let active_identity = crate::health_check::authenticated_runtime_identity(
+        config.kernel_port,
+        panel_bootstrap_secret,
+        &metadata.contract_namespace,
+    )
+    .context("failed to capture the active execution Profile identity")?;
+    if !active_identity.matches(metadata.execution_identity()) {
+        bail!("authenticated runtime identity differs from the verified active Profile authority");
+    }
+
+    let mut values = vec![
+        ("panel_bootstrap_secret", panel_bootstrap_secret.to_owned()),
+        (
+            "system_pack_descriptors",
+            metadata
+                .host_contract_contributions
+                .system_pack_descriptors
+                .clone(),
+        ),
+        (
+            "update_target_descriptors",
+            metadata
+                .host_contract_contributions
+                .update_target_descriptors
+                .clone(),
+        ),
+    ];
+    if let Some(token) = desktop_api_token {
+        values.push(("desktop_api_token", token.to_owned()));
+    }
+    crate::host_contract::write_contract(config, metadata.execution_identity(), values)
+        .context("failed to publish the active Host contract")?;
+    Ok(())
+}
+
 fn ensure_defaultspack_desktop_ready(
     app: &AppHandle,
     config: &AppConfig,
@@ -565,39 +612,14 @@ fn ensure_defaultspack_desktop_ready(
             return Err(e);
         }
     };
-    let active_identity = crate::health_check::authenticated_runtime_identity(
-        config.kernel_port,
+    publish_active_host_contract(
+        config,
+        &metadata,
         &panel_bootstrap_secret,
-        &metadata.contract_namespace,
-    )
-    .context("failed to capture the active execution Profile identity")?;
-    if !active_identity.matches(metadata.execution_identity()) {
-        bail!("authenticated runtime identity differs from the verified active Profile authority");
-    }
+        Some(api_token.as_str()),
+    )?;
     let base_url = application_origin(metadata.port);
     info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {base_url}");
-    crate::host_contract::write_contract(
-        config,
-        metadata.execution_identity(),
-        [
-            ("desktop_api_token", api_token.clone()),
-            ("panel_bootstrap_secret", panel_bootstrap_secret.clone()),
-            (
-                "system_pack_descriptors",
-                metadata
-                    .host_contract_contributions
-                    .system_pack_descriptors
-                    .clone(),
-            ),
-            (
-                "update_target_descriptors",
-                metadata
-                    .host_contract_contributions
-                    .update_target_descriptors
-                    .clone(),
-            ),
-        ],
-    )?;
 
     let managed_process = manager
         .has_managed_process()

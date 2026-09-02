@@ -2260,6 +2260,16 @@ fn spawn_kernel_exit_monitor(
                             error!("Failed to refresh panel after Kernel restart: {error}");
                         }
                     }
+                    // Exit 42 is a contract-transition handoff.  The new
+                    // Kernel has been given a freshly projected authority and
+                    // the old WebView cookie is intentionally not reused.
+                    // Restart guardian preparation only after the new panel
+                    // code was minted from that fresh authenticated process.
+                    prepare_defaultspack_guardian_in_background(
+                        app.clone(),
+                        config.clone(),
+                        panel_bootstrap_secret.clone(),
+                    );
                 }
                 Err(error) => {
                     warn!("Kernel restarted, but panel session refresh failed: {error}");
@@ -2318,12 +2328,45 @@ enum StartupRecoveryStage {
     Bootstrap,
 }
 
+fn capture_guardian_kernel_generation(app: &AppHandle) -> Option<u64> {
+    let manager = Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner());
+    let generation = match manager.lock() {
+        Ok(kernel) => Some(kernel.launch_generation()),
+        Err(error) => {
+            error!("Failed to capture Kernel generation for Defaultspack guardian: {error}");
+            None
+        }
+    };
+    generation
+}
+
+fn guardian_kernel_generation_is_current(app: &AppHandle, generation: u64) -> bool {
+    let manager = Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner());
+    let is_current = match manager.lock() {
+        Ok(mut kernel) => kernel.is_current_launch_generation(generation),
+        Err(error) => {
+            error!("Failed to validate Kernel generation for Defaultspack guardian: {error}");
+            false
+        }
+    };
+    is_current
+}
+
 fn prepare_defaultspack_guardian_in_background(
     app: AppHandle,
     config: AppConfig,
     panel_bootstrap_secret: String,
 ) {
+    let Some(expected_generation) = capture_guardian_kernel_generation(&app) else {
+        return;
+    };
     thread::spawn(move || {
+        if !guardian_kernel_generation_is_current(&app, expected_generation) {
+            info!(
+                "Skipping stale Defaultspack guardian task for Kernel generation {expected_generation}"
+            );
+            return;
+        }
         match health_check::check_authenticated_runtime_ready(
             config.kernel_port,
             &panel_bootstrap_secret,
@@ -2339,6 +2382,12 @@ fn prepare_defaultspack_guardian_in_background(
                 );
                 return;
             }
+        }
+        if !guardian_kernel_generation_is_current(&app, expected_generation) {
+            info!(
+                "Skipping stale Defaultspack guardian task after readiness for Kernel generation {expected_generation}"
+            );
+            return;
         }
         if let Err(error) = dock_registration::prepare_defaultspack_guardian_impl(&app, &config) {
             error!("Failed to prepare Launcher-owned Defaultspack guardian: {error:#}");

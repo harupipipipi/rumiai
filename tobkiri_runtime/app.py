@@ -51,12 +51,29 @@ def _create_defaultspack_kernel() -> Any:
     return create_defaultspack_kernel()
 
 
+def _clear_restart_request() -> None:
+    """Discard a test/process-local restart request before a fresh boot."""
+
+    from core_runtime.restart_control import clear_kernel_restart_request
+
+    clear_kernel_restart_request()
+
+
+def _restart_requested() -> bool:
+    """Return whether the post-response activation handoff requested a restart."""
+
+    from core_runtime.restart_control import is_kernel_restart_requested
+
+    return is_kernel_restart_requested()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Start only the canonical v4 Host and wait for process termination."""
     args = _parser().parse_args(argv)
     kernel = _create_defaultspack_kernel()
     stop = threading.Event()
     try:
+        _clear_restart_request()
         result = kernel.run_startup()
         if args.health:
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
@@ -69,8 +86,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         for signum in (signal.SIGINT, signal.SIGTERM):
             signal.signal(signum, request_stop)
-        stop.wait()
-        return 0
+        while not stop.wait(0.1):
+            if _restart_requested():
+                # The Launcher treats this as a bounded, intentional cold
+                # recapture boundary, not as an application crash.
+                return 42
+        return 42 if _restart_requested() else 0
     finally:
         kernel.shutdown()
 

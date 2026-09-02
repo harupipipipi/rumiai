@@ -9,6 +9,7 @@ is absent, foreign, or malformed.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import re
@@ -28,6 +29,19 @@ EXECUTION_IDENTITY_FIELDS = (
     "activation_id",
     "plan_digest",
 )
+# The Launcher owns this synthetic identity only while the first Host process
+# exposes the Profile-ceremony surface.  It is deliberately not a resolved
+# Profile identity and must never enter a normal execution-value path.
+_LAUNCHER_BOOTSTRAP_IDENTITY = {
+    "profile_id": "defaults",
+    "profile_revision": (
+        "sha256:cce92a9b1d3092cdac63ba80b39e5d3a17d0905f3a716241250e8ac724095580"
+    ),
+    "activation_id": "activation:bootstrap-template",
+    "plan_digest": (
+        "sha256:2a08fdc2de1e0d5e51d2f248b0984d4510db442e6905bcebc2984a44d23131a5"
+    ),
+}
 _ACTIVATION_ID_RE = re.compile(r"^activation:[a-z0-9][a-z0-9._-]{7,127}$")
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONTRACT_FIELDS = frozenset(
@@ -111,7 +125,10 @@ def bind_host_contract(contract: Mapping[str, Any]) -> Iterator[None]:
         _CONTRACT.reset(token)
 
 
-def _load_contract_file() -> Mapping[str, Any] | None:
+def _load_contract_file(
+    *,
+    allow_launcher_bootstrap: bool = False,
+) -> Mapping[str, Any] | None:
     """Load a launcher-owned contract file, if the host supplied its path."""
 
     raw_path = os.getenv("TOBKIRI_HOST_CONTRACT_PATH", "").strip()
@@ -143,7 +160,10 @@ def _load_contract_file() -> Mapping[str, Any] | None:
     except (OSError, ValueError, TypeError):
         return None
     try:
-        return validate_host_contract(payload)
+        return validate_host_contract(
+            payload,
+            allow_launcher_bootstrap=allow_launcher_bootstrap,
+        )
     except HostContractError:
         return None
 
@@ -152,6 +172,7 @@ def validate_host_contract(
     contract: Mapping[str, Any],
     *,
     expected_identity: Mapping[str, Any] | object | None = None,
+    allow_launcher_bootstrap: bool = False,
 ) -> Mapping[str, Any]:
     """Validate and freeze one Host contract, optionally against a capture.
 
@@ -190,6 +211,10 @@ def validate_host_contract(
         values[key] = value
 
     identity = ExecutionProfileIdentity(**cast(dict[str, str], identity_values))
+    if _is_launcher_bootstrap_identity(identity) and not allow_launcher_bootstrap:
+        raise HostContractError(
+            "launcher bootstrap contract is not execution authority"
+        )
     if expected_identity is not None:
         expected = ExecutionProfileIdentity.from_source(expected_identity)
         if not identity.matches(expected):
@@ -236,6 +261,43 @@ def capture_host_contract_from_file(
     if candidate is None:
         raise HostContractError("host contract is unavailable")
     return validate_host_contract(candidate, expected_identity=expected_identity)
+
+
+def capture_launcher_bootstrap_secret() -> str:
+    """Capture only the Launcher-owned panel credential snapshot.
+
+    The initial Profile-ceremony process may read the credential from the
+    Launcher bootstrap contract, but it must not gain that contract's
+    synthetic identity as route authority.  Normal contract capture rejects
+    that marker; this narrow API returns only the one credential needed for
+    the local panel handoff.
+    """
+
+    candidate = _load_contract_file(allow_launcher_bootstrap=True)
+    if candidate is None:
+        raise HostContractError("launcher panel bootstrap credential is unavailable")
+    values = candidate.get("values")
+    secret = values.get("panel_bootstrap_secret") if isinstance(values, Mapping) else None
+    if (
+        not isinstance(secret, str)
+        or not secret
+        or secret != secret.strip()
+        or len(secret) > 4096
+    ):
+        raise HostContractError("launcher panel bootstrap credential is invalid")
+    return secret
+
+
+def _is_launcher_bootstrap_identity(identity: ExecutionProfileIdentity) -> bool:
+    """Return whether ``identity`` is the Launcher-only bootstrap marker."""
+
+    return all(
+        hmac.compare_digest(
+            getattr(identity, field),
+            expected,
+        )
+        for field, expected in _LAUNCHER_BOOTSTRAP_IDENTITY.items()
+    )
 
 
 def _validate_identity(identity: Mapping[str, Any]) -> None:

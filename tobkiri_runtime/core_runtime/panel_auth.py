@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from .host_contract import host_contract_value
+from .host_contract import HostContractError, capture_launcher_bootstrap_secret
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +80,23 @@ class PanelAuthManager:
         if not self._bootstrap_secret or not candidate:
             return False
         return hmac.compare_digest(candidate, self._bootstrap_secret)
+
+    def desktop_challenge_response(self, challenge: str) -> str:
+        """Sign one bounded Launcher health challenge from the sealed snapshot."""
+
+        if (
+            not self._bootstrap_secret
+            or not isinstance(challenge, str)
+            or not challenge
+            or len(challenge) > 256
+            or challenge != challenge.strip()
+        ):
+            return ""
+        return hmac.new(
+            self._bootstrap_secret.encode("utf-8"),
+            challenge.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def issue_login_code(self, binding: PanelAuthBinding) -> Dict[str, Any]:
         now = time.time()
@@ -169,14 +186,30 @@ _panel_auth_manager: Optional[PanelAuthManager] = None
 def get_panel_auth_manager() -> PanelAuthManager:
     global _panel_auth_manager
     if _panel_auth_manager is None:
-        bootstrap_secret = host_contract_value("panel_bootstrap_secret")
+        try:
+            # This is intentionally a one-way credential capture.  In
+            # particular, a Launcher bootstrap contract never becomes a
+            # normal Host execution contract or route-identity source.
+            bootstrap_secret = capture_launcher_bootstrap_secret()
+        except HostContractError:
+            bootstrap_secret = ""
         _panel_auth_manager = PanelAuthManager(bootstrap_secret=bootstrap_secret)
     return _panel_auth_manager
 
 
 def reset_panel_auth_manager_for_tests(
     manager: Optional[PanelAuthManager] = None,
+    *,
+    capture_launcher_credential: bool = False,
 ) -> PanelAuthManager:
+    """Replace the process singleton, optionally as a fresh Host process would."""
+
     global _panel_auth_manager
-    _panel_auth_manager = manager or PanelAuthManager(bootstrap_secret="test-bootstrap")
+    if manager is not None:
+        _panel_auth_manager = manager
+    elif capture_launcher_credential:
+        _panel_auth_manager = None
+        return get_panel_auth_manager()
+    else:
+        _panel_auth_manager = PanelAuthManager(bootstrap_secret="test-bootstrap")
     return _panel_auth_manager

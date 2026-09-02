@@ -122,5 +122,26 @@ class TestExistingFlagsNotBroken(unittest.TestCase):
         assert exc.value.code == 2
 
 
+def test_post_activation_restart_request_exits_with_launcher_handoff_code() -> None:
+    """The supervised Host exits 42 only after the setup response requested it."""
+
+    import app
+
+    kernel = MagicMock()
+    kernel.run_startup.return_value = {"status": "setup_required"}
+    wait = MagicMock(return_value=False)
+    stop = MagicMock(wait=wait)
+    with (
+        patch.object(app, "_create_defaultspack_kernel", return_value=kernel),
+        patch.object(app.threading, "Event", return_value=stop),
+        patch.object(app, "_clear_restart_request") as clear_restart,
+        patch.object(app, "_restart_requested", return_value=True),
+    ):
+        assert app.main([]) == 42
+
+    clear_restart.assert_called_once()
+    kernel.shutdown.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

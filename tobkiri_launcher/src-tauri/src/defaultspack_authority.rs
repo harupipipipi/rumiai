@@ -285,6 +285,15 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
     SignedApplicationResolver::resolve(config)
 }
 
+/// Return whether the durable active-Profile pointer is present and valid.
+///
+/// This deliberately validates the complete pointer/snapshot pair rather than
+/// treating an old Host-contract file as authority. Callers that receive
+/// ``true`` must still resolve the selected Application before launch.
+pub(crate) fn has_verified_active_profile(config: &AppConfig) -> Result<bool> {
+    Ok(read_active_profile_snapshot(config)?.is_some())
+}
+
 /// Generic resolver retained behind the historical module boundary until the
 /// Launcher composition root can be renamed without a migration fan-out.
 pub(crate) struct SignedApplicationResolver;

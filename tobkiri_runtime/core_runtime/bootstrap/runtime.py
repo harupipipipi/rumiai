@@ -195,7 +195,6 @@ class Kernel:
                     except Exception:
                         authority_store.close()
                         raise
-                    install_dispatch_session(get_container(), dispatch_session)
                     self._dispatch_session = dispatch_session
                 except Exception as error:
                     from ..profile_runtime_port import require_profile_runtime
@@ -211,17 +210,30 @@ class Kernel:
                 )
                 self._dispatch_session = dispatch_session
             port = resolve_runtime_port()
-            self._server = initialize_pack_api_server(
-                host="127.0.0.1",
-                port=port,
-                dispatch_session=dispatch_session,
-                app_lifecycle_manager=self._lifecycle,
-                contract_bindings=contract_bindings,
-                runtime_capture_factory=self._runtime_capture_factory,
-                capability_snapshot_factory=self._capability_snapshot_factory,
-                application_presentation=self._application_presentation,
-                packvm_lifecycle=self._packvm_lifecycle,
-            )
+            try:
+                self._server = initialize_pack_api_server(
+                    host="127.0.0.1",
+                    port=port,
+                    dispatch_session=dispatch_session,
+                    app_lifecycle_manager=self._lifecycle,
+                    contract_bindings=contract_bindings,
+                    runtime_capture_factory=self._runtime_capture_factory,
+                    capability_snapshot_factory=self._capability_snapshot_factory,
+                    application_presentation=self._application_presentation,
+                    packvm_lifecycle=self._packvm_lifecycle,
+                )
+            except Exception:
+                close = getattr(self._dispatch_session, "close", None)
+                if callable(close):
+                    close()
+                self._dispatch_session = None
+                raise
+            if (
+                dispatch_session is not None
+                and getattr(dispatch_session, "session_kind", None)
+                != "host_profile_control"
+            ):
+                install_dispatch_session(get_container(), dispatch_session)
             if reconfirmation_error is None:
                 mark_panel_ready()
             else:
@@ -233,6 +245,13 @@ class Kernel:
         with self._lock:
             if self._server is None or not self._server.is_running():
                 raise RuntimeError("Pack v4 Host surface is not running")
+            from ..restart_control import is_kernel_restart_requested
+
+            if is_kernel_restart_requested():
+                return {
+                    "status": "restart_required",
+                    "runtime_ready": False,
+                }
             if self._lifecycle.check_setup_status().get("needs_setup") is True:
                 return {
                     "status": "setup_required",

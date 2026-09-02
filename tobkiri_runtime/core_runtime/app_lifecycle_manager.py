@@ -217,7 +217,7 @@ class AppLifecycleManager:
         return result
 
     def activate_bootstrap_profile(self, confirmation: Mapping[str, Any]) -> Any:
-        """Commit one Pack-selected bootstrap activation and publish its session."""
+        """Commit one Pack-selected activation and construct a restart-only check."""
 
         from .authority.v4 import AuthorityStore
         from .bootstrap.production_v4 import capture_production_dispatch
@@ -225,9 +225,6 @@ class AppLifecycleManager:
             capture_bootstrap_profile,
             runtime_user_data_root,
         )
-        from .di_container import get_container
-        from tobkiri_host.runtime import install_dispatch_session
-
         with self._activation_lock:
             active = capture_bootstrap_profile(
                 base_dir=self.base_dir,
@@ -256,8 +253,6 @@ class AppLifecycleManager:
                 capability_binding_selector=inputs.capability_binding_selector,
                 credential_store_factory=inputs.credential_store_factory,
             )
-            install_dispatch_session(get_container(), session)
-            mark_runtime_ready()
             return active, session
 
     def activate_default_profile(self, confirmation: Mapping[str, Any]) -> Any:

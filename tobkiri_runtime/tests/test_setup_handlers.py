@@ -10,6 +10,8 @@ from unittest.mock import patch
 import pytest
 
 from core_runtime.api.setup_handlers import SetupHandlersMixin
+from core_runtime.pack_api_server import PackAPIHandler
+from core_runtime.panel_auth import PanelAuthManager
 
 
 class _Handler(SetupHandlersMixin):
@@ -139,7 +141,7 @@ def test_setup_requires_explicit_confirmation() -> None:
     assert result["state"] == "confirmation_required"
 
 
-def test_setup_completes_canonical_capture_without_restart() -> None:
+def test_setup_completes_canonical_capture_and_requires_cold_restart() -> None:
     with (
         patch.object(
             SetupHandlersMixin,
@@ -179,8 +181,102 @@ def test_setup_completes_canonical_capture_without_restart() -> None:
             "activation_id": "activation:test",
             "fencing_token": 11,
         },
-        "restart_required": False,
+        "restart_required": True,
     }
+
+
+def test_setup_keeps_the_control_handler_and_closes_restart_only_session() -> None:
+    """Activation cannot publish a new session into the old HTTP handler."""
+
+    class RestartOnlySession:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    restart_only_session = RestartOnlySession()
+    control_session = object()
+    _Handler._dispatch_session = control_session
+    lifecycle = SimpleNamespace(
+        activate_bootstrap_profile=lambda _confirmation: (_active(), restart_only_session)
+    )
+    _Handler.app_lifecycle_manager = lifecycle
+    try:
+        with (
+            patch.object(
+                SetupHandlersMixin,
+                "_setup_listing",
+                return_value=_listing(),
+            ),
+            patch(
+                "core_runtime.bootstrap.profile_capture.activation_audit_receipt",
+                return_value={
+                    "reservation_id": "activation-reservation:test",
+                    "state": "committed",
+                    "activation_id": "activation:test",
+                    "fencing_token": 11,
+                },
+            ),
+        ):
+            result = _Handler()._setup_install_pack(_request())
+        preserved_handler_session = _Handler._dispatch_session
+    finally:
+        del _Handler.app_lifecycle_manager
+        _Handler._dispatch_session = None
+
+    assert result["state"] == "active"
+    assert result["restart_required"] is True
+    assert restart_only_session.close_calls == 1
+    assert preserved_handler_session is control_session
+
+
+def test_committed_setup_requests_restart_when_response_write_fails() -> None:
+    """A post-commit transport failure cannot strand the stale control Host."""
+
+    from core_runtime import restart_control
+
+    handler_type = PackAPIHandler.canonical_v4_server_handler(
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="test-bootstrap"),
+        dispatch_session=None,
+        app_lifecycle_manager=None,
+    )
+    handler = object.__new__(handler_type)
+    handler.path = "/api/setup/packs/install"
+    handler._reset_request_state = lambda: None
+    handler._handle_packvm_lifecycle = lambda _method, _path: False
+    handler._handle_contract_request = lambda _method: False
+    handler._is_retired_setup_complete_path = lambda: False
+    handler._setup_pre_auth_allowed = lambda: True
+    handler._parse_object_body = lambda: {}
+    handler._setup_install_pack = lambda _body: {"state": "active"}
+    events: list[str] = []
+
+    def fail_after_commit(_result: object) -> None:
+        events.append("send")
+        raise OSError("simulated post-commit response failure")
+
+    original_request_restart = restart_control.request_kernel_restart
+
+    def record_restart() -> None:
+        events.append("restart")
+        original_request_restart()
+
+    handler._send_mapping_result = fail_after_commit
+    restart_control.clear_kernel_restart_request()
+    try:
+        with patch.object(
+            restart_control,
+            "request_kernel_restart",
+            side_effect=record_restart,
+        ):
+            with pytest.raises(OSError, match="post-commit"):
+                handler.do_POST()
+        assert restart_control.is_kernel_restart_requested() is True
+    finally:
+        restart_control.clear_kernel_restart_request()
+
+    assert events == ["send", "restart"]
 
 
 def test_non_v4_install_shape_is_retired_without_capture() -> None:

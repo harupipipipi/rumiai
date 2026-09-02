@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Mapping
 
 from ..profile_runtime_port import require_profile_runtime
+
+
+logger = logging.getLogger(__name__)
 
 
 class SetupHandlersMixin:
@@ -97,19 +101,35 @@ class SetupHandlersMixin:
         )
 
         lifecycle = getattr(self.__class__, "app_lifecycle_manager", None)
+        dispatch_session: Any = None
         try:
             if lifecycle is not None and hasattr(lifecycle, "activate_bootstrap_profile"):
                 activated = lifecycle.activate_bootstrap_profile(confirmation)
                 if not isinstance(activated, tuple) or len(activated) != 2:
                     raise RuntimeError("application activation result is invalid")
                 active_profile, dispatch_session = activated
-                self.__class__._dispatch_session = dispatch_session
             else:
                 active_profile = capture_bootstrap_profile(confirmation=confirmation)
             audit_receipt = activation_audit_receipt(active_profile)
         except Exception:
             return dict(runtime.setup_activation_failure())
-        return dict(runtime.setup_activation_success(active_profile, audit_receipt))
+        finally:
+            # This process still serves the stale HostProfileControl handler.
+            # The activated capture is validation-only and must not survive
+            # until the Launcher cold-restarts into a freshly published tuple.
+            close = getattr(dispatch_session, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    logger.exception("activated restart-only dispatch session did not close")
+        result = dict(runtime.setup_activation_success(active_profile, audit_receipt))
+        if result.get("state") == "active":
+            # The receipt has been durably committed, but this HTTP handler
+            # remains bound to HostProfileControl until the Launcher performs
+            # the cold handoff.
+            result["restart_required"] = True
+        return result
 
     @staticmethod
     def _retired_state() -> Dict[str, Any]:

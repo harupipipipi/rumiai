@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import heapq
-import hmac
 import json
 import logging
 import os
@@ -46,10 +44,10 @@ from .global_contracts.http_contract_dispatch import (
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_host.backends import ExecutionBackend
 from .host_contract import (
+    ExecutionProfileIdentity,
     HostContractError,
     capture_host_contract,
     capture_host_contract_from_file,
-    host_contract_value,
     validate_host_contract,
 )
 from .panel_auth import PanelAuthBinding, PanelAuthManager, get_panel_auth_manager
@@ -806,20 +804,20 @@ class PackAPIHandler(
                 self,
                 result: Mapping[str, object],
             ) -> None:
-                """Recapture committed setup state after flushing its receipt."""
+                """Request a cold Host recapture after flushing activation success.
 
-                if result.get("state") != "active" or bound_runtime_refresh is None:
+                A setup handler serves the HostProfileControl capture.  Once
+                activation commits, that capture is intentionally stale and
+                must not be replaced in-process from a mutable contract path.
+                The Launcher publishes the matching active contract before it
+                restarts the Host, which then captures one coherent pair.
+                """
+
+                if result.get("state") != "active":
                     return
-                try:
-                    bound_runtime_refresh(self.__class__._dispatch_session)
-                except Exception as error:
-                    from .app_lifecycle_manager import mark_runtime_failed
+                from .restart_control import request_kernel_restart
 
-                    mark_runtime_failed("canonical runtime capture failed")
-                    logger.warning(
-                        "Canonical runtime recapture failed after setup response",
-                        exc_info=error,
-                    )
+                request_kernel_restart()
 
             @staticmethod
             def _fixed_web_mounts() -> tuple[WebMountEntry, ...]:
@@ -1728,33 +1726,38 @@ class PackAPIHandler(
             if hasattr(self, "headers")
             else ""
         )
-        snapshot = self.__class__._host_contract_snapshot
-        bootstrap_secret = (
-            host_contract_value(
-                "panel_bootstrap_secret",
-                contract=snapshot,
-                expected_identity=(
-                    self.__class__._dispatch_session
-                    if self.__class__._dispatch_session is not None
-                    and getattr(
-                        self.__class__._dispatch_session,
-                        "session_kind",
-                        None,
-                    )
-                    != "host_profile_control"
-                    else None
-                ),
-            )
-            if snapshot is not None
-            else ""
+        identity = self._current_health_execution_identity()
+        if identity is not None:
+            health.update(identity.as_mapping())
+        manager = self.__class__._panel_auth_manager
+        challenge_response = (
+            manager.desktop_challenge_response(challenge) if manager is not None else ""
         )
-        if challenge and bootstrap_secret:
-            health["desktop_challenge_response"] = hmac.new(
-                bootstrap_secret.encode("utf-8"),
-                challenge.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
+        if challenge_response:
+            health["desktop_challenge_response"] = challenge_response
         self._send_response(APIResponse(True, data=health))
+
+    @classmethod
+    def _current_health_execution_identity(cls) -> ExecutionProfileIdentity | None:
+        """Project only a current non-bootstrap execution capture on health."""
+
+        session = cls._dispatch_session
+        if session is None or getattr(session, "session_kind", None) == "host_profile_control":
+            return None
+        try:
+            session.assert_current()
+            return ExecutionProfileIdentity.from_source(session)
+        except (
+            AttributeError,
+            HostContractError,
+            HostCoreError,
+            KeyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            return None
 
     @classmethod
     def _current_panel_auth_binding(cls) -> PanelAuthBinding | None:
@@ -2167,12 +2170,13 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             body = self._parse_object_body()
             if body is not None:
                 result = self._setup_install_pack(body)
-                self._send_mapping_result(result)
                 try:
-                    self.wfile.flush()
-                except self._CLIENT_DISCONNECT_EXCEPTIONS:
-                    self.close_connection = True
-                self._refresh_setup_runtime_after_response(result)
+                    self._send_mapping_result(result)
+                finally:
+                    # ``_send_response`` flushes its complete envelope. Once
+                    # activation committed, a later disconnect must not keep
+                    # this stale HostProfileControl process alive.
+                    self._refresh_setup_runtime_after_response(result)
             return
         profile_action = {
             "/api/v4/profiles/create": "create",

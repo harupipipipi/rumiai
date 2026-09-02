@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.util
 import json
 import plistlib
@@ -7,7 +9,7 @@ import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 import pytest
 
@@ -113,16 +115,61 @@ def _write_embedded_broker_connection(app_data_dir: Path, broker_port: int) -> N
     connection.chmod(0o600)
 
 
+def _write_embedded_host_contract(app_data_dir: Path) -> None:
+    contract = app_data_dir / VERIFY.HOST_CONTRACT_RELATIVE
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text(
+        json.dumps(
+            {
+                "schema_version": "tobkiri.host-contract.v1",
+                "profile_id": "defaults",
+                "profile_revision": "sha256:" + "a" * 64,
+                "activation_id": "activation:bootstrap-template",
+                "plan_digest": "sha256:" + "b" * 64,
+                "values": {"panel_bootstrap_secret": "cold-boot-test-secret"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    contract.chmod(0o600)
+
+
+def _authenticated_kernel_health_response(headers: object) -> object:
+    assert isinstance(headers, dict)
+    challenge = headers[VERIFY.DESKTOP_HEALTH_CHALLENGE_HEADER]
+    assert isinstance(challenge, str) and challenge
+    challenge_response = hmac.new(
+        b"cold-boot-test-secret",
+        challenge.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return VERIFY.HttpResponse(
+        200,
+        {"content-type": "application/json"},
+        json.dumps(
+            {
+                "success": True,
+                "data": {
+                    "panel_ready": True,
+                    "desktop_challenge_response": challenge_response,
+                },
+            }
+        ).encode("utf-8"),
+    )
+
+
 def _probes(
     clock: _Clock,
-    request: Callable[[int, str], Optional[object]],
+    request: Callable[
+        [int, str, str, Mapping[str, str], bytes], Optional[VERIFY.HttpResponse]
+    ],
     parent_pid: Callable[[int], Optional[int]],
     signals: list[tuple[int, signal.Signals]],
 ) -> object:
     return VERIFY.ColdBootProbes(
         port_available=lambda _port: True,
         reserve_broker_port=lambda _kernel_port: 18770,
-        http_get=request,
+        http_request=request,
         listener_pid=lambda _port: 4243,
         parent_pid=parent_pid,
         monotonic=clock.monotonic,
@@ -139,38 +186,60 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
     config, _diagnostics = _bundle_and_config(tmp_path)
     clock = _Clock()
     signals: list[tuple[int, signal.Signals]] = []
-    calls: list[tuple[int, str]] = []
+    calls: list[tuple[int, str, str]] = []
     launched_environment: dict[str, str] = {}
     launched_executable: Optional[Path] = None
 
-    def request(port: int, path: str) -> Optional[object]:
-        calls.append((port, path))
-        if port == 18770 and path == VERIFY.BROKER_HEALTH_PATH:
+    def request(
+        port: int,
+        method: str,
+        path: str,
+        headers: object,
+        body: bytes,
+    ) -> Optional[object]:
+        calls.append((port, method, path))
+        if port == 18770 and method == "GET" and path == VERIFY.BROKER_HEALTH_PATH:
             _write_embedded_broker_connection(config.app_data_dir, port)
+            _write_embedded_host_contract(config.app_data_dir)
             return VERIFY.HttpResponse(
                 200,
                 {"content-type": "application/json"},
                 b'{"ok":true,"status":"running"}',
             )
-        if port == config.kernel_port and path == VERIFY.KERNEL_HEALTH_PATH:
+        if (
+            port == config.kernel_port
+            and method == "GET"
+            and path == VERIFY.KERNEL_HEALTH_PATH
+        ):
+            return _authenticated_kernel_health_response(headers)
+        if (
+            port == config.kernel_port
+            and method == "POST"
+            and path == VERIFY.PANEL_AUTH_BOOTSTRAP_PATH
+        ):
+            assert isinstance(headers, dict)
+            assert headers["X-Rumi-Desktop-Bootstrap"] == "cold-boot-test-secret"
+            assert body == b"{}"
             return VERIFY.HttpResponse(
                 200,
                 {"content-type": "application/json"},
-                b'{"success":true,"data":{"panel_ready":true}}',
+                b'{"success":true,"data":{"code":"one-time-code"}}',
             )
-        if port == config.kernel_port and path == VERIFY.PANEL_BOOTSTRAP_PATH:
+        if (
+            port == config.kernel_port
+            and method == "POST"
+            and path == VERIFY.PANEL_AUTH_EXCHANGE_PATH
+        ):
+            assert isinstance(headers, dict)
+            assert headers["Origin"] == f"http://127.0.0.1:{config.kernel_port}"
+            assert json.loads(body) == {"code": "one-time-code"}
             return VERIFY.HttpResponse(
                 200,
                 {
-                    "content-type": "text/html; charset=utf-8",
-                    "cache-control": "no-store",
+                    "content-type": "application/json",
+                    "set-cookie": "rumi_panel_session=sealed-session; HttpOnly; Path=/",
                 },
-                (
-                    b"<!doctype html><script>"
-                    b"document.body.textContent='Tobkiri Launcher authentication required';"
-                    b"fetch('/api/panel/auth/exchange');"
-                    b"</script>"
-                ),
+                b'{"success":true,"data":{"csrf_token":"csrf-token"}}',
             )
         return None
 
@@ -204,9 +273,10 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
         / _TEST_EXECUTABLE_NAME
     )
     assert calls == [
-        (18770, VERIFY.BROKER_HEALTH_PATH),
-        (config.kernel_port, VERIFY.KERNEL_HEALTH_PATH),
-        (config.kernel_port, VERIFY.PANEL_BOOTSTRAP_PATH),
+        (18770, "GET", VERIFY.BROKER_HEALTH_PATH),
+        (config.kernel_port, "GET", VERIFY.KERNEL_HEALTH_PATH),
+        (config.kernel_port, "POST", VERIFY.PANEL_AUTH_BOOTSTRAP_PATH),
+        (config.kernel_port, "POST", VERIFY.PANEL_AUTH_EXCHANGE_PATH),
     ]
     assert launched_environment["RUMI_VIEWER_BROKER_PORT"] == "18770"
     assert launched_environment["HTTPS_PROXY"] == "http://127.0.0.1:9"
@@ -218,7 +288,7 @@ def test_cold_boot_requires_embedded_broker_then_owned_kernel_and_panel(
     ]
 
 
-def test_panel_bootstrap_probe_rejects_unauthenticated_static_panel() -> None:
+def test_panel_auth_response_rejects_unauthenticated_static_panel() -> None:
     response = VERIFY.HttpResponse(
         200,
         {
@@ -228,7 +298,21 @@ def test_panel_bootstrap_probe_rejects_unauthenticated_static_panel() -> None:
         b'<html><script src="/panel/assets/index-test.js"></script></html>',
     )
 
-    assert VERIFY._panel_bootstrap_is_reachable(response) is False
+    assert VERIFY._successful_panel_auth_response(response) is None
+
+
+def test_embedded_bootstrap_contract_rejects_reused_profile_and_plan_digest(
+    tmp_path: Path,
+) -> None:
+    config, _diagnostics = _bundle_and_config(tmp_path)
+    _write_embedded_host_contract(config.app_data_dir)
+    contract = config.app_data_dir / VERIFY.HOST_CONTRACT_RELATIVE
+    document = json.loads(contract.read_text(encoding="utf-8"))
+    document["plan_digest"] = document["profile_revision"]
+    contract.write_text(json.dumps(document), encoding="utf-8")
+    contract.chmod(0o600)
+
+    assert VERIFY._embedded_panel_bootstrap_secret(config) is None
 
 
 @pytest.mark.parametrize(
@@ -250,13 +334,13 @@ def test_panel_bootstrap_probe_rejects_unauthenticated_static_panel() -> None:
         ),
     ],
 )
-def test_panel_bootstrap_probe_requires_fail_closed_auth_markers(
+def test_panel_auth_response_requires_successful_json_envelope(
     headers: dict[str, str],
     body: bytes,
 ) -> None:
     response = VERIFY.HttpResponse(200, headers, body)
 
-    assert VERIFY._panel_bootstrap_is_reachable(response) is False
+    assert VERIFY._successful_panel_auth_response(response) is None
 
 
 def test_cold_boot_rejects_healthy_kernel_not_owned_by_launched_app(
@@ -266,16 +350,23 @@ def test_cold_boot_rejects_healthy_kernel_not_owned_by_launched_app(
     clock = _Clock()
     signals: list[tuple[int, signal.Signals]] = []
 
-    def request(port: int, path: str) -> Optional[object]:
-        if port == 18770 and path == VERIFY.BROKER_HEALTH_PATH:
+    def request(
+        port: int,
+        method: str,
+        path: str,
+        headers: object,
+        _body: bytes,
+    ) -> Optional[object]:
+        if port == 18770 and method == "GET" and path == VERIFY.BROKER_HEALTH_PATH:
             _write_embedded_broker_connection(config.app_data_dir, port)
+            _write_embedded_host_contract(config.app_data_dir)
             return VERIFY.HttpResponse(200, {}, b'{"ok":true,"status":"running"}')
-        if port == config.kernel_port and path == VERIFY.KERNEL_HEALTH_PATH:
-            return VERIFY.HttpResponse(
-                200,
-                {},
-                b'{"success":true,"data":{"panel_ready":true}}',
-            )
+        if (
+            port == config.kernel_port
+            and method == "GET"
+            and path == VERIFY.KERNEL_HEALTH_PATH
+        ):
+            return _authenticated_kernel_health_response(headers)
         return None
 
     with pytest.raises(VERIFY.ColdBootError, match="not owned"):

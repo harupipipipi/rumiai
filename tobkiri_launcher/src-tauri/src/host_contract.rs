@@ -17,6 +17,15 @@ use crate::config::AppConfig;
 
 pub(crate) const CONTRACT_ENV: &str = "TOBKIRI_HOST_CONTRACT_PATH";
 
+// These are SHA-256 digests of distinct, domain-separated bootstrap labels.
+// They are deliberately not a synthetic resolved Profile or plan; the
+// bootstrap contract exists only long enough for the first Host process to
+// establish its canonical active capture.
+const BOOTSTRAP_PROFILE_REVISION: &str =
+    "sha256:cce92a9b1d3092cdac63ba80b39e5d3a17d0905f3a716241250e8ac724095580";
+const BOOTSTRAP_PLAN_DIGEST: &str =
+    "sha256:2a08fdc2de1e0d5e51d2f248b0984d4510db442e6905bcebc2984a44d23131a5";
+
 /// Exact identity of the execution Profile captured by the Host.
 ///
 /// Every Launcher boundary that can cause code to execute carries this same
@@ -56,6 +65,9 @@ impl ExecutionProfileIdentity {
         validate_sha256(&self.profile_revision, "profile_revision")?;
         validate_activation_id(&self.activation_id)?;
         validate_sha256(&self.plan_digest, "plan_digest")?;
+        if self.profile_revision == self.plan_digest {
+            anyhow::bail!("host contract profile_revision cannot be the plan_digest");
+        }
         Ok(())
     }
 
@@ -72,9 +84,9 @@ impl ExecutionProfileIdentity {
 fn bootstrap_identity() -> ExecutionProfileIdentity {
     ExecutionProfileIdentity {
         profile_id: "defaults".into(),
-        profile_revision: format!("sha256:{}", "0".repeat(64)),
+        profile_revision: BOOTSTRAP_PROFILE_REVISION.into(),
         activation_id: "activation:bootstrap-template".into(),
-        plan_digest: format!("sha256:{}", "0".repeat(64)),
+        plan_digest: BOOTSTRAP_PLAN_DIGEST.into(),
     }
 }
 
@@ -88,7 +100,23 @@ pub(crate) fn write_contract(
     identity: &ExecutionProfileIdentity,
     values: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<PathBuf> {
+    write_contract_inner(config, identity, values, false)
+}
+
+/// Publish a contract after checking whether the caller is the sole bootstrap
+/// template writer.  Keeping that exception private prevents normal authority
+/// publication paths from accidentally reintroducing bootstrap as execution
+/// authority.
+fn write_contract_inner(
+    config: &AppConfig,
+    identity: &ExecutionProfileIdentity,
+    values: impl IntoIterator<Item = (&'static str, String)>,
+    allow_bootstrap_identity: bool,
+) -> Result<PathBuf> {
     identity.validate()?;
+    if is_bootstrap_identity(identity) && !allow_bootstrap_identity {
+        anyhow::bail!("bootstrap Host contract identity is not execution authority");
+    }
     let path = contract_path(config);
     let parent = path
         .parent()
@@ -159,7 +187,7 @@ pub(crate) fn write_bootstrap_contract(
     values: impl IntoIterator<Item = (&'static str, String)>,
 ) -> Result<PathBuf> {
     let identity = bootstrap_identity();
-    write_contract(config, &identity, values)
+    write_contract_inner(config, &identity, values, true)
 }
 
 fn existing_values_for_identity(
@@ -186,7 +214,8 @@ fn existing_values_for_identity(
 pub(crate) fn read_identity(config: &AppConfig) -> Option<ExecutionProfileIdentity> {
     let path = contract_path(config);
     let payload: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    identity_from_payload(&payload)
+    let identity = identity_from_payload(&payload)?;
+    (!is_bootstrap_identity(&identity)).then_some(identity)
 }
 
 /// Read one contract value for Launcher-side verification without exposing the
@@ -194,7 +223,8 @@ pub(crate) fn read_identity(config: &AppConfig) -> Option<ExecutionProfileIdenti
 pub(crate) fn read_value(config: &AppConfig, name: &str) -> Option<String> {
     let path = contract_path(config);
     let payload: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
-    identity_from_payload(&payload)?;
+    let identity = identity_from_payload(&payload)?;
+    (!is_bootstrap_identity(&identity)).then_some(())?;
     payload
         .get("values")?
         .get(name)?
@@ -212,6 +242,16 @@ fn identity_from_payload(payload: &Value) -> Option<ExecutionProfileIdentity> {
         payload.get("plan_digest")?.as_str()?.to_owned(),
     )
     .ok()
+}
+
+/// The bootstrap template carries a credential for the first Host process but
+/// is not an execution authority.  Keep its marker out of normal read paths
+/// so presentation, guardian, and broker consumers cannot treat it as one.
+fn is_bootstrap_identity(identity: &ExecutionProfileIdentity) -> bool {
+    identity.profile_id == "defaults"
+        && identity.profile_revision == BOOTSTRAP_PROFILE_REVISION
+        && identity.activation_id == "activation:bootstrap-template"
+        && identity.plan_digest == BOOTSTRAP_PLAN_DIGEST
 }
 
 #[cfg(unix)]
@@ -253,8 +293,8 @@ fn restrict_owner_only(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        existing_values_for_identity, read_identity, read_value, write_contract,
-        ExecutionProfileIdentity,
+        bootstrap_identity, existing_values_for_identity, read_identity, read_value,
+        write_bootstrap_contract, write_contract, ExecutionProfileIdentity,
     };
     use crate::config::AppConfig;
     use serde_json::json;
@@ -265,9 +305,61 @@ mod tests {
             profile_id,
             format!("sha256:{}", revision.repeat(64)),
             format!("activation:{activation}template"),
-            format!("sha256:{}", revision.repeat(64)),
+            format!(
+                "sha256:{}",
+                if revision == "f" { "e" } else { "f" }.repeat(64)
+            ),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn identity_rejects_a_profile_revision_reused_as_the_plan_digest() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let result = ExecutionProfileIdentity::new(
+            "profile-a",
+            digest.clone(),
+            "activation:profile-atemplate",
+            digest,
+        );
+
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("profile_revision cannot be the plan_digest"));
+    }
+
+    #[test]
+    fn bootstrap_identity_uses_distinct_domain_separated_digests() {
+        let identity = bootstrap_identity();
+
+        identity.validate().unwrap();
+        assert_ne!(identity.profile_revision, identity.plan_digest);
+    }
+
+    #[test]
+    fn normal_contract_writer_rejects_the_bootstrap_template() {
+        let root = std::env::temp_dir().join(format!(
+            "tobkiri-bootstrap-contract-writer-test-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&root).ok();
+        let config = test_config(&root);
+        let bootstrap = bootstrap_identity();
+
+        let error = write_contract(&config, &bootstrap, []).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("bootstrap Host contract identity is not execution authority"));
+
+        write_bootstrap_contract(
+            &config,
+            [("panel_bootstrap_secret", "bootstrap-secret".into())],
+        )
+        .unwrap();
+        assert!(read_identity(&config).is_none());
+        assert!(read_value(&config, "panel_bootstrap_secret").is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
