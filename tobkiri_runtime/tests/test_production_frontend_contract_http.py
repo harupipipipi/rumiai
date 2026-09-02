@@ -473,10 +473,9 @@ def test_all_high_risk_commands_http_require_host_approval_and_run_once(
     """
 
     from core_runtime.authority.ui_operator import sign_ui_operator
-    from ecosystem.rumi_git_publish_pack.runtime import publish as git_publish
     from ecosystem.rumi_workspace_mount_pack.runtime.mounts import WorkspaceMountStore
 
-    server, _session, _authority = command_vertical_server
+    server, session, _authority = command_vertical_server
     workspace = tmp_path / "workspace"
     remote = tmp_path / "vertical-remote.git"
     workspace.mkdir()
@@ -536,7 +535,15 @@ def test_all_high_risk_commands_http_require_host_approval_and_run_once(
     # URL validation, source/remote CAS, and lease construction.  Only the
     # final, already revalidated transport is redirected to an isolated bare
     # repository, so the vertical test never contacts the network.
-    original_git = git_publish._git
+    publish_contribution = next(
+        contribution
+        for backend in session.broker._backends.registered
+        for contribution in getattr(backend, "_contributions", {}).values()
+        if contribution.operation_id == "rumi_git_publish_pack.git-push"
+    )
+    provider_globals = publish_contribution.invoke.__globals__
+    original_git = provider_globals["_git"]
+    git_executable = provider_globals["_git_executable"]
 
     def local_final_push(
         repository: Path,
@@ -552,7 +559,7 @@ def test_all_high_risk_commands_http_require_host_approval_and_run_once(
         assert args[-1].endswith(f":refs/heads/{branch}")
         completed = subprocess.run(
             (
-                git_publish._git_executable(),
+                git_executable(),
                 "-C",
                 str(repository),
                 "-c",
@@ -571,7 +578,10 @@ def test_all_high_risk_commands_http_require_host_approval_and_run_once(
             raise RuntimeError(output.strip() or "test local Git push failed")
         return output
 
-    monkeypatch.setattr(git_publish, "_git", local_final_push)
+    # Host extensions are loaded from verified bytes under a digest-scoped
+    # module name.  Patch that exact captured Provider transport rather than
+    # an ordinary import which production dispatch never calls.
+    monkeypatch.setitem(provider_globals, "_git", local_final_push)
 
     def approve(approval_request_id: str, nonce: str) -> None:
         status, approval = post(
