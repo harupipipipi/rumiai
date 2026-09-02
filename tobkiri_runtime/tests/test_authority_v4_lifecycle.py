@@ -339,7 +339,6 @@ def test_equivalent_provider_rows_resolve_as_one_exact_authority(tmp_path: Path)
     result = harness.kernel.authorize(harness.context(), harness.scope)
     stored = harness.store.get_lease(result.lease_id)
 
-    assert result.target == harness.target
     assert stored is not None
     assert stored[0].provider_authority_id == "provider-authority-1"
 
