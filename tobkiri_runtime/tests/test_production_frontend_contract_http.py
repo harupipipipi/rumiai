@@ -6,6 +6,7 @@ import http.client
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -307,6 +308,129 @@ def test_command_protocol_paths_are_inert_in_captured_production_http(
     assert file_snapshot(offline_queue_path) is None
     assert len(authority.audit_events()) == audit_count
     assert session.broker._executor._work_queue.empty()
+
+
+def test_high_risk_terminal_http_uses_host_approval_before_effect(
+    production_server,
+    tmp_path: Path,
+) -> None:
+    """A signed HTTP terminal request cannot execute before V3 UI approval."""
+
+    from core_runtime.authority.ui_operator import sign_ui_operator
+    from ecosystem.rumi_workspace_mount_pack.runtime.mounts import WorkspaceMountStore
+
+    server, _session, _authority = production_server
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for command in (
+        ("git", "init", "-q", str(workspace)),
+        ("git", "-C", str(workspace), "config", "user.email", "test@example.com"),
+        ("git", "-C", str(workspace), "config", "user.name", "Tobkiri Test"),
+    ):
+        subprocess.run(command, check=True)
+    (workspace / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(workspace), "add", "seed.txt"), check=True)
+    subprocess.run(("git", "-C", str(workspace), "commit", "-qm", "seed"), check=True)
+
+    mounts = WorkspaceMountStore(
+        "defaults",
+        user_data_root=Path(os.environ["TOBKIRI_USER_DATA"]),
+    )
+    mounted = mounts.mount("vertical", str(workspace), expected_revision=0)
+    mounts.select("vertical", expected_revision=mounted["revision"])
+
+    cookie, csrf, origin = _authenticate(server)
+    headers = {"Cookie": cookie, "Origin": origin, "X-Rumi-CSRF": csrf}
+
+    def post(path: str, body: Mapping[str, object]) -> tuple[int, dict[str, object]]:
+        status, response, _ = _request(
+            server,
+            "POST",
+            _contract("POST", path),
+            body=body,
+            headers={**headers, "X-Tobkiri-Request-ID": str(uuid.uuid4())},
+        )
+        return status, response
+
+    invocation_id = "vertical-terminal"
+    status, pending = post(
+        "/api/command-protocol/v1/high-risk",
+        {
+            "phase": "prepare",
+            "invocation_id": invocation_id,
+            "command_ref": "terminal",
+            "arguments": {
+                "command": [
+                    "git",
+                    "config",
+                    "--local",
+                    "--add",
+                    "tobkiri.vertical.terminal",
+                    "ran",
+                ],
+                "cwd": ".",
+            },
+            "presentation": {"title": "Run", "summary": "Run local test command"},
+        },
+    )
+    assert status == 200, pending
+    assert pending["data"]["state"] == "approval_pending"
+    assert (
+        subprocess.run(
+            ("git", "-C", str(workspace), "config", "--local", "--get-all", "tobkiri.vertical.terminal"),
+            check=False,
+            capture_output=True,
+            text=True,
+        ).returncode
+        != 0
+    )
+
+    approval_request_id = pending["data"]["approval_request_id"]
+    status, approval = post(
+        "/api/interactive-approval/v1/get",
+        {"request_id": approval_request_id},
+    )
+    assert status == 200, approval
+    approval_data = approval["data"]
+    assert approval_data["typed_confirmation_required"] is True
+    status, approved = post(
+        "/api/interactive-approval/v1/approve",
+        {
+            "request_id": approval_request_id,
+            "confirmation_text": "EXECUTE",
+            "ui_operator": sign_ui_operator(
+                approval_request_id,
+                nonce="vertical-terminal",
+                decision="approve",
+                request_snapshot_digest=approval_data["request_snapshot_digest"],
+                typed_confirmation_digest=approval_data["typed_confirmation_digest"],
+            ),
+        },
+    )
+    assert status == 200, approved
+    assert approved["data"]["state"] == "approved"
+
+    status, completed = post(
+        "/api/command-protocol/v1/high-risk",
+        {"phase": "resume", "invocation_id": invocation_id},
+    )
+    assert status == 200, completed
+    assert completed["data"]["state"] == "succeeded"
+    config = subprocess.run(
+        ("git", "-C", str(workspace), "config", "--local", "--get-all", "tobkiri.vertical.terminal"),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert config.stdout.splitlines() == ["ran"]
+
+    status, replay = post(
+        "/api/command-protocol/v1/high-risk",
+        {"phase": "resume", "invocation_id": invocation_id},
+    )
+    assert status == 200, replay
+    assert replay["data"] == completed["data"]
+    assert config.stdout.splitlines() == ["ran"]
 
 
 def test_named_profile_registry_crud_http_preserves_active_pointer_and_history(
