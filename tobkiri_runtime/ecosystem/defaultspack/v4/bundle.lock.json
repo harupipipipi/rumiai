@@ -169,12 +169,12 @@
     {
       "path": "packs/rumi_credential_broker_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:a2652dac33b13873c7acc11e7ef3529f635de7d2d3e9caf704b6dbb9491cedb3"
+      "digest": "sha256:6240b5d0d5151cadeb620dc4c71adf74dde99c27dca8baa9c477d74cf5f4489f"
     },
     {
       "path": "packs/rumi_credential_broker_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:b76f75468eef2da2a8b95c36552444bb99958b35740c5e4abe03fa32e7df980b"
+      "digest": "sha256:844e0bf5581f0ccb954a03d7d13874a24f469a1418d72e1f42759aefe6063518"
     },
     {
       "path": "packs/rumi_default_tool_projection_pack.executables.v4.json",

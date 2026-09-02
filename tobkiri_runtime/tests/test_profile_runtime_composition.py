@@ -41,6 +41,33 @@ def test_defaultspack_application_composition_installs_profile_port(
         kernel.shutdown()
 
 
+def test_defaultspack_kernel_preserves_host_credential_factory_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The application composition forwards the exact Host factory port."""
+
+    import core_runtime.profile_runtime_port as profile_port
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        create_defaultspack_kernel,
+    )
+
+    def credential_store_factory(*, user_data_root: Path) -> object:
+        del user_data_root
+        return object()
+
+    monkeypatch.setattr(profile_port, "_PROFILE_RUNTIME", None)
+    kernel = create_defaultspack_kernel(
+        credential_store_factory=credential_store_factory,
+    )
+    try:
+        capture_factory = kernel._runtime_capture_factory
+        assert capture_factory.keywords["credential_store_factory"] is (
+            credential_store_factory
+        )
+    finally:
+        kernel.shutdown()
+
+
 def test_profile_port_rejects_replacement_after_composition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

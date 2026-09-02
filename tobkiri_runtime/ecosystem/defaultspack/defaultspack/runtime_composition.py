@@ -7,9 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from core_runtime.authority.v4 import AuthorityStore
-from core_runtime.credential_transport import CredentialMaterialStoreBinding
+from core_runtime.credential_transport import CredentialMaterialStoreFactory
 from core_runtime.pack_api_server import RuntimeCaptureInputs
 from tobkiri_host.backends import ExecutionBackend
+from tobkiri_host.credential_store import host_credential_store_factory
 
 if TYPE_CHECKING:
     from core_runtime.bootstrap.runtime import Kernel
@@ -49,6 +50,9 @@ def defaultspack_runtime_capture_inputs(
     *,
     packvm_provisioner: object | None = None,
     bundle_root: Path | None = None,
+    credential_store_factory: CredentialMaterialStoreFactory = (
+        host_credential_store_factory
+    ),
 ) -> RuntimeCaptureInputs:
     """Select one signed Defaultspack application map for a runtime refresh."""
 
@@ -97,24 +101,7 @@ def defaultspack_runtime_capture_inputs(
             if packvm_provisioner is not None
             else None
         ),
-        credential_store_factory=defaultspack_credential_store_factory,
-    )
-
-
-def defaultspack_credential_store_factory(
-    *,
-    user_data_root: Path,
-) -> CredentialMaterialStoreBinding:
-    """Bind the Host transport to Defaultspack's encrypted credential store."""
-
-    from ecosystem.rumi_credential_broker_pack.runtime.store import (
-        KEY_VERSION,
-        CredentialBrokerStore,
-    )
-
-    return CredentialMaterialStoreBinding(
-        store=CredentialBrokerStore(user_data_root=user_data_root),
-        key_version=KEY_VERSION,
+        credential_store_factory=credential_store_factory,
     )
 
 
@@ -151,7 +138,13 @@ def defaultspack_packvm_backend_factory(
     return build
 
 
-def create_defaultspack_kernel(*, bundle_root: Path | None = None) -> Kernel:
+def create_defaultspack_kernel(
+    *,
+    bundle_root: Path | None = None,
+    credential_store_factory: CredentialMaterialStoreFactory = (
+        host_credential_store_factory
+    ),
+) -> Kernel:
     """Compose the generic Host bootstrap with Defaultspack-owned services."""
 
     from core_runtime.bootstrap.runtime import Kernel
@@ -189,6 +182,7 @@ def create_defaultspack_kernel(*, bundle_root: Path | None = None) -> Kernel:
             defaultspack_runtime_capture_inputs,
             packvm_provisioner=lifecycle,
             bundle_root=bundle_root,
+            credential_store_factory=credential_store_factory,
         ),
         capability_snapshot_factory=defaultspack_capability_snapshot,
         application_presentation=DefaultspackHTTPPresentation(),
@@ -244,7 +238,6 @@ def _contract_context(active: object | None) -> dict[str, str]:
 __all__ = [
     "defaultspack_activation_snapshot_loader",
     "create_defaultspack_kernel",
-    "defaultspack_credential_store_factory",
     "defaultspack_packvm_backend_factory",
     "defaultspack_runtime_capture_inputs",
 ]

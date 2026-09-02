@@ -10808,7 +10808,7 @@
     "generator": "tobkiri.scripts.generate_executable_source_registry_v1",
     "generator_version": "1.0.0",
     "input_count": 191,
-    "input_digest": "sha256:a9e61f6e210139db9d2dc496bcdf94c7d0922dbfc6227bc135e0d8ee7266db01",
+    "input_digest": "sha256:897eaaad8d6815aea9b2f4dc63fb86764a732ef4090166c92d45434c80816c42",
     "input_paths": [
       "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/artifact-manifest.json",
       "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/artifact-manifest.json",
@@ -11139,7 +11139,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_conversation_store_pack/artifact-manifest.json"
       },
       {
-        "digest": "sha256:0a2285615ec8db4cfafc34ed205a35c0b52aa561486a6698e5184fa1c4cf4fde",
+        "digest": "sha256:944f1e6bca5c3e798f674aa964c59a422fd69d8a400255137348783e7c960e54",
         "kind": "legacy-artifact-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/artifact-manifest.json"
       },
@@ -11619,7 +11619,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_conversation_store_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json"
       },

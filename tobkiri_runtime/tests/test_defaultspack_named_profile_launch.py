@@ -30,6 +30,7 @@ from defaultspack import desktop_app
 from ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner import (
     default_packvm_provisioner,
 )
+from tobkiri_host.credential_store import host_credential_store_factory
 
 
 BUNDLE_ROOT = Path(sys.argv[1])
@@ -38,9 +39,20 @@ profile_capture._bundle_root = lambda _base_dir=None: BUNDLE_ROOT
 
 session = None
 server = None
+credential_factory_calls = []
+
+
+def credential_store_factory(*, user_data_root):
+    credential_factory_calls.append(str(user_data_root))
+    return host_credential_store_factory(user_data_root=user_data_root)
+
+
 try:
     lifecycle = PackVMLifecycleV4(default_packvm_provisioner())
-    session, bindings = desktop_app._restore_active_profile_contracts(lifecycle)
+    session, bindings = desktop_app._restore_active_profile_contracts(
+        lifecycle,
+        credential_store_factory=credential_store_factory,
+    )
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(
@@ -58,6 +70,7 @@ try:
         json.dumps(
             {
                 "defaults_activation": default_activation.is_file(),
+                "credential_factory_calls": len(credential_factory_calls),
                 "port": server.port,
                 "profile_id": session.profile_id,
                 "plan_digest": session.plan_digest,
@@ -193,6 +206,7 @@ def test_named_profile_launch_has_no_defaults_activation_prerequisite(
     try:
         state = _read_child_state(process)
         assert state["defaults_activation"] is False
+        assert state["credential_factory_calls"] == 1
         assert state["profile_id"] == "profile-a"
         assert isinstance(state["plan_digest"], str)
         assert state["plan_digest"].startswith("sha256:")

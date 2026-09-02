@@ -166,7 +166,7 @@
       },
       {
         "evidence": "pack_api_server",
-        "line": 722,
+        "line": 736,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
@@ -6150,13 +6150,6 @@
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence": "permissive",
-        "line": 622,
-        "message": "legacy execution or authority path is present",
-        "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/runtime/store.py",
-        "rule_id": "legacy_permissive_mode"
-      },
-      {
         "evidence": "python_file_call",
         "line": 4,
         "message": "legacy execution or authority path is present",
@@ -8656,7 +8649,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:2241cd06578202ad93d9c2c5aab8f3a908167b5b944de3328530389b1eccdaa9",
+        "digest": "sha256:156305bf08e4bc5432e36f9d7ae33e3c9fe61e98772c2fa75d8b116042aa05e5",
         "identity": "rumi_credential_broker_pack",
         "kind": "manifest",
         "legacy": true,
@@ -8664,7 +8657,7 @@
         "version": "1.0.0"
       },
       {
-        "digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "identity": "rumi.credential_broker",
         "kind": "manifest",
         "legacy": true,
@@ -10108,8 +10101,8 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:7049f14f08fd46161c3dcc6f629c121216b1278ab3e280ec70f7b2318234aa12",
-        "line": 722,
+        "evidence_digest": "sha256:07bec12c56fa006e356ede0091e0902232669a96894f8be1ff9ab84b93f7fc4f",
+        "line": 736,
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/desktop_app.py",
         "rule_id": "legacy_direct_pack_route"
       },
@@ -10120,7 +10113,7 @@
         "rule_id": "legacy_direct_pack_route"
       },
       {
-        "evidence_digest": "sha256:737effbee1e52e614142cf98674db5fc21817257b38ca3020ddbe36cec78eae5",
+        "evidence_digest": "sha256:d893b7d29045e782d72a7ee7bdf52bb1ac40976e09257d7897e9939639f65591",
         "line": 11,
         "path": "tobkiri_runtime/ecosystem/defaultspack/defaultspack/runtime_composition.py",
         "rule_id": "legacy_direct_pack_route"
@@ -13426,19 +13419,19 @@
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:2241cd06578202ad93d9c2c5aab8f3a908167b5b944de3328530389b1eccdaa9",
+        "evidence_digest": "sha256:156305bf08e4bc5432e36f9d7ae33e3c9fe61e98772c2fa75d8b116042aa05e5",
         "line": 14,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "evidence_digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "line": 151,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "evidence_digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "line": 165,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_host_execution"
@@ -15238,12 +15231,6 @@
         "rule_id": "legacy_permissive_mode"
       },
       {
-        "evidence_digest": "sha256:8ff0aa1fca5626b6a82933ce5f817da1304643f7e0cc8608a7064e93c1b79a9c",
-        "line": 622,
-        "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/runtime/store.py",
-        "rule_id": "legacy_permissive_mode"
-      },
-      {
         "evidence_digest": "sha256:9aefdbb44218dbd127c3df4ca865a2c36d6ca767dfb57b1c3c8487476a74477d",
         "line": 4,
         "path": "tobkiri_runtime/core_runtime/audit_logger.py",
@@ -15808,13 +15795,13 @@
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:2241cd06578202ad93d9c2c5aab8f3a908167b5b944de3328530389b1eccdaa9",
+        "evidence_digest": "sha256:156305bf08e4bc5432e36f9d7ae33e3c9fe61e98772c2fa75d8b116042aa05e5",
         "line": 28,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "rule_id": "legacy_v3_manifest"
       },
       {
-        "evidence_digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "evidence_digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "line": 251,
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "rule_id": "legacy_v3_manifest"
@@ -17103,14 +17090,14 @@
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:2241cd06578202ad93d9c2c5aab8f3a908167b5b944de3328530389b1eccdaa9",
+        "manifest_digest": "sha256:156305bf08e4bc5432e36f9d7ae33e3c9fe61e98772c2fa75d8b116042aa05e5",
         "pack_id": "rumi_credential_broker_pack",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/ecosystem.json",
         "version": "1.0.0"
       },
       {
         "legacy": true,
-        "manifest_digest": "sha256:c2553cd46230a766a21598fcf42c1deb2e62b8993d5311c0641367164b766771",
+        "manifest_digest": "sha256:1f2fed618cb0e8ca0fbc0d797e3d55cf9ff33dcf852f0ac60737b01af52f45ae",
         "pack_id": "rumi.credential_broker",
         "path": "tobkiri_runtime/ecosystem/rumi_credential_broker_pack/rumi.pack.v3.json",
         "version": "1.0.0"
@@ -18416,8 +18403,8 @@
     ]
   },
   "repository": {
-    "commit": "d2f0b35f12c7b14b029b4d8f8868e74b32bb16cf",
-    "tree_digest": "c6ffe9efec1f2979307c3b10cd4ec3bba884eb5a94dedb2fa4db0321306e72bf"
+    "commit": "388d010d97bad96946840cd56413f45e72142e17",
+    "tree_digest": "ecc2558f77633a312e85fc823a52ccfe93af905e190da3ac2f7d810de430cef8"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
   "schema": "io.tobkiri.architecture.inventory.v1"

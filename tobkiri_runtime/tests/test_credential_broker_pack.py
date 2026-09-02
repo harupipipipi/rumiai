@@ -16,8 +16,8 @@ from dataclasses import replace
 
 import pytest
 
-from ecosystem.rumi_credential_broker_pack.runtime import store as store_module
 from ecosystem.rumi_credential_broker_pack.runtime.store import CredentialBrokerStore
+from tobkiri_host import credential_store as store_module
 from core_runtime.credential_transport import (
     AuthorizedEnvelopeCredentialTransport,
     CredentialTransportDenied,
@@ -617,14 +617,12 @@ def test_tampered_expiration_fails_closed_on_select_and_resolve(
             expected_resource_binding=binding,
         )
 
-def test_defaultspack_composition_binds_the_real_host_credential_store(
+def test_host_composition_binds_the_real_host_credential_store(
     tmp_path: Path,
 ) -> None:
-    from ecosystem.defaultspack.defaultspack.runtime_composition import (
-        defaultspack_credential_store_factory,
-    )
+    from tobkiri_host.credential_store import host_credential_store_factory
 
-    binding = defaultspack_credential_store_factory(user_data_root=tmp_path)
+    binding = host_credential_store_factory(user_data_root=tmp_path)
 
     assert isinstance(binding.store, CredentialBrokerStore)
     assert binding.store.user_data_root == tmp_path

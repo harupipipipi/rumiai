@@ -837,6 +837,7 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
     assert "core_runtime/bootstrap/runtime.py" in paths
     assert "tobkiri_host/runtime.py" in paths
     assert "tobkiri_host/composition.py" in paths
+    assert "tobkiri_host/credential_store.py" in paths
     assert "tobkiri_host/extension_sdk.py" in paths
     assert "tobkiri_host/platform_backends.py" in paths
     assert "tobkiri_host/tauri_roles.py" in paths

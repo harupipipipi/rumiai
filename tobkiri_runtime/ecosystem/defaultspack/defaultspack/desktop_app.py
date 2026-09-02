@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
+    from core_runtime.credential_transport import CredentialMaterialStoreFactory
     from core_runtime.panel_auth import PanelAuthManager
+
+from tobkiri_host.credential_store import host_credential_store_factory
 
 _DIAGNOSTIC_ENV_KEYS = (
     "DEFAULTS_HTTP_HOST",
@@ -399,7 +402,13 @@ def _active_profile_contract_context(active: Any) -> dict[str, str]:
     }
 
 
-def _restore_active_profile_contracts(packvm_lifecycle: Any):
+def _restore_active_profile_contracts(
+    packvm_lifecycle: Any,
+    *,
+    credential_store_factory: CredentialMaterialStoreFactory = (
+        host_credential_store_factory
+    ),
+):
     """Capture the active Profile and verify its Application contract map."""
 
     from core_runtime.authority.v4 import AuthorityStore
@@ -453,6 +462,7 @@ def _restore_active_profile_contracts(packvm_lifecycle: Any):
         runtime_surface_factory=create_runtime_surface_services,
         capability_binding_snapshot_factory=defaultspack_capability_snapshot_mapping,
         capability_binding_selector=defaultspack_capability_binding,
+        credential_store_factory=credential_store_factory,
     )
     install_dispatch_session(get_container(), session)
     _write_launch_event(
@@ -695,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
     runtime_capture_factory = partial(
         defaultspack_runtime_capture_inputs,
         packvm_provisioner=packvm_lifecycle,
+        credential_store_factory=host_credential_store_factory,
     )
     lifecycle = AppLifecycleManager(
         packvm_lifecycle=packvm_lifecycle,
@@ -702,7 +713,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     reconfirmation_error: str | None = None
     try:
-        dispatch_session, contract_bindings = _restore_active_profile_contracts(packvm_lifecycle)
+        dispatch_session, contract_bindings = _restore_active_profile_contracts(
+            packvm_lifecycle,
+            credential_store_factory=host_credential_store_factory,
+        )
     except ProfileReconfirmationRequired as error:
         dispatch_session, contract_bindings = None, ()
         reconfirmation_error = str(error)
