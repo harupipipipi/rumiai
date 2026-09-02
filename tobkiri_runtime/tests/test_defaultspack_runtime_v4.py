@@ -224,12 +224,18 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_ai_stream_pack",
         "rumi_ai_tool_bridge_pack",
         "rumi_ai_usage_pack",
+        "rumi_command_protocol_pack",
         "rumi_file_inspect_pack",
+        "rumi_git_publish_pack",
+        "rumi_git_read_pack",
+        "rumi_git_write_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_model_catalog_pack",
         "rumi_model_registry_pack",
         "rumi_provider_adapters_pack",
         "rumi_provider_registry_pack",
+        "rumi_shell_execute_pack",
+        "rumi_shell_policy_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
         "dev.tauri.toolchain.default",
@@ -252,12 +258,18 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "rumi_ai_stream_pack",
         "rumi_ai_tool_bridge_pack",
         "rumi_ai_usage_pack",
+        "rumi_command_protocol_pack",
         "rumi_file_inspect_pack",
+        "rumi_git_publish_pack",
+        "rumi_git_read_pack",
+        "rumi_git_write_pack",
         "rumi_host_authority_bridge_pack",
         "rumi_model_catalog_pack",
         "rumi_model_registry_pack",
         "rumi_provider_adapters_pack",
         "rumi_provider_registry_pack",
+        "rumi_shell_execute_pack",
+        "rumi_shell_policy_pack",
         "rumi_workspace_mount_pack",
         "runtime.tauri.application.default",
         "tobkiri_host_pack_control",
@@ -318,19 +330,39 @@ def test_bundle_is_protocol_v4_and_resolves_exact_dependency_closure() -> None:
         "tobkiri.host.pack-control",
         "tobkiri.host.pack-control",
         "rumi_file_inspect_pack.file-inspect.service",
+        "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+        "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+        "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+        "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+        "rumi_command_protocol_pack.high-risk-command.service",
+        "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
+        "rumi_shell_execute_pack.shell-prepare.service",
+        "rumi_shell_execute_pack.shell-execute.service",
+        "rumi_git_write_pack.git-commit-prepare.service",
+        "rumi_git_write_pack.git-commit.service",
+        "rumi_git_write_pack.git-restore-prepare.service",
+        "rumi_git_write_pack.git-restore.service",
+        "rumi_git_write_pack.git-apply-patch-prepare.service",
+        "rumi_git_write_pack.git-apply-patch.service",
+        "rumi_git_publish_pack.git-push-prepare.service",
+        "rumi_git_publish_pack.git-publish.service",
     ]
     assert resolved.lock["plan_digest"] == resolved.plan["plan_digest"]
 
 
-def test_interactive_only_edge_is_compiled_without_changing_legacy_defaults() -> None:
-    """The new authority mode is opt-in and becomes a signed plan binding."""
+def test_interactive_only_edge_is_compiled_into_hardened_defaults() -> None:
+    """Interactive effects are explicit and remain signed plan bindings."""
 
     catalog = _catalog()
     baseline = _resolve(catalog)
-    assert all(
-        "authority_mode" not in edge for edge in baseline.profile["requested_edges"]
+    assert any(
+        edge.get("authority_mode") == "interactive_only"
+        for edge in baseline.profile["requested_edges"]
     )
-    assert all("authority_mode" not in binding for binding in baseline.plan["bindings"])
+    assert any(
+        binding.get("authority_mode") == "interactive_only"
+        for binding in baseline.plan["bindings"]
+    )
 
     source = copy.deepcopy(catalog.profiles["defaults"])
     selected = source["requested_edges"][0]
