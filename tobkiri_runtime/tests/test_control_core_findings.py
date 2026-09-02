@@ -62,6 +62,7 @@ class _Dispatch:
     profile_revision = "sha256:" + "b" * 64
     activation_id = "activation:control-core"
     plan_digest = "sha256:" + "a" * 64
+    security_epoch = 1
 
     def __init__(self) -> None:
         self.calls = 0

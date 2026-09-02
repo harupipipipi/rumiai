@@ -302,6 +302,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             def stop(self):
                 self.stopped = True
 
+            def issue_panel_login_code(self):
+                return {"code": "test-panel-login-code"}
+
         fake_server = FakeServer()
 
         with tempfile.TemporaryDirectory() as tmp:

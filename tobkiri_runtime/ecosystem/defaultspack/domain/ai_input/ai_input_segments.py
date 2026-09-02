@@ -16,7 +16,7 @@ from ..tool.schema_adapter import (
     adapt_tool_definition,
     tool_name_from_definition,
 )
-from ...transport.registry import canonical_http_route_specs
+from transport.registry import canonical_http_route_specs
 
 
 def collect_prompt_segments(
