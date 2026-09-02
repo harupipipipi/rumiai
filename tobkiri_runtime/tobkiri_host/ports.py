@@ -246,6 +246,8 @@ class InteractiveEffectPrepareCommand:
 
     context: RequestContext
     coordinator_principal: OpaqueAuthorityRef
+    presentation_owner_principal_id: str
+    presentation_owner_session_id: str
     effect_kind: str
     payload: Mapping[str, Any]
     prepared_result: Mapping[str, Any]
@@ -257,6 +259,8 @@ class InteractiveEffectOwnerQuery:
 
     context: RequestContext
     coordinator_principal: OpaqueAuthorityRef
+    presentation_owner_principal_id: str
+    presentation_owner_session_id: str
     effect_id: str
 
 

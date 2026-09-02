@@ -1,13 +1,13 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
   "pack_id": "rumi_host_authority_bridge_pack",
-  "source_identity": "sha256:13c720e5e6fc13981b5c0d5bd76de22fadb9451e59a42967256af9e8c9af7c86",
+  "source_identity": "sha256:556bbf0d996e19e6a6951166415bc60a4d6b539f7a74d7aa8799d57e219cb410",
   "variants": [
     {
       "variant_id": "rumi_host_authority_bridge_pack.host-authority.authorize.python",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
       "implementation_path": "runtime/bridge.py",
-      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
+      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -59,7 +59,7 @@
       "variant_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval.python",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
       "implementation_path": "runtime/bridge.py",
-      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
+      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -206,7 +206,7 @@
       "variant_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect.python",
       "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
       "implementation_path": "runtime/bridge.py",
-      "implementation_digest": "sha256:7ac038b8face1433e364128c2acc0aff5e7c3842c7d4671937ebcce09743b64f",
+      "implementation_digest": "sha256:3562f701a9ed0367fb1e8e7f4cf4ffb31d1741d6f246722e29ba36c7054e7d69",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -264,6 +264,6 @@
       ]
     }
   ],
-  "materialization_catalog_digest": "sha256:126241b0403f5cf77f5d1c2f377901a40bc08d58afbf54921e903c516355bda1",
-  "catalog_digest": "sha256:fee40b5d33a028b128c2e3174675472b0c7668bf3d157faab040cfeadb0506e5"
+  "materialization_catalog_digest": "sha256:76597bd699bd86c357b92753c1fd80764082748109d1458cfcf9023a79e65c42",
+  "catalog_digest": "sha256:f5d99040da763cd0c1ab25c941c33a9380f199885cc1686d4c33de3288fad25e"
 }

@@ -184,6 +184,10 @@ class HostInteractiveEffectService(InteractiveEffectPort):
         try:
             self._assert_current_capture()
             self._validate_outer_context(command.context, command.coordinator_principal)
+            self._validate_presentation_owner(
+                command.presentation_owner_principal_id,
+                command.presentation_owner_session_id,
+            )
             route = self._route(command.effect_kind)
             request = _json_mapping(command.payload, self._MAX_REQUEST_BYTES)
             prepared_result = _json_mapping(
@@ -223,8 +227,10 @@ class HostInteractiveEffectService(InteractiveEffectPort):
                 context=execute_context,
                 effect_scope=effect_scope.to_dict(),
                 invocation_owner_id=effect_scope.dimensions["invocation_owner_id"][0],
-                presentation_owner_principal_id=command.context.caller_principal.value,
-                presentation_owner_session_id=command.context.caller_session_id,
+                presentation_owner_principal_id=(
+                    command.presentation_owner_principal_id
+                ),
+                presentation_owner_session_id=command.presentation_owner_session_id,
                 # This is deliberately derived after Broker.prepare.  The UI
                 # therefore describes the same frozen execute payload and
                 # request digest which become the durable PendingEffect, not
@@ -248,11 +254,17 @@ class HostInteractiveEffectService(InteractiveEffectPort):
         try:
             self._assert_current_capture()
             self._validate_outer_context(query.context, query.coordinator_principal)
+            self._validate_presentation_owner(
+                query.presentation_owner_principal_id,
+                query.presentation_owner_session_id,
+            )
             return _port_status(
                 self._controller.status_for_presentation(
                     effect_id=_effect_id(query.effect_id),
-                    presentation_owner_principal_id=query.context.caller_principal.value,
-                    presentation_owner_session_id=query.context.caller_session_id,
+                    presentation_owner_principal_id=(
+                        query.presentation_owner_principal_id
+                    ),
+                    presentation_owner_session_id=query.presentation_owner_session_id,
                 )
             )
         except Exception as exc:
@@ -267,11 +279,17 @@ class HostInteractiveEffectService(InteractiveEffectPort):
         try:
             self._assert_current_capture()
             self._validate_outer_context(query.context, query.coordinator_principal)
+            self._validate_presentation_owner(
+                query.presentation_owner_principal_id,
+                query.presentation_owner_session_id,
+            )
             return _port_status(
                 self._controller.resume_for_presentation(
                     effect_id=_effect_id(query.effect_id),
-                    presentation_owner_principal_id=query.context.caller_principal.value,
-                    presentation_owner_session_id=query.context.caller_session_id,
+                    presentation_owner_principal_id=(
+                        query.presentation_owner_principal_id
+                    ),
+                    presentation_owner_session_id=query.presentation_owner_session_id,
                     broker=self._broker,
                 )
             )
@@ -287,11 +305,17 @@ class HostInteractiveEffectService(InteractiveEffectPort):
         try:
             self._assert_current_capture()
             self._validate_outer_context(query.context, query.coordinator_principal)
+            self._validate_presentation_owner(
+                query.presentation_owner_principal_id,
+                query.presentation_owner_session_id,
+            )
             return _port_status(
                 self._controller.cancel_for_presentation(
                     effect_id=_effect_id(query.effect_id),
-                    presentation_owner_principal_id=query.context.caller_principal.value,
-                    presentation_owner_session_id=query.context.caller_session_id,
+                    presentation_owner_principal_id=(
+                        query.presentation_owner_principal_id
+                    ),
+                    presentation_owner_session_id=query.presentation_owner_session_id,
                 )
             )
         except Exception as exc:
@@ -319,6 +343,13 @@ class HostInteractiveEffectService(InteractiveEffectPort):
             or context.security_epoch != self._security_epoch
             or not context.caller_session_id
         ):
+            raise InteractiveEffectUnavailable("interactive effect is unavailable")
+
+    @staticmethod
+    def _validate_presentation_owner(principal_id: str, session_id: str) -> None:
+        """Reject missing Host-origin ownership without exposing its values."""
+
+        if not principal_id or not session_id:
             raise InteractiveEffectUnavailable("interactive effect is unavailable")
 
     @staticmethod

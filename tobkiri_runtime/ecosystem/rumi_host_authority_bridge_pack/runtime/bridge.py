@@ -704,7 +704,7 @@ class InteractiveEffectCoordinatorBridgeV4:
             return self._prepare(envelope, payload, invocation)
         if phase in {"resume", "status", "cancel"}:
             _require_exact_payload_keys(payload, {"phase", "effect_id"})
-            return self._manage(envelope, str(phase), payload)
+            return self._manage(envelope, str(phase), payload, invocation)
         raise PermissionError("interactive effect phase is invalid")
 
     def _prepare(
@@ -738,6 +738,12 @@ class InteractiveEffectCoordinatorBridgeV4:
                     InteractiveEffectPrepareCommand(
                         context=envelope.context,
                         coordinator_principal=envelope.target_principal,
+                        presentation_owner_principal_id=(
+                            invocation.presentation_owner_principal_id
+                        ),
+                        presentation_owner_session_id=(
+                            invocation.presentation_owner_session_id
+                        ),
                         effect_kind=effect_kind,
                         payload=dict(request),
                         prepared_result=dict(prepared_result),
@@ -752,10 +758,15 @@ class InteractiveEffectCoordinatorBridgeV4:
         envelope: RequestEnvelope,
         phase: str,
         payload: Mapping[str, Any],
+        invocation: HostProviderInvocationContextV4,
     ) -> Mapping[str, Any]:
         query = InteractiveEffectOwnerQuery(
             context=envelope.context,
             coordinator_principal=envelope.target_principal,
+            presentation_owner_principal_id=(
+                invocation.presentation_owner_principal_id
+            ),
+            presentation_owner_session_id=invocation.presentation_owner_session_id,
             effect_id=_payload_id(payload, "effect_id"),
         )
         if phase == "status":

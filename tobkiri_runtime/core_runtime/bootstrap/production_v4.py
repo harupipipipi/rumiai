@@ -1958,13 +1958,71 @@ def capture_production_dispatch(
         for binding in plan["bindings"]
     }
     caller_session_bindings: dict[str, str] = {}
+    presentation_owner_bindings: dict[str, tuple[str, str]] = {}
+    nested_session_refcounts: dict[str, int] = {}
     caller_session_bindings_lock = threading.RLock()
+
+    def authority_session_id(session_id: str, caller_principal_id: str) -> str:
+        """Derive the same Host authority-session identity for every call site."""
+
+        caller_identity_suffix = caller_principal_id.removeprefix("sha256:")[:24]
+        return f"{session_id}.{caller_identity_suffix}.{activation_suffix}"
+
+    def presentation_owner_for(envelope: Any) -> tuple[str, str]:
+        """Resolve the Host-preserved root owner for one nested invocation."""
+
+        context = envelope.context
+        with caller_session_bindings_lock:
+            inherited = presentation_owner_bindings.get(context.caller_session_id)
+        if inherited is not None:
+            return inherited
+        return context.caller_principal.value, context.caller_session_id
+
+    def bind_nested_session(
+        session_id: str,
+        caller_principal_id: str,
+        presentation_owner: tuple[str, str],
+    ) -> str:
+        """Atomically bind one stable nested session and retain concurrent users."""
+
+        resolved_session_id = authority_session_id(session_id, caller_principal_id)
+        with caller_session_bindings_lock:
+            existing_caller = caller_session_bindings.get(session_id)
+            existing_owner = presentation_owner_bindings.get(resolved_session_id)
+            if existing_caller not in {None, caller_principal_id}:
+                raise AuthorityDenied("nested Host Provider caller binding changed")
+            if existing_owner not in {None, presentation_owner}:
+                raise AuthorityDenied("nested Host Provider owner binding changed")
+            caller_session_bindings[session_id] = caller_principal_id
+            presentation_owner_bindings[resolved_session_id] = presentation_owner
+            nested_session_refcounts[session_id] = (
+                nested_session_refcounts.get(session_id, 0) + 1
+            )
+        return resolved_session_id
+
+    def release_nested_session(session_id: str, resolved_session_id: str) -> None:
+        """Release one stable nested-session user without racing a peer call."""
+
+        with caller_session_bindings_lock:
+            remaining = nested_session_refcounts.get(session_id, 0) - 1
+            if remaining > 0:
+                nested_session_refcounts[session_id] = remaining
+                return
+            nested_session_refcounts.pop(session_id, None)
+            caller_session_bindings.pop(session_id, None)
+            presentation_owner_bindings.pop(resolved_session_id, None)
 
     class _InvocationSession:
         """Bind nested dispatch to the authenticated provider invocation."""
 
-        def __init__(self, envelope: Any) -> None:
+        def __init__(
+            self,
+            envelope: Any,
+            *,
+            presentation_owner: tuple[str, str],
+        ) -> None:
             self._envelope = envelope
+            self._presentation_owner = presentation_owner
             self.profile_id = str(profile["profile_id"])
             self.plan_digest = str(plan["plan_digest"])
             self.profile_revision = str(plan["profile_revision"])
@@ -1986,8 +2044,11 @@ def capture_production_dispatch(
             if not dispatch_holder:
                 raise AuthorityDenied("Host Provider dispatch is not initialized")
             nested_session_id = _nested_host_provider_session_id(self._envelope)
-            with caller_session_bindings_lock:
-                caller_session_bindings[nested_session_id] = self._envelope.target_principal.value
+            nested_authority_session_id = bind_nested_session(
+                nested_session_id,
+                self._envelope.target_principal.value,
+                self._presentation_owner,
+            )
             try:
                 return dispatch_holder[0].invoke(
                     contract_id,
@@ -1996,20 +2057,31 @@ def capture_production_dispatch(
                     version_range=version_range,
                 )
             finally:
-                with caller_session_bindings_lock:
-                    caller_session_bindings.pop(nested_session_id, None)
+                release_nested_session(nested_session_id, nested_authority_session_id)
 
     class _HostInvocation(HostProviderInvocationContextV4):
         """Expose only declared nested dispatch and one credential transport."""
 
         def __init__(self, envelope: Any) -> None:
             self._envelope = envelope
+            (
+                self._presentation_owner_principal_id,
+                self._presentation_owner_session_id,
+            ) = presentation_owner_for(envelope)
             self._client: GlobalContractClient | None = None
             self._client_binding: tuple[frozenset[str], str] | None = None
 
         @property
         def envelope(self) -> Any:
             return self._envelope
+
+        @property
+        def presentation_owner_principal_id(self) -> str:
+            return self._presentation_owner_principal_id
+
+        @property
+        def presentation_owner_session_id(self) -> str:
+            return self._presentation_owner_session_id
 
         def contract_client(
             self,
@@ -2042,7 +2114,13 @@ def capture_production_dispatch(
                 else None
             )
             self._client = GlobalContractClient(
-                session=_InvocationSession(self._envelope),
+                session=_InvocationSession(
+                    self._envelope,
+                    presentation_owner=(
+                        self._presentation_owner_principal_id,
+                        self._presentation_owner_session_id,
+                    ),
+                ),
                 allowed_contract_ids=allowed_contract_ids,
                 consumer_pack_id=consumer_pack_id,
                 host_credential_transport=transport,
@@ -2259,10 +2337,15 @@ def capture_production_dispatch(
         # bindings are principal-specific, so include that exact caller in
         # the Host-derived session identity instead of reusing a session
         # already bound to another caller.
-        caller_identity_suffix = caller.principal_id.removeprefix("sha256:")[:24]
-        authority_session_id = f"{session_id}.{caller_identity_suffix}.{activation_suffix}"
+        resolved_authority_session_id = authority_session_id(
+            session_id,
+            caller.principal_id,
+        )
         caller_suffix = canonical_digest(
-            {"session_id": authority_session_id, "caller": caller.principal_id}
+            {
+                "session_id": resolved_authority_session_id,
+                "caller": caller.principal_id,
+            }
         ).removeprefix("sha256:")[:24]
         context = RequestContext(
             request_id="request." + secrets.token_hex(16),
@@ -2274,7 +2357,7 @@ def capture_production_dispatch(
             plan_digest=str(plan["plan_digest"]),
             profile_revision=str(plan["profile_revision"]),
             security_epoch=int(active.activation["security_epoch"]),
-            caller_session_id=authority_session_id,
+            caller_session_id=resolved_authority_session_id,
             caller_domain_id=f"domain.panel.{caller_suffix}.{activation_suffix}",
             caller_boot_epoch=1,
             target_domain_id=f"domain.provider.{target_suffix}.{activation_suffix}",
@@ -2293,7 +2376,7 @@ def capture_production_dispatch(
             handle_namespace=f"activation.{target_suffix}",
         )
         with caller_sessions_lock:
-            if authority_session_id not in caller_sessions:
+            if resolved_authority_session_id not in caller_sessions:
                 caller_domain = _execution_domain(
                     domain_id=context.caller_domain_id,
                     principal=caller,
@@ -2305,10 +2388,10 @@ def capture_production_dispatch(
                     authority_store,
                     authority_control,
                     caller_domain,
-                    session_id=authority_session_id,
+                    session_id=resolved_authority_session_id,
                     principal=caller,
                 )
-                caller_sessions.add(authority_session_id)
+                caller_sessions.add(resolved_authority_session_id)
         return context
 
     providers: dict[str, tuple[Mapping[str, Any], ...]] = {}

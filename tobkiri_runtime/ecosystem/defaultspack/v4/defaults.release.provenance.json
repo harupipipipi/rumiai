@@ -38,7 +38,7 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi-host-authority-bridge.pack.v4.json",
-      "digest": "sha256:8951967a46e82417d264d2ac554d36516242033b21b3cab6a9fc3e385d570973"
+      "digest": "sha256:f50b15bf27efa5034da4479029a2ca47170806265d5678c103eb43723cd149e0"
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi-workspace-mount.pack.v4.json",
@@ -234,7 +234,7 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_host_authority_bridge_pack.executables.v4.json",
-      "digest": "sha256:64846fc2333274c139baedd84739cd31c3add113457c426722661c1d558a7338"
+      "digest": "sha256:ae97132cd097156d6659ca0d678471a45d6741287f961d23ffd2e0a8650069f3"
     },
     {
       "path": "ecosystem/defaultspack/v4/packs/rumi_http_api_connector_pack.executables.v4.json",
@@ -725,9 +725,9 @@
   },
   "catalog": {
     "bundle_lock_path": "ecosystem/defaultspack/v4/bundle.lock.json",
-    "bundle_digest": "sha256:9f0cafb39e4143dd7a34c2b9b27493857260e814af843802f05865591b2791b9",
-    "catalog_revision": "sha256:31cd028dcb121db365719fb95cc4a0838ce26457fc226df7f9ca577132491bb7",
-    "closure_digest": "sha256:e1d8a70dbf2a3f2b98d9ee3896d2824f92d92468530c09a2b3214941b0cbf623"
+    "bundle_digest": "sha256:9e572dbbaaba6784b6ceaa7a535443523eb009dd2304c079082319845b157466",
+    "catalog_revision": "sha256:58d0e4514c2ffcfaf784fa69025cc8679f90b0ac4afa6917c5da019ec4807dd4",
+    "closure_digest": "sha256:6659ce3139e6d5b472ff37d974878ddf8e8b79ddd09faa999a8b215eb8752461"
   },
   "outputs": [
     {
@@ -736,8 +736,8 @@
     },
     {
       "path": "ecosystem/defaultspack/v4/defaults.profile.lock.v5.json",
-      "digest": "sha256:333280d0676d0e0b8ee5d13d8b52a596ba46ee1c6f2bb19d3315560ff43b014f"
+      "digest": "sha256:ba8d283c1cdac7b6e7f7f4ff76319bc9edcb208cbbfcbcfd6002184a160bbefa"
     }
   ],
-  "release_digest": "sha256:b6663d5124d36daa99b2e0bfa9946b0c7ef7cdfedec81991fe64bf8d9ff22055"
+  "release_digest": "sha256:bb0e5dceefa14757e2bc89a4018e048d10dcf85f13f57fdd755273e61a8f4632"
 }

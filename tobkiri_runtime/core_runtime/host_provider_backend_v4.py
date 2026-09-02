@@ -31,6 +31,14 @@ class HostProviderInvocationContextV4(Protocol):
     def envelope(self) -> RequestEnvelope:
         """Return the Broker-authenticated envelope for this invocation."""
 
+    @property
+    def presentation_owner_principal_id(self) -> str:
+        """Return the Host-preserved principal which originated this call chain."""
+
+    @property
+    def presentation_owner_session_id(self) -> str:
+        """Return the Host-preserved session which originated this call chain."""
+
     def contract_client(
         self,
         *,

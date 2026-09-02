@@ -444,6 +444,8 @@ class _Invocation:
 
     def __init__(self, envelope: RequestEnvelope, client: _Client) -> None:
         self.envelope = envelope
+        self.presentation_owner_principal_id = "presentation-owner-principal"
+        self.presentation_owner_session_id = "presentation-owner-session"
         self._client = client
 
     def contract_client(self, **_kwargs: Any) -> _Client:
@@ -561,6 +563,14 @@ def test_bridge_runs_only_signed_prepare_then_hands_a_redacted_future_to_port() 
         )
     ]
     assert port.prepare_commands[0].prepared_result == prepared
+    assert (
+        port.prepare_commands[0].presentation_owner_principal_id
+        == "presentation-owner-principal"
+    )
+    assert (
+        port.prepare_commands[0].presentation_owner_session_id
+        == "presentation-owner-session"
+    )
     assert set(result) == {
         "effect_id",
         "approval_request_id",
@@ -594,6 +604,30 @@ def test_bridge_rejects_authority_claim_before_prepare_edge_is_called() -> None:
 
     assert client.calls == []
     assert port.prepare_commands == []
+
+
+@pytest.mark.parametrize("phase", ["status", "resume", "cancel"])
+def test_bridge_preserves_host_origin_owner_for_management(phase: str) -> None:
+    """Nested coordinator calls retain the UI owner captured by the Host."""
+
+    port = _EffectPort()
+    contribution = _capture_coordinator(port).contributions[0]
+
+    contribution.invoke(
+        bridge._EFFECT_OPERATION,
+        {"phase": phase, "effect_id": "pending-effect-1"},
+        _Invocation(_effect_envelope(), _Client({})),
+    )
+
+    assert len(port.queries) == 1
+    assert (
+        port.queries[0].presentation_owner_principal_id
+        == "presentation-owner-principal"
+    )
+    assert (
+        port.queries[0].presentation_owner_session_id
+        == "presentation-owner-session"
+    )
 
 
 class _PreparedBroker:
@@ -722,6 +756,8 @@ def test_host_service_prepares_execute_snapshot_and_scopes_all_owner_dimensions(
         bridge.InteractiveEffectPrepareCommand(
             context=outer,
             coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+            presentation_owner_principal_id="caller-principal",
+            presentation_owner_session_id="session-caller",
             effect_kind="shell_execute",
             payload={"command": ["git", "status"], "cwd": ".", "env": {}},
             prepared_result={
@@ -763,6 +799,8 @@ def test_host_service_rejects_browser_presentation_copy_before_preparing_an_effe
             bridge.InteractiveEffectPrepareCommand(
                 context=outer,
                 coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+                presentation_owner_principal_id="caller-principal",
+                presentation_owner_session_id="session-caller",
                 effect_kind="shell_execute",
                 payload={
                     "command": ["git", "status"],
@@ -788,6 +826,8 @@ def test_host_service_owner_commands_retain_outer_principal_and_session() -> Non
     query = bridge.InteractiveEffectOwnerQuery(
         context=outer,
         coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+        presentation_owner_principal_id="caller-principal",
+        presentation_owner_session_id="session-caller",
         effect_id="pending-effect-1",
     )
 
@@ -811,6 +851,8 @@ def test_host_service_fails_closed_on_execute_binding_or_outer_session_mismatch(
     command = bridge.InteractiveEffectPrepareCommand(
         context=outer,
         coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+        presentation_owner_principal_id="caller-principal",
+        presentation_owner_session_id="session-caller",
         effect_kind="shell_execute",
         payload={"command": ["git", "status"], "cwd": ".", "env": {}},
         prepared_result={
@@ -828,6 +870,8 @@ def test_host_service_fails_closed_on_execute_binding_or_outer_session_mismatch(
             bridge.InteractiveEffectOwnerQuery(
                 context=replace(outer, caller_session_id=""),
                 coordinator_principal=OpaqueAuthorityRef("coordinator-principal"),
+                presentation_owner_principal_id="caller-principal",
+                presentation_owner_session_id="session-caller",
                 effect_id="pending-effect-1",
             )
         )
