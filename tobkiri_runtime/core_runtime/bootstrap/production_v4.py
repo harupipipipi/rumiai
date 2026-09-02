@@ -890,6 +890,13 @@ def _commit_plan_authority(
                 host_extension_trust=host_extension_trust,
                 provider_authorities=(provider,),
             )
+        elif (
+            host_extension_trust is not None
+            and interactive_existing == (host_extension_trust, None)
+        ):
+            control.commit_provider_authority_bundle(
+                provider_authorities=(provider,),
+            )
         elif interactive_existing != interactive_expected:
             raise AuthorityDenied("Pack catalog authority snapshot changed")
         return
@@ -964,6 +971,15 @@ def _commit_plan_authority(
         control.commit_approval_bundle(
             approval,
             host_extension_trust=host_extension_trust,
+            provider_authorities=(provider,),
+            grants=(grant,),
+        )
+    elif (
+        host_extension_trust is not None
+        and existing == (host_extension_trust, None, None, None)
+    ):
+        control.commit_approval_bundle(
+            approval,
             provider_authorities=(provider,),
             grants=(grant,),
         )
