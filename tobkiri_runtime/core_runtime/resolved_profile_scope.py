@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -155,7 +155,17 @@ def effective_profile_projections() -> tuple[Any, ...]:
     """Return digest-bound content projections from the active Profile."""
 
     plan = persisted_resolved_profile()
-    return tuple(plan.projections) if plan is not None else ()
+    if plan is None:
+        return ()
+    projections = getattr(plan, "projections", None)
+    if projections is None:
+        profile = getattr(plan, "profile", None)
+        projections = (
+            profile.get("content_projections")
+            if isinstance(profile, Mapping)
+            else ()
+        )
+    return tuple(projections or ())
 
 
 def require_effective_pack(pack_id: str) -> None:
