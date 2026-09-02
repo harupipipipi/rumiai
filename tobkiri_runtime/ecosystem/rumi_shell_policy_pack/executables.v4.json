@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:fdd6132ae9688ae4029fb0444b84a970f0e719b23d94d0197653c8495f8ee123",
+  "catalog_digest": "sha256:1fdcf796ee12f4086c15e3ea69e8f81d8abf1ae8929521a4380fb8ff735277a2",
   "pack_id": "rumi_shell_policy_pack",
-  "source_identity": "sha256:1bd8e35ba1573f45290b340cca887aa42bdc211fe53dc141b030c54cb2fb71b1",
+  "source_identity": "sha256:1a766fedb33307d93248edee37353a62f4717c9df0779cafe9ee4c5cf8cea04a",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "sandbox.default.v1",
       "execution_kind": "pack_vm",
       "function_id": "rumi_shell_policy_pack.shell-policy.inspect",
-      "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+      "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
       "implementation_path": "runtime/policy.py",
       "materialization_mode": "on_demand",
       "operations": [

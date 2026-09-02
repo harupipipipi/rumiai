@@ -1,13 +1,13 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
   "pack_id": "rumi_git_write_pack",
-  "source_identity": "sha256:59f6c799efe2b56b6642a04b8a324be77f5cc0ddeb6b097d9420124b9c6aff00",
+  "source_identity": "sha256:dc29437a222ed77aab0fe01c64cd0ce1c177a2380c3d4f70296232afad8f683e",
   "variants": [
     {
       "variant_id": "rumi_git_write_pack.git-apply-patch-prepare.service.python",
       "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -71,7 +71,7 @@
       "variant_id": "rumi_git_write_pack.git-apply-patch.service.python",
       "function_id": "rumi_git_write_pack.git-apply-patch.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -135,7 +135,7 @@
       "variant_id": "rumi_git_write_pack.git-commit-prepare.service.python",
       "function_id": "rumi_git_write_pack.git-commit-prepare.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -199,7 +199,7 @@
       "variant_id": "rumi_git_write_pack.git-commit.service.python",
       "function_id": "rumi_git_write_pack.git-commit.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -263,7 +263,7 @@
       "variant_id": "rumi_git_write_pack.git-restore-prepare.service.python",
       "function_id": "rumi_git_write_pack.git-restore-prepare.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -327,7 +327,7 @@
       "variant_id": "rumi_git_write_pack.git-restore.service.python",
       "function_id": "rumi_git_write_pack.git-restore.service",
       "implementation_path": "runtime/write.py",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "execution_kind": "host_extension",
       "platform": "any",
       "architecture": "any",
@@ -388,6 +388,6 @@
       ]
     }
   ],
-  "materialization_catalog_digest": "sha256:b85791cf6231afa0561525b9ce2aae6a8071313fca57293f50f7e2eda3ea4d29",
-  "catalog_digest": "sha256:e31a1915de5ea5cafdb0d41779de0067b1c0067fe237fb81baa8660f7dae97aa"
+  "materialization_catalog_digest": "sha256:240d7e3dbcb33a233999802a105d1c445e7bc0c70ada344267b4a658a5bc0e68",
+  "catalog_digest": "sha256:16ffdd6c021b8cdb14afb276ce8bbec9fc826df6527a9bb5eafe2de7706e6767"
 }

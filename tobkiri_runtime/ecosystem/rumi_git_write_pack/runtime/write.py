@@ -37,6 +37,7 @@ from tobkiri_protocol.canonical import canonical_digest
 AUTHORITY = "rumi.service.host.authorize.v1"
 GIT_READ = "tobkiri.service.git.read.v1"
 WORKSPACE = "tobkiri.resource.workspace.v1"
+WORKSPACE_GET_OPERATION = "rumi_workspace_mount_pack.workspace-resource"
 SERVICE_PACK_ID = "rumi_git_write_pack"
 _RESTRICTED_NAMES = {
     ".env",
@@ -94,7 +95,11 @@ _V4_EXECUTE_OPERATION_IDS = frozenset(
         APPLY_PATCH_OPERATION,
     }
 )
-_V4_DEPENDENCIES = frozenset({WORKSPACE, GIT_READ})
+# The V4 provider resolves the repository under the Host-owned workspace
+# mount itself.  Git read remains a legacy V3 dependency only; giving a V4
+# provider that unused contract would widen its captured authority without a
+# corresponding dispatch edge.
+_V4_DEPENDENCIES = frozenset({WORKSPACE})
 _UNTRUSTED_AUTHORITY_FIELDS = frozenset(
     {
         "approved",
@@ -327,7 +332,9 @@ class GitWriteV4Service:
             raise PermissionError("Git plan profile binding changed")
         if str(payload.get("workspace_id") or "") != plan["workspace_id"]:
             raise PermissionError("Git plan workspace binding changed")
-        root, repository = GitWriteService(self.client)._roots(binding)
+        root, repository, mount_revision = _capture_roots(self.client, binding)
+        if mount_revision != plan["expected_mount_revision"]:
+            raise PermissionError("workspace mount revision changed after prepare")
         relative = repository.relative_to(root).as_posix() if repository != root else "."
         if relative != plan["repository_root"]:
             raise PermissionError("Git repository root changed after prepare")
@@ -529,20 +536,31 @@ def _capture_roots(
     workspace_id = str(payload.get("workspace_id") or "")
     mount = client.invoke(
         WORKSPACE,
-        "get",
-        {"profile_id": profile_id, "workspace_id": workspace_id},
+        WORKSPACE_GET_OPERATION,
+        {
+            # The catalog operation is intentionally stable and opaque.  The
+            # service-level action belongs in the payload, as required by the
+            # workspace host-provider contract.
+            "operation": "get",
+            "profile_id": profile_id,
+            "workspace_id": workspace_id,
+        },
     )
     if not isinstance(mount, Mapping):
         raise KeyError("workspace mount is unknown")
     mount_revision = int(mount.get("mount_revision") or 0)
     if mount_revision < 1:
         raise PermissionError("workspace mount revision is unavailable")
-    binding = {
-        "profile_id": profile_id,
-        "workspace_id": workspace_id,
-        "expected_mount_revision": mount_revision,
-    }
-    root, repository = GitWriteService(client)._roots(binding)
+    root = Path(str(mount.get("root_path") or "")).resolve(strict=True)
+    if not root.is_dir():
+        raise PermissionError("workspace root is unavailable")
+    repository = Path(
+        _git(root, ["rev-parse", "--show-toplevel"]).strip()
+    ).resolve(strict=True)
+    try:
+        repository.relative_to(root)
+    except ValueError as exc:
+        raise PermissionError("Git repository root escapes workspace") from exc
     return root, repository, mount_revision
 
 

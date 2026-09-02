@@ -43,19 +43,31 @@ class _Dispatch:
     ) -> Mapping[str, Any]:
         assert version_range is None
         self.calls.append((contract_id, operation_id, dict(payload)))
-        if contract_id == "tobkiri.resource.workspace.v1" and operation_id == "list":
+        if (
+            contract_id == "tobkiri.resource.workspace.v1"
+            and operation_id == "rumi_workspace_mount_pack.workspace-resource"
+            and payload.get("operation") == "list"
+        ):
             return {
                 "profile_id": "defaults",
                 "revision": self.snapshot_revision,
                 "selected_workspace_id": "workspace.fixture",
             }
-        if contract_id == "tobkiri.resource.workspace.v1" and operation_id == "get":
+        if (
+            contract_id == "tobkiri.resource.workspace.v1"
+            and operation_id == "rumi_workspace_mount_pack.workspace-resource"
+            and payload.get("operation") == "get"
+        ):
             return {
                 "id": "workspace.fixture",
                 "root_path": str(self.root),
                 "mount_revision": self.mount_revision,
             }
-        if contract_id == "tobkiri.service.shell.inspect.v1" and operation_id == "classify":
+        if (
+            contract_id == "tobkiri.service.shell.inspect.v1"
+            and operation_id == "rumi_shell_policy_pack.shell-inspect"
+            and payload.get("operation") == "classify"
+        ):
             return {
                 "classification": self.policy_revision,
                 "risk_level": "low",
@@ -251,13 +263,40 @@ def test_shell_prepare_and_execute_revalidate_then_run_once(tmp_path: Path) -> N
             "rumi_shell_execute_pack",
         ),
     ]
-    assert [item[:2] for item in dispatch.calls] == [
-        ("tobkiri.service.shell.inspect.v1", "classify"),
-        ("tobkiri.resource.workspace.v1", "list"),
-        ("tobkiri.resource.workspace.v1", "get"),
-        ("tobkiri.service.shell.inspect.v1", "classify"),
-        ("tobkiri.resource.workspace.v1", "list"),
-        ("tobkiri.resource.workspace.v1", "get"),
+    assert [
+        (contract_id, operation_id, payload["operation"])
+        for contract_id, operation_id, payload in dispatch.calls
+    ] == [
+        (
+            "tobkiri.service.shell.inspect.v1",
+            "rumi_shell_policy_pack.shell-inspect",
+            "classify",
+        ),
+        (
+            "tobkiri.resource.workspace.v1",
+            "rumi_workspace_mount_pack.workspace-resource",
+            "list",
+        ),
+        (
+            "tobkiri.resource.workspace.v1",
+            "rumi_workspace_mount_pack.workspace-resource",
+            "get",
+        ),
+        (
+            "tobkiri.service.shell.inspect.v1",
+            "rumi_shell_policy_pack.shell-inspect",
+            "classify",
+        ),
+        (
+            "tobkiri.resource.workspace.v1",
+            "rumi_workspace_mount_pack.workspace-resource",
+            "list",
+        ),
+        (
+            "tobkiri.resource.workspace.v1",
+            "rumi_workspace_mount_pack.workspace-resource",
+            "get",
+        ),
     ]
 
     contributions_after_restart = _captured()
@@ -448,7 +487,10 @@ def test_shell_prepare_rejects_user_writable_allowlisted_executable(
     assert _Runner.calls == []
 
 
-@pytest.mark.parametrize("field", ["approved", "token", "authority_receipt"])
+@pytest.mark.parametrize(
+    "field",
+    sorted(shell_runtime._V4_UNTRUSTED_AUTHORITY_FIELDS),
+)
 def test_shell_v4_rejects_client_authority_fields(
     tmp_path: Path,
     field: str,

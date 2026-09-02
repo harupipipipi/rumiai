@@ -1546,6 +1546,258 @@
         "exact_request_digest": null,
         "opaque": false
       }
+    },
+    {
+      "caller_function_id": "rumi_shell_execute_pack.shell-prepare.service",
+      "target_provider_id": "rumi_shell_policy_pack.shell-policy.inspect",
+      "contract_id": "tobkiri.service.shell.inspect.v1",
+      "operation_id": "rumi_shell_policy_pack.shell-inspect",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.service.shell.inspect.v1"
+          ],
+          "operation": [
+            "rumi_shell_policy_pack.shell-inspect"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_shell_execute_pack.shell-prepare.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_shell_execute_pack.shell-execute.service",
+      "target_provider_id": "rumi_shell_policy_pack.shell-policy.inspect",
+      "contract_id": "tobkiri.service.shell.inspect.v1",
+      "operation_id": "rumi_shell_policy_pack.shell-inspect",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.service.shell.inspect.v1"
+          ],
+          "operation": [
+            "rumi_shell_policy_pack.shell-inspect"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_shell_execute_pack.shell-execute.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-commit-prepare.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-commit.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-restore-prepare.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-restore.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_write_pack.git-apply-patch.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_publish_pack.git-push-prepare.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
+    },
+    {
+      "caller_function_id": "rumi_git_publish_pack.git-publish.service",
+      "target_provider_id": "rumi_workspace_mount_pack.workspace-mount.resource",
+      "contract_id": "tobkiri.resource.workspace.v1",
+      "operation_id": "rumi_workspace_mount_pack.workspace-resource",
+      "authority_mode": "profile_grant",
+      "requested_scope_template": {
+        "capability": "operation.invoke",
+        "dimensions": {
+          "contract": [
+            "tobkiri.resource.workspace.v1"
+          ],
+          "operation": [
+            "rumi_workspace_mount_pack.workspace-resource"
+          ]
+        },
+        "quotas": {},
+        "exact_request_digest": null,
+        "opaque": false
+      }
     }
   ],
   "shell": {

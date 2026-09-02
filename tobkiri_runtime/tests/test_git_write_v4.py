@@ -26,6 +26,7 @@ from ecosystem.rumi_git_write_pack.runtime.write import (
     RESTORE_PREPARE_FUNCTION_ID,
     RESTORE_PREPARE_OPERATION,
     WORKSPACE,
+    WORKSPACE_GET_OPERATION,
     GitWriteV4Service,
 )
 from core_runtime.host_provider_backend_v4 import HostProviderCaptureContextV4
@@ -47,6 +48,7 @@ class _GitClient:
         self.root = root
         self.profile_id = profile_id
         self.calls: list[tuple[str, str]] = []
+        self.payloads: list[dict[str, Any]] = []
 
     def invoke(
         self,
@@ -55,12 +57,12 @@ class _GitClient:
         payload: Mapping[str, Any],
     ) -> Mapping[str, Any]:
         self.calls.append((contract_id, operation))
+        self.payloads.append(dict(payload))
         assert payload["profile_id"] == self.profile_id
         assert payload["workspace_id"] == "workspace"
-        if (contract_id, operation) == (WORKSPACE, "get"):
+        if (contract_id, operation) == (WORKSPACE, WORKSPACE_GET_OPERATION):
+            assert payload["operation"] == "get"
             return {"root_path": str(self.root), "mount_revision": 7}
-        if (contract_id, operation) == (GIT_READ, "root"):
-            return {"repository_root": "."}
         raise AssertionError(f"unexpected dependency: {contract_id}.{operation}")
 
 
@@ -690,7 +692,7 @@ def test_v4_prepare_injects_nondefault_profile_from_host_context(
 
     assert plan["profile_id"] == "non-default-profile"
     assert invocation.contract_client_calls == [
-        (frozenset({WORKSPACE, GIT_READ}), "rumi_git_write_pack")
+        (frozenset({WORKSPACE}), "rumi_git_write_pack")
     ]
 
 

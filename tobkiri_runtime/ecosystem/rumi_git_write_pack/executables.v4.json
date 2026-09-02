@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:b85791cf6231afa0561525b9ce2aae6a8071313fca57293f50f7e2eda3ea4d29",
+  "catalog_digest": "sha256:240d7e3dbcb33a233999802a105d1c445e7bc0c70ada344267b4a658a5bc0e68",
   "pack_id": "rumi_git_write_pack",
-  "source_identity": "sha256:888693a59ed1cece7f5a7b59c42144f809ed1cc2c9f0a5101634f1344216659a",
+  "source_identity": "sha256:97a07a6af47f59aded999a29f3dbb7c2139b3c363ce221e00cf813c7b119a29b",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -74,7 +74,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-apply-patch.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -138,7 +138,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-commit-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -202,7 +202,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-commit.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -266,7 +266,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-restore-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -330,7 +330,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_git_write_pack.git-restore.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "materialization_mode": "on_demand",
       "operations": [

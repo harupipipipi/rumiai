@@ -1,8 +1,8 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
-  "catalog_digest": "sha256:f031db77c4a11e446e2e652c8ce8af5b308c039320a8d7611567815ff262f62b",
+  "catalog_digest": "sha256:f334e96552075a89d1c6ba80a04150a5f676c70ca8ee58674de1121c0d303d48",
   "pack_id": "rumi_shell_execute_pack",
-  "source_identity": "sha256:c7937c85c408583f52b12a262a10477133e9a91240685b2831cf0fcecf91e0cd",
+  "source_identity": "sha256:41b3ff1f31e189c5f690e1f5633cbe85a1b249c1cc870a5cf884c9b79b1a2223",
   "variants": [
     {
       "architecture": "any",
@@ -10,7 +10,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_shell_execute_pack.shell-execute.service",
-      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+      "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
       "implementation_path": "runtime/execute.py",
       "materialization_mode": "on_demand",
       "operations": [
@@ -78,7 +78,7 @@
       "execution_domain_profile": "host.extension.default.v1",
       "execution_kind": "host_extension",
       "function_id": "rumi_shell_execute_pack.shell-prepare.service",
-      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+      "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
       "implementation_path": "runtime/execute.py",
       "materialization_mode": "on_demand",
       "operations": [

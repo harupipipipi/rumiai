@@ -271,7 +271,7 @@
       "source_path": "tobkiri_runtime/ecosystem/defaultspack/v4/packs/rumi_shell_policy_pack.pack.v4.json"
     }
   ],
-  "default_profile_digest": "sha256:e758a97578b314a210d00b1b90e0af9c4a6a97778e9d0877374dde9cc0d43a8d",
+  "default_profile_digest": "sha256:bf9457cbeb71bb4e8ac04201bef4909585e0db3643cff557b486e96e4b49954f",
   "default_profile_id": "defaults",
   "default_profile_source": "tobkiri_runtime/ecosystem/defaultspack/v4/defaults.profile.v4.json",
   "default_selection": {
@@ -413,14 +413,14 @@
     "rumi_file_inspect_pack": "sha256:bb07aef155a52b5d8f66abfb4fe87253d1a0641dbdd414b3c178a8a0eb4bb623",
     "rumi_git_publish_pack": "sha256:e47b76b4a283196354251652b3682726d7bd08266442fcde36a594b658ac94ef",
     "rumi_git_read_pack": "sha256:effd36de39db1a504a4f10176429b353ce00fb31877403ce955e130f829f5768",
-    "rumi_git_write_pack": "sha256:b553395789e1df3751c597d2fed7607f4ef39b61ed6f86c2e78c941878c253c4",
+    "rumi_git_write_pack": "sha256:b5c46ad8b9e7226c2c8f76f44b7e9fc9c2a2105cb4d84039c7de430bcfb2ab42",
     "rumi_host_authority_bridge_pack": "sha256:8951967a46e82417d264d2ac554d36516242033b21b3cab6a9fc3e385d570973",
     "rumi_model_catalog_pack": "sha256:01b88c8e5c1d2fd96f88ee7088c1fd3984b36127830a9a40b7a730f60eaf044e",
     "rumi_model_registry_pack": "sha256:2f85eead08ddd064625eddc9bf49c46fe5ab0e15a53bc479bcf54ff7b633f622",
     "rumi_provider_adapters_pack": "sha256:f6ec77c80384454124bab25ef169ba38e015a88c418f4044a1cccb62d6caddb3",
     "rumi_provider_registry_pack": "sha256:5b9914d6d35a01b867b6e4077191877b949d85f7892ab3061641e79565c3097a",
-    "rumi_shell_execute_pack": "sha256:c5eaa3379cb975c13cba244bb3571d12860e1f1f17471004d9df98b7fcbbdeee",
-    "rumi_shell_policy_pack": "sha256:f8a5048ed892aa410aa1d19506c03b8d9d58408e003765e2ecdba4218019fffa",
+    "rumi_shell_execute_pack": "sha256:a848ccdc4b4b174b4bf8c006a754e5e3dcc5f72533efc06e3187b1ae561f4326",
+    "rumi_shell_policy_pack": "sha256:ded503f3d245214e952a2821a3328aac3155a389a658d903ba9d705d9edbb012",
     "rumi_workspace_mount_pack": "sha256:6034b20f29eb888f31697f0740bc54544ae74070fff4168f207d4674fe2b340a",
     "runtime.tauri.application.default": "sha256:bc4dbe48fd8f230cfa9ff3cf6f3100d67d65593a322431df25bf086e0f409dc3",
     "shell.tauri.default": "sha256:b2989503eb3e8f899f263387d8b9d6c810ec0a1859188200f86f781aa2965cc1",

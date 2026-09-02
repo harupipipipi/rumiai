@@ -4055,7 +4055,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4069,7 +4069,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -4106,7 +4106,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-apply-patch.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4120,7 +4120,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -4157,7 +4157,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-commit-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4171,7 +4171,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -4208,7 +4208,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-commit.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4222,7 +4222,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -4261,7 +4261,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-restore-prepare.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4275,7 +4275,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -4312,7 +4312,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_git_write_pack.git-restore.service",
-      "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+      "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
       "implementation_path": "runtime/write.py",
       "input_schema": {
         "type": "object"
@@ -4326,7 +4326,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "implementation_path": "runtime/write.py",
           "input_schema": {
             "type": "object"
@@ -7714,7 +7714,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_shell_execute_pack.shell-execute.service",
-      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+      "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
       "implementation_path": "runtime/execute.py",
       "input_schema": {
         "type": "object"
@@ -7728,7 +7728,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "implementation_path": "runtime/execute.py",
           "input_schema": {
             "type": "object"
@@ -7767,7 +7767,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_shell_execute_pack.shell-prepare.service",
-      "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+      "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
       "implementation_path": "runtime/execute.py",
       "input_schema": {
         "type": "object"
@@ -7781,7 +7781,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "implementation_path": "runtime/execute.py",
           "input_schema": {
             "type": "object"
@@ -7818,7 +7818,7 @@
       },
       "execution_kind": "source-verified",
       "function_id": "rumi_shell_policy_pack.shell-policy.inspect",
-      "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+      "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
       "implementation_path": "runtime/policy.py",
       "input_schema": {
         "type": "object"
@@ -7832,7 +7832,7 @@
           "error_schema": {
             "type": "object"
           },
-          "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+          "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
           "implementation_path": "runtime/policy.py",
           "input_schema": {
             "type": "object"
@@ -10808,7 +10808,7 @@
     "generator": "tobkiri.scripts.generate_executable_source_registry_v1",
     "generator_version": "1.0.0",
     "input_count": 191,
-    "input_digest": "sha256:897eaaad8d6815aea9b2f4dc63fb86764a732ef4090166c92d45434c80816c42",
+    "input_digest": "sha256:375b62bfa5d06af857d5ebee68146412d2437e31fe486e78962c0e45733f8c18",
     "input_paths": [
       "tobkiri_runtime/ecosystem/rumi_agent_runtime_service_pack/artifact-manifest.json",
       "tobkiri_runtime/ecosystem/rumi_agent_state_store_pack/artifact-manifest.json",
@@ -11204,7 +11204,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/artifact-manifest.json"
       },
       {
-        "digest": "sha256:1315a5ff74e6daf34a018110fbcdddc93d7dc6671ef0049860cb43f2dfb78db7",
+        "digest": "sha256:e6fd81f61455079762e228129c79f00f0f58a93c4827118a2e41ae9f015d3e87",
         "kind": "legacy-artifact-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/artifact-manifest.json"
       },
@@ -11369,12 +11369,12 @@
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/artifact-manifest.json"
       },
       {
-        "digest": "sha256:5830a8c037679890639abe8a870047761c18b79e4d79b96c723260d686d3c068",
+        "digest": "sha256:d8b80c4c3e2f0f9167711d2ed81e1916bf51906407d4bc5db6c695922fc66970",
         "kind": "legacy-artifact-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_shell_execute_pack/artifact-manifest.json"
       },
       {
-        "digest": "sha256:6748bbe2fb006966b56f4a6b21a5142a4dec84bdc9a7007c896b4e1c6623b7ef",
+        "digest": "sha256:0386a454865c7a93fecf36b1361889773c1f8332f35353df4c7f430b0cf73fa2",
         "kind": "legacy-artifact-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_shell_policy_pack/artifact-manifest.json"
       },
@@ -11684,7 +11684,7 @@
         "path": "tobkiri_runtime/ecosystem/rumi_git_read_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:c7c9987d293142bcbb738d5daefc0fcd2dcac3e075060667d60df0b122dd2b55",
+        "digest": "sha256:0905013e882f92f4444b2bbc3913517e0ab99e8d77e46d412257e4e99b1452aa",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_git_write_pack/rumi.pack.v3.json"
       },
@@ -11849,12 +11849,12 @@
         "path": "tobkiri_runtime/ecosystem/rumi_scheduler_tool_adapter_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:22b23861f64a246fef69d81e483bab2793af7d1fcef2d4f1b73cbaf1e07e28c6",
+        "digest": "sha256:23bcd654cf44475849b47319e990d50fbd837b661c1c04d097706c78204b4741",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_shell_execute_pack/rumi.pack.v3.json"
       },
       {
-        "digest": "sha256:8da97ccc549817d5169017df8f9f48888e99932deed4f08933bd9e6a912efbf0",
+        "digest": "sha256:83b7e133ab1722878f187546ba17fcb731e75898183929cab779f29ad5a88309",
         "kind": "legacy-v3-manifest",
         "path": "tobkiri_runtime/ecosystem/rumi_shell_policy_pack/rumi.pack.v3.json"
       },

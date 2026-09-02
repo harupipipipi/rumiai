@@ -31,6 +31,8 @@ _CREDENTIAL = {
     "pass", "op read", "aws configure",
 }
 _METACHARS = (";", "&&", "||", "|", ">", "<", "`", "$(", "${")
+_PACKVM_OPERATION = "rumi_shell_policy_pack.shell-inspect"
+_PACKVM_SERVICE_OPERATION = "classify"
 
 
 def create_shell_policy_operation(
@@ -47,6 +49,30 @@ def create_shell_policy_operation(
         raise ValueError(f"unknown shell policy operation: {name}")
 
     return operation
+
+
+def tobkiri_packvm_invoke(
+    operation_id: object,
+    payload: object,
+) -> dict[str, Any]:
+    """Run the sealed PackVM shell-policy ABI without Host authority.
+
+    The V4 catalog grants this PackVM entrypoint only the canonical inspect
+    operation.  The service action remains data so a caller cannot select a
+    different legacy operation by changing the dispatch target.
+    """
+
+    if operation_id != _PACKVM_OPERATION:
+        raise ValueError("PackVM shell policy operation is not permitted")
+    if not isinstance(payload, Mapping):
+        raise ValueError("PackVM shell policy payload must be an object")
+    service_operation = payload.get("operation")
+    if service_operation != _PACKVM_SERVICE_OPERATION:
+        raise ValueError("PackVM shell policy service operation is invalid")
+    result = create_shell_policy_operation(None)(service_operation, payload)
+    if not isinstance(result, dict):
+        raise ValueError("PackVM shell policy result must be an object")
+    return dict(result)
 
 
 def classify(payload: Mapping[str, Any]) -> dict[str, Any]:

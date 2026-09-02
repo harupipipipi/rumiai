@@ -13,7 +13,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Iterator, Mapping
 from urllib.parse import quote
 
 import pytest
@@ -50,12 +50,21 @@ from ecosystem.defaultspack.domain.runtime_surface_v4 import (
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
 from ecosystem.defaultspack.domain.runtime_v4 import ActivationStore, BundledCatalog
+from ecosystem.rumi_shell_policy_pack.runtime import policy as shell_policy
 from tests.conformance_support.command_protocol_activation import (
     COMMAND_PROTOCOL_HTTP_CASES,
     file_snapshot,
 )
-from tobkiri_host.backends import BackendRegistry
+from tobkiri_host.backends import (
+    REQUIRED_PRODUCTION_GATES,
+    BackendRegistry,
+    BackendStatus,
+)
+from tobkiri_host.broker import RequestEnvelope
+from tobkiri_host.effects import ProviderOutcome
 from tobkiri_host.errors import BackendUnavailableError
+from tobkiri_host.models import ExecutionKind, OpaqueAuthorityRef, RuntimeEvidence
+from tobkiri_protocol.canonical import canonical_digest
 from tests.conformance_support.host_contract import host_contract
 
 
@@ -69,6 +78,121 @@ BUNDLE_ROOT = RUNTIME_ROOT / "ecosystem" / "defaultspack" / "v4"
 MAP_PATH = (
     RUNTIME_ROOT / "ecosystem" / "defaultspack" / "defaultspack" / "frontend_contract_map.v4.json"
 )
+
+
+class _ShellPolicyPackVmBackend:
+    """Test supervisor for the one production-admitted shell policy PackVM ABI.
+
+    The test owns the supervisor transport only.  It still asks production
+    capture to bind the sealed artifact and target-domain resolvers, then
+    calls the staged shell-policy entrypoint with the exact catalog operation.
+    That makes a nested terminal prepare prove the actual PackVM policy edge
+    without adding a product fallback for non-macOS test runs.
+    """
+
+    _PACK_ID = "rumi_shell_policy_pack"
+    _FUNCTION_ID = "rumi_shell_policy_pack.shell-policy.inspect"
+    _CONTRACT_ID = "tobkiri.service.shell.inspect.v1"
+    _OPERATION_ID = "rumi_shell_policy_pack.shell-inspect"
+
+    def __init__(self) -> None:
+        self.status = BackendStatus(
+            backend_id="tobkiri.python-pack-v4",
+            execution_kind=ExecutionKind.PACK_VM,
+            platform="any",
+            backend_digest=canonical_digest({"backend": "test-shell-policy-packvm", "abi": 1}),
+            production_enabled=True,
+            conformance_only=False,
+            satisfied_gates=REQUIRED_PRODUCTION_GATES,
+        )
+        self._artifact_resolver = None
+        self._target_domain_resolver = None
+        self._target_domain_id: str | None = None
+
+    def supports(self, binding: object) -> bool:
+        """Admit only the exact shell-policy Function pinned by the Plan."""
+
+        artifact = getattr(binding, "artifact", None)
+        function = getattr(binding, "function", None)
+        operation = getattr(binding, "operation", None)
+        return bool(
+            getattr(artifact, "pack_id", None) == self._PACK_ID
+            and getattr(function, "function_id", None) == self._FUNCTION_ID
+            and getattr(operation, "contract_id", None) == self._CONTRACT_ID
+            and getattr(operation, "operation_id", None) == self._OPERATION_ID
+        )
+
+    def bind_artifact_resolver(self, resolver: object) -> None:
+        """Accept the production-captured resolver exactly once."""
+
+        assert self._artifact_resolver is None
+        assert callable(resolver)
+        self._artifact_resolver = resolver
+
+    def bind_target_domain_resolver(self, resolver: object) -> None:
+        """Accept the production authority domain resolver exactly once."""
+
+        assert self._target_domain_resolver is None
+        assert callable(resolver)
+        self._target_domain_resolver = resolver
+
+    def materialize(self, binding: object, reservation_id: str) -> RuntimeEvidence:
+        """Materialize the verified policy artifact in its exact Host domain."""
+
+        if not reservation_id or not self.supports(binding):
+            raise BackendUnavailableError("test PackVM binding is unavailable")
+        if self._artifact_resolver is None or self._target_domain_resolver is None:
+            raise BackendUnavailableError("test PackVM capture is unavailable")
+        artifact = self._artifact_resolver(binding)
+        implementation_digest = getattr(
+            getattr(binding, "function", None), "implementation_digest", None
+        )
+        if (
+            getattr(artifact, "artifact_digest", None)
+            != getattr(getattr(binding, "artifact", None), "digest", None)
+            or getattr(artifact, "implementation_digest", None) != implementation_digest
+        ):
+            raise BackendUnavailableError("test PackVM artifact changed")
+        domain_id = self._target_domain_resolver(binding)
+        if not isinstance(domain_id, str) or not domain_id:
+            raise BackendUnavailableError("test PackVM domain is unavailable")
+        self._target_domain_id = domain_id
+        return RuntimeEvidence(
+            domain_ref=OpaqueAuthorityRef(domain_id),
+            executable_digest=str(implementation_digest),
+            backend_digest=self.status.backend_digest,
+            authenticated_channel=True,
+            nonce_fresh=True,
+        )
+
+    def invoke(self, request: object) -> ProviderOutcome:
+        """Execute just the real sealed shell-policy ABI over this test transport."""
+
+        if (
+            not isinstance(request, RequestEnvelope)
+            or request.target_domain.value != self._target_domain_id
+            or request.contract_id != self._CONTRACT_ID
+            or request.operation_id != self._OPERATION_ID
+        ):
+            raise BackendUnavailableError("test PackVM envelope is invalid")
+        return ProviderOutcome(
+            shell_policy.tobkiri_packvm_invoke(
+                request.operation_id,
+                dict(request.payload),
+            )
+        )
+
+    def cancel(self, request_id: str) -> None:
+        """Accept the Broker's authenticated cancellation identity."""
+
+        if not request_id:
+            raise BackendUnavailableError("test PackVM cancellation is invalid")
+
+    def terminate(self, domain_id: str) -> None:
+        """Fence only the domain that production capture issued to this backend."""
+
+        if domain_id != self._target_domain_id:
+            raise BackendUnavailableError("test PackVM domain is invalid")
 
 
 def _contract(method: str, target: str) -> str:
@@ -125,8 +249,14 @@ def _authenticate(server: PackAPIServer) -> tuple[str, str, str]:
     return cookie.split(";", 1)[0], str(exchange["data"]["csrf_token"]), origin
 
 
-@pytest.fixture
-def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _captured_production_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    packvm_backends: BackendRegistry | None = None,
+) -> Iterator[tuple[PackAPIServer, object, AuthorityStore]]:
+    """Start one production capture, optionally with a test PackVM supervisor."""
+
     user_data = tmp_path / "user-data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
@@ -170,6 +300,7 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         bundle_root=bundle_root,
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
+        backends=packvm_backends,
         http_contract_bindings=bindings,
         activation_snapshot_loader=defaultspack_activation_snapshot_loader,
         runtime_surface_factory=create_runtime_surface_services,
@@ -221,6 +352,24 @@ def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         server.stop()
         session.broker.close()
         authority.close()
+
+
+@pytest.fixture
+def production_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Capture the unmodified production HTTP server fixture."""
+
+    yield from _captured_production_server(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def command_vertical_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Capture production HTTP with only the sealed policy PackVM test port."""
+
+    yield from _captured_production_server(
+        tmp_path,
+        monkeypatch,
+        packvm_backends=BackendRegistry((_ShellPolicyPackVmBackend(),)),
+    )
 
 
 def test_command_protocol_paths_are_inert_in_captured_production_http(
@@ -310,27 +459,50 @@ def test_command_protocol_paths_are_inert_in_captured_production_http(
     assert session.broker._executor._work_queue.empty()
 
 
-def test_high_risk_terminal_http_uses_host_approval_before_effect(
-    production_server,
+def test_all_high_risk_commands_http_require_host_approval_and_run_once(
+    command_vertical_server,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A signed HTTP terminal request cannot execute before V3 UI approval."""
+    """Exercise every Command ref through HTTP, Host approval, and one resume.
+
+    This is intentionally one mounted repository.  The PackVM test transport
+    is limited to the real shell-policy ABI; every command effect still uses
+    the production adapter, Host coordinator, signed UI operator, and its
+    captured Host Provider.
+    """
 
     from core_runtime.authority.ui_operator import sign_ui_operator
+    from ecosystem.rumi_git_publish_pack.runtime import publish as git_publish
     from ecosystem.rumi_workspace_mount_pack.runtime.mounts import WorkspaceMountStore
 
-    server, _session, _authority = production_server
+    server, _session, _authority = command_vertical_server
     workspace = tmp_path / "workspace"
+    remote = tmp_path / "vertical-remote.git"
     workspace.mkdir()
-    for command in (
-        ("git", "init", "-q", str(workspace)),
-        ("git", "-C", str(workspace), "config", "user.email", "test@example.com"),
-        ("git", "-C", str(workspace), "config", "user.name", "Tobkiri Test"),
+    subprocess.run(("git", "init", "-q", str(workspace)), check=True)
+    subprocess.run(("git", "init", "--bare", "-q", str(remote)), check=True)
+    for key, value in (
+        ("user.email", "test@example.com"),
+        ("user.name", "Tobkiri Test"),
     ):
-        subprocess.run(command, check=True)
+        subprocess.run(("git", "-C", str(workspace), "config", key, value), check=True)
     (workspace / "seed.txt").write_text("seed\n", encoding="utf-8")
-    subprocess.run(("git", "-C", str(workspace), "add", "seed.txt"), check=True)
+    (workspace / "restore.txt").write_text("restore seed\n", encoding="utf-8")
+    (workspace / "patch.txt").write_text("patch before\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(workspace), "add", "."), check=True)
     subprocess.run(("git", "-C", str(workspace), "commit", "-qm", "seed"), check=True)
+    branch = subprocess.run(
+        ("git", "-C", str(workspace), "symbolic-ref", "--short", "HEAD"),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    approved_remote_url = "https://push.example.invalid/tobkiri/vertical.git"
+    subprocess.run(
+        ("git", "-C", str(workspace), "remote", "add", "origin", approved_remote_url),
+        check=True,
+    )
 
     mounts = WorkspaceMountStore(
         "defaults",
@@ -352,85 +524,236 @@ def test_high_risk_terminal_http_uses_host_approval_before_effect(
         )
         return status, response
 
-    invocation_id = "vertical-terminal"
-    status, pending = post(
-        "/api/command-protocol/v1/high-risk",
-        {
-            "phase": "prepare",
-            "invocation_id": invocation_id,
-            "command_ref": "terminal",
-            "arguments": {
-                "command": [
-                    "git",
-                    "config",
-                    "--local",
-                    "--add",
-                    "tobkiri.vertical.terminal",
-                    "ran",
-                ],
-                "cwd": ".",
-            },
-            "presentation": {"title": "Run", "summary": "Run local test command"},
-        },
-    )
-    assert status == 200, pending
-    assert pending["data"]["state"] == "approval_pending"
-    assert (
-        subprocess.run(
-            ("git", "-C", str(workspace), "config", "--local", "--get-all", "tobkiri.vertical.terminal"),
+    def git_output(*args: str, check: bool = True) -> str:
+        return subprocess.run(
+            ("git", "-C", str(workspace), *args),
+            check=check,
+            capture_output=True,
+            text=True,
+        ).stdout
+
+    # The product plan retains a safe HTTPS remote and performs its normal
+    # URL validation, source/remote CAS, and lease construction.  Only the
+    # final, already revalidated transport is redirected to an isolated bare
+    # repository, so the vertical test never contacts the network.
+    original_git = git_publish._git
+
+    def local_final_push(
+        repository: Path,
+        args: list[str],
+        *,
+        timeout: int = 30,
+        hardened: bool = False,
+    ) -> str:
+        if not args or args[0] != "push":
+            return original_git(repository, args, timeout=timeout, hardened=hardened)
+        assert hardened is True
+        assert args[-2] == approved_remote_url
+        assert args[-1].endswith(f":refs/heads/{branch}")
+        completed = subprocess.run(
+            (
+                git_publish._git_executable(),
+                "-C",
+                str(repository),
+                "-c",
+                "protocol.file.allow=always",
+                *args[:-2],
+                str(remote),
+                args[-1],
+            ),
             check=False,
             capture_output=True,
             text=True,
-        ).returncode
-        != 0
-    )
+            timeout=timeout,
+        )
+        output = (completed.stdout + completed.stderr)[:256_000]
+        if completed.returncode != 0:
+            raise RuntimeError(output.strip() or "test local Git push failed")
+        return output
 
-    approval_request_id = pending["data"]["approval_request_id"]
-    status, approval = post(
-        "/api/interactive-approval/v1/get",
-        {"request_id": approval_request_id},
-    )
-    assert status == 200, approval
-    approval_data = approval["data"]
-    assert approval_data["typed_confirmation_required"] is True
-    status, approved = post(
-        "/api/interactive-approval/v1/approve",
-        {
-            "request_id": approval_request_id,
-            "confirmation_text": "EXECUTE",
-            "ui_operator": sign_ui_operator(
-                approval_request_id,
-                nonce="vertical-terminal",
-                decision="approve",
-                request_snapshot_digest=approval_data["request_snapshot_digest"],
-                typed_confirmation_digest=approval_data["typed_confirmation_digest"],
+    monkeypatch.setattr(git_publish, "_git", local_final_push)
+
+    def approve(approval_request_id: str, nonce: str) -> None:
+        status, approval = post(
+            "/api/interactive-approval/v1/get",
+            {"request_id": approval_request_id},
+        )
+        assert status == 200, approval
+        approval_data = approval["data"]
+        assert approval_data["typed_confirmation_required"] is True
+        status, approved = post(
+            "/api/interactive-approval/v1/approve",
+            {
+                "request_id": approval_request_id,
+                "confirmation_text": "EXECUTE",
+                "ui_operator": sign_ui_operator(
+                    approval_request_id,
+                    nonce=nonce,
+                    decision="approve",
+                    request_snapshot_digest=approval_data["request_snapshot_digest"],
+                    typed_confirmation_digest=approval_data["typed_confirmation_digest"],
+                ),
+            },
+        )
+        assert status == 200, approved
+        assert approved["data"]["state"] == "approved"
+
+    def exercise(
+        command_ref: str,
+        arguments: Mapping[str, object],
+        before_effect: Callable[[], object],
+        after_effect: Callable[[], object],
+    ) -> None:
+        """Prove a command has no pre-approval effect and one final effect."""
+
+        invocation_id = f"vertical-{command_ref}"
+        request = {
+            "phase": "prepare",
+            "invocation_id": invocation_id,
+            "command_ref": command_ref,
+            "arguments": dict(arguments),
+            "presentation": {"title": "Untrusted copy", "summary": "Run command"},
+        }
+        expected_before = before_effect()
+
+        for suffix, forbidden in enumerate(
+            (
+                {**request, "approved": True},
+                {
+                    **request,
+                    "arguments": {**dict(arguments), "authority_receipt": "forged"},
+                },
             ),
+            start=1,
+        ):
+            # The adapter reserves durable state before it calls the Host
+            # coordinator.  A rejected authority field can therefore leave a
+            # conservative tombstone, which must never share the real
+            # invocation's idempotency key.
+            forbidden = {
+                **forbidden,
+                "invocation_id": f"{invocation_id}-forged-{suffix}",
+            }
+            status, rejected = post("/api/command-protocol/v1/high-risk", forbidden)
+            assert status >= 400, rejected
+            assert rejected["success"] is False
+            assert before_effect() == expected_before
+
+        status, pending = post("/api/command-protocol/v1/high-risk", request)
+        assert status == 200, pending
+        assert pending["data"]["state"] == "approval_pending"
+        assert before_effect() == expected_before
+
+        approve(str(pending["data"]["approval_request_id"]), invocation_id)
+        status, completed = post(
+            "/api/command-protocol/v1/high-risk",
+            {"phase": "resume", "invocation_id": invocation_id},
+        )
+        assert status == 200, completed
+        assert completed["data"]["state"] == "succeeded"
+        expected_after = after_effect()
+        assert expected_after != expected_before
+
+        status, replay = post(
+            "/api/command-protocol/v1/high-risk",
+            {"phase": "resume", "invocation_id": invocation_id},
+        )
+        assert status == 200, replay
+        assert replay["data"] == completed["data"]
+        assert after_effect() == expected_after
+
+    def terminal_before() -> tuple[int, str]:
+        completed = subprocess.run(
+            (
+                "git",
+                "-C",
+                str(workspace),
+                "config",
+                "--local",
+                "--get-all",
+                "tobkiri.vertical.terminal",
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.returncode, completed.stdout
+
+    exercise(
+        "terminal",
+        {
+            "command": [
+                "git",
+                "config",
+                "--local",
+                "--add",
+                "tobkiri.vertical.terminal",
+                "ran",
+            ],
+            "cwd": ".",
         },
+        terminal_before,
+        lambda: (0, git_output("config", "--local", "--get-all", "tobkiri.vertical.terminal")),
     )
-    assert status == 200, approved
-    assert approved["data"]["state"] == "approved"
 
-    status, completed = post(
-        "/api/command-protocol/v1/high-risk",
-        {"phase": "resume", "invocation_id": invocation_id},
+    (workspace / "commit.txt").write_text("commit effect\n", encoding="utf-8")
+    subprocess.run(("git", "-C", str(workspace), "add", "commit.txt"), check=True)
+    exercise(
+        "commit",
+        {"workspace_id": "vertical", "message": "vertical command commit"},
+        lambda: git_output("rev-parse", "HEAD").strip(),
+        lambda: git_output("rev-parse", "HEAD").strip(),
     )
-    assert status == 200, completed
-    assert completed["data"]["state"] == "succeeded"
-    config = subprocess.run(
-        ("git", "-C", str(workspace), "config", "--local", "--get-all", "tobkiri.vertical.terminal"),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert config.stdout.splitlines() == ["ran"]
 
-    status, replay = post(
-        "/api/command-protocol/v1/high-risk",
-        {"phase": "resume", "invocation_id": invocation_id},
+    (workspace / "restore.txt").write_text("restore changed\n", encoding="utf-8")
+    exercise(
+        "restore",
+        {
+            "workspace_id": "vertical",
+            "paths": ["restore.txt"],
+            "source": "HEAD",
+        },
+        lambda: (workspace / "restore.txt").read_text(encoding="utf-8"),
+        lambda: (workspace / "restore.txt").read_text(encoding="utf-8"),
     )
-    assert status == 200, replay
-    assert replay["data"] == completed["data"]
-    assert config.stdout.splitlines() == ["ran"]
+
+    patch = """diff --git a/patch.txt b/patch.txt
+index ba35db0..e311d74 100644
+--- a/patch.txt
++++ b/patch.txt
+@@ -1 +1 @@
+-patch before
++patch after
+"""
+    exercise(
+        "patch",
+        {"workspace_id": "vertical", "patch": patch},
+        lambda: (workspace / "patch.txt").read_text(encoding="utf-8"),
+        lambda: (workspace / "patch.txt").read_text(encoding="utf-8"),
+    )
+
+    remote_ref = f"refs/heads/{branch}"
+    exercise(
+        "push",
+        {
+            "workspace_id": "vertical",
+            "remote": "origin",
+            "branch": branch,
+            "force_with_lease": False,
+        },
+        lambda: subprocess.run(
+            ("git", "--git-dir", str(remote), "rev-parse", "--verify", remote_ref),
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+        lambda: subprocess.run(
+            ("git", "--git-dir", str(remote), "rev-parse", "--verify", remote_ref),
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip(),
+    )
 
 
 def test_named_profile_registry_crud_http_preserves_active_pointer_and_history(

@@ -63,6 +63,8 @@ _V4_PREPARE_OPERATION = "rumi_shell_execute_pack.shell-prepare"
 _V4_EXECUTE_OPERATION = "rumi_shell_execute_pack.shell-execute"
 _V4_POLICY_CONTRACT = "tobkiri.service.shell.inspect.v1"
 _V4_WORKSPACE_CONTRACT = "tobkiri.resource.workspace.v1"
+_V4_POLICY_OPERATION = "rumi_shell_policy_pack.shell-inspect"
+_V4_WORKSPACE_OPERATION = "rumi_workspace_mount_pack.workspace-resource"
 _V4_DEPENDENCIES = frozenset({_V4_POLICY_CONTRACT, _V4_WORKSPACE_CONTRACT})
 _V4_UNTRUSTED_AUTHORITY_FIELDS = frozenset(
     {
@@ -329,7 +331,11 @@ class ShellExecuteV4Service:
             > 64 * 1024
         ):
             raise ValueError("shell environment exceeds the bounded schema")
-        policy = client.invoke(_V4_POLICY_CONTRACT, "classify", dict(arguments))
+        policy = client.invoke(
+            _V4_POLICY_CONTRACT,
+            _V4_POLICY_OPERATION,
+            {"operation": "classify", **arguments},
+        )
         if not isinstance(policy, Mapping):
             raise PermissionError("shell policy response is invalid")
         if policy.get("shell_syntax") and not arguments["shell"]:
@@ -486,8 +492,8 @@ def _v4_arguments(payload: Mapping[str, Any]) -> dict[str, Any]:
 def _v4_workspace(client: Any, profile_id: str) -> dict[str, Any]:
     snapshot = client.invoke(
         _V4_WORKSPACE_CONTRACT,
-        "list",
-        {"profile_id": profile_id},
+        _V4_WORKSPACE_OPERATION,
+        {"operation": "list", "profile_id": profile_id},
     )
     if not isinstance(snapshot, Mapping):
         raise PermissionError("workspace snapshot is invalid")
@@ -500,8 +506,12 @@ def _v4_workspace(client: Any, profile_id: str) -> dict[str, Any]:
         raise PermissionError("Host-selected workspace is unavailable")
     mount = client.invoke(
         _V4_WORKSPACE_CONTRACT,
-        "get",
-        {"profile_id": profile_id, "workspace_id": workspace_id},
+        _V4_WORKSPACE_OPERATION,
+        {
+            "operation": "get",
+            "profile_id": profile_id,
+            "workspace_id": workspace_id,
+        },
     )
     if not isinstance(mount, Mapping):
         raise PermissionError("workspace mount is unavailable")

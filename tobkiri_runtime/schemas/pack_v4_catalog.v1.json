@@ -6960,7 +6960,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-commit-prepare.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-commit-prepare"
           ]
@@ -6968,7 +6968,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-commit.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-commit"
           ]
@@ -6976,7 +6976,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-restore-prepare.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-restore-prepare"
           ]
@@ -6984,7 +6984,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-restore.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-restore"
           ]
@@ -6992,7 +6992,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-apply-patch-prepare"
           ]
@@ -7000,7 +7000,7 @@
         {
           "contract_id": "tobkiri.service.git.write.v1",
           "function_id": "rumi_git_write_pack.git-apply-patch.service",
-          "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "operation_ids": [
             "rumi_git_write_pack.git-apply-patch"
           ]
@@ -7041,7 +7041,7 @@
               ],
               "entrypoint_id": "git-commit-prepare",
               "id": "rumi_git_write_pack.git-commit-prepare",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             },
             {
               "effect_ceiling": [
@@ -7051,7 +7051,7 @@
               ],
               "entrypoint_id": "git-commit",
               "id": "rumi_git_write_pack.git-commit",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             },
             {
               "effect_ceiling": [
@@ -7061,7 +7061,7 @@
               ],
               "entrypoint_id": "git-restore-prepare",
               "id": "rumi_git_write_pack.git-restore-prepare",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             },
             {
               "effect_ceiling": [
@@ -7071,7 +7071,7 @@
               ],
               "entrypoint_id": "git-restore",
               "id": "rumi_git_write_pack.git-restore",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             },
             {
               "effect_ceiling": [
@@ -7081,7 +7081,7 @@
               ],
               "entrypoint_id": "git-apply-patch-prepare",
               "id": "rumi_git_write_pack.git-apply-patch-prepare",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             },
             {
               "effect_ceiling": [
@@ -7091,7 +7091,7 @@
               ],
               "entrypoint_id": "git-apply-patch",
               "id": "rumi_git_write_pack.git-apply-patch",
-              "implementation_digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939"
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             }
           ],
           "owner": "rumi_git_write_pack",
@@ -7162,7 +7162,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:09a601e1cbef060b7fd52461d5daff1081be58eb62c609ed60ba9b98c7bd5939",
+          "digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "kind": "executable",
           "path": "runtime/write.py"
         }
@@ -12472,7 +12472,7 @@
         {
           "contract_id": "tobkiri.service.shell.execute.v1",
           "function_id": "rumi_shell_execute_pack.shell-prepare.service",
-          "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "operation_ids": [
             "rumi_shell_execute_pack.shell-prepare"
           ]
@@ -12480,7 +12480,7 @@
         {
           "contract_id": "tobkiri.service.shell.execute.v1",
           "function_id": "rumi_shell_execute_pack.shell-execute.service",
-          "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "operation_ids": [
             "rumi_shell_execute_pack.shell-execute"
           ]
@@ -12521,7 +12521,7 @@
               ],
               "entrypoint_id": "shell-prepare",
               "id": "rumi_shell_execute_pack.shell-prepare",
-              "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068"
+              "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145"
             },
             {
               "effect_ceiling": [
@@ -12531,7 +12531,7 @@
               ],
               "entrypoint_id": "shell-execute",
               "id": "rumi_shell_execute_pack.shell-execute",
-              "implementation_digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068"
+              "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145"
             }
           ],
           "owner": "rumi_shell_execute_pack",
@@ -12606,7 +12606,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:50ae0de62ab00493370eff4547cf50ce7012844ebd84ad44f58b6cf788752068",
+          "digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "kind": "executable",
           "path": "runtime/execute.py"
         }
@@ -12674,7 +12674,7 @@
             {
               "entrypoint_id": "shell-inspect",
               "id": "rumi_shell_policy_pack.shell-inspect",
-              "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e"
+              "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed"
             }
           ],
           "owner": "rumi_shell_policy_pack",
@@ -12697,7 +12697,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+          "digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
           "kind": "executable",
           "path": "runtime/policy.py"
         }

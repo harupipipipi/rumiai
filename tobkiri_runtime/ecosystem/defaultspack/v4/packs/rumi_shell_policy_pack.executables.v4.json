@@ -1,13 +1,13 @@
 {
   "catalog_api_version": "io.tobkiri.executable-catalog.v4",
   "pack_id": "rumi_shell_policy_pack",
-  "source_identity": "sha256:de6d4eae35f69f71167c21d9c9b9bb5cde1fc054eed1c9a0eeac336f5de49a9a",
+  "source_identity": "sha256:e72bd085465b07c44536015a368969f7fc2703efc0ce6f1c05b641a66d9defbd",
   "variants": [
     {
       "variant_id": "rumi_shell_policy_pack.shell-policy.inspect.python",
       "function_id": "rumi_shell_policy_pack.shell-policy.inspect",
       "implementation_path": "runtime/policy.py",
-      "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+      "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
       "execution_kind": "pack_vm",
       "platform": "any",
       "architecture": "any",
@@ -38,6 +38,6 @@
       ]
     }
   ],
-  "materialization_catalog_digest": "sha256:fdd6132ae9688ae4029fb0444b84a970f0e719b23d94d0197653c8495f8ee123",
-  "catalog_digest": "sha256:441774d34b3593307c686636fda96dfb733743b89eabc6f0169e3348c20156c4"
+  "materialization_catalog_digest": "sha256:1fdcf796ee12f4086c15e3ea69e8f81d8abf1ae8929521a4380fb8ff735277a2",
+  "catalog_digest": "sha256:24daf45ce0a6ca8591c539f89f3f2c0144481e6fa5312d3a7fd9c789520dfb4c"
 }
