@@ -215,35 +215,35 @@
       },
       {
         "evidence": "host_execution",
-        "line": 501,
+        "line": 508,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
         "evidence": "host_execution",
-        "line": 502,
+        "line": 509,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
         "evidence": "host_execution",
-        "line": 674,
+        "line": 681,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
         "evidence": "host_execution",
-        "line": 676,
+        "line": 683,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
         "evidence": "host_execution",
-        "line": 1412,
+        "line": 1419,
         "message": "legacy execution or authority path is present",
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
@@ -10143,32 +10143,32 @@
         "rule_id": "legacy_function_registry"
       },
       {
-        "evidence_digest": "sha256:7bbea7ff294ea9ecd6a5b9006e333fddaebb6fe3a2388afacef434271dc336bb",
-        "line": 501,
+        "evidence_digest": "sha256:aeb109710df69f98b088136aa368ed2bac243fa444617fd5bed6f3b1c157808b",
+        "line": 508,
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:7bbea7ff294ea9ecd6a5b9006e333fddaebb6fe3a2388afacef434271dc336bb",
-        "line": 502,
+        "evidence_digest": "sha256:aeb109710df69f98b088136aa368ed2bac243fa444617fd5bed6f3b1c157808b",
+        "line": 509,
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:7bbea7ff294ea9ecd6a5b9006e333fddaebb6fe3a2388afacef434271dc336bb",
-        "line": 674,
+        "evidence_digest": "sha256:aeb109710df69f98b088136aa368ed2bac243fa444617fd5bed6f3b1c157808b",
+        "line": 681,
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:7bbea7ff294ea9ecd6a5b9006e333fddaebb6fe3a2388afacef434271dc336bb",
-        "line": 676,
+        "evidence_digest": "sha256:aeb109710df69f98b088136aa368ed2bac243fa444617fd5bed6f3b1c157808b",
+        "line": 683,
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
       {
-        "evidence_digest": "sha256:7bbea7ff294ea9ecd6a5b9006e333fddaebb6fe3a2388afacef434271dc336bb",
-        "line": 1412,
+        "evidence_digest": "sha256:aeb109710df69f98b088136aa368ed2bac243fa444617fd5bed6f3b1c157808b",
+        "line": 1419,
         "path": "tobkiri_runtime/core_runtime/approval_manager.py",
         "rule_id": "legacy_host_execution"
       },
@@ -18403,7 +18403,7 @@
     ]
   },
   "repository": {
-    "commit": "7698b7a76c378c427267df0a8bcad242e01ffcf7",
+    "commit": "a0f2133869b8b6aef8035d06f43c6ec4be63a4d2",
     "tree_digest": "ecc2558f77633a312e85fc823a52ccfe93af905e190da3ac2f7d810de430cef8"
   },
   "scanner_version": "io.tobkiri.architecture.scanner.v1",
