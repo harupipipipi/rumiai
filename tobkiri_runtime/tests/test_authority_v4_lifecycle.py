@@ -328,6 +328,90 @@ def test_payload_cannot_substitute_caller_target_or_activation(tmp_path: Path) -
     assert harness.store.grant_usage(harness.grant.grant_id) == (0, 0)
 
 
+def test_equivalent_provider_rows_resolve_as_one_exact_authority(tmp_path: Path) -> None:
+    """Caller-specific rows may share one exact Provider reachability path."""
+
+    harness = _Harness(tmp_path)
+    harness.store.put_record(
+        replace(harness.provider, record_id="provider-authority-equivalent")
+    )
+
+    result = harness.kernel.authorize(harness.context(), harness.scope)
+    stored = harness.store.get_lease(result.lease_id)
+
+    assert result.target == harness.target
+    assert stored is not None
+    assert stored[0].provider_authority_id == "provider-authority-1"
+
+
+def test_materially_different_provider_rows_remain_ambiguous(tmp_path: Path) -> None:
+    """A broader overlapping Provider row must still fail closed."""
+
+    harness = _Harness(tmp_path)
+    harness.store.put_record(
+        replace(
+            harness.provider,
+            record_id="provider-authority-broader",
+            scope=_scope(paths=("/safe", "/other")),
+        )
+    )
+
+    with pytest.raises(AuthorityDenied, match="missing or ambiguous"):
+        harness.kernel.authorize(harness.context(), harness.scope)
+
+
+def test_equivalent_provider_row_revocation_is_exact_and_fails_over(
+    tmp_path: Path,
+) -> None:
+    """Exact row revocation fences its lease before another alias is selected."""
+
+    harness = _Harness(tmp_path)
+    alias_id = "provider-authority-equivalent"
+    harness.store.put_record(replace(harness.provider, record_id=alias_id))
+    first = harness.kernel.authorize(harness.context(), harness.scope)
+    first_stored = harness.store.get_lease(first.lease_id)
+    assert first_stored is not None
+    assert first_stored[0].provider_authority_id == harness.provider.record_id
+
+    harness.kernel.revoke(
+        target_kind="provider_authority",
+        target_id=harness.provider.record_id,
+        reason="revoke selected exact row",
+    )
+    with pytest.raises(AuthorityDenied, match="already used or revoked"):
+        harness.kernel.dispatch(
+            first.lease_token,
+            target_domain_id=harness.target_domain.domain_id,
+            target_boot_epoch=harness.target_domain.boot_epoch,
+            request_digest=_digest("5"),
+        )
+
+    second_context = harness.context(
+        request_id="request-2",
+        request_digest=_digest("8"),
+        effect_digest=_digest("9"),
+    )
+    second = harness.kernel.authorize(second_context, harness.scope)
+    second_stored = harness.store.get_lease(second.lease_id)
+    assert second_stored is not None
+    assert second_stored[0].provider_authority_id == alias_id
+
+    harness.kernel.revoke(
+        target_kind="provider_authority",
+        target_id=alias_id,
+        reason="revoke remaining exact row",
+    )
+    with pytest.raises(AuthorityDenied, match="missing or ambiguous"):
+        harness.kernel.authorize(
+            harness.context(
+                request_id="request-3",
+                request_digest=_digest("10"),
+                effect_digest=_digest("11"),
+            ),
+            harness.scope,
+        )
+
+
 def test_host_extension_trust_does_not_expand_to_another_operation(
     tmp_path: Path,
 ) -> None:

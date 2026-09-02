@@ -1100,9 +1100,21 @@ class AuthorityKernel:
             ):
                 self._validate_provider_domain(record)
                 matches.append(record)
-        if len(matches) != 1:
+        if not matches:
             raise AuthorityDenied("exact Provider authority is missing or ambiguous")
-        return matches[0]
+        # Provider authority is target reachability; caller-specific authority
+        # remains in GrantRecord. Profile capture can therefore persist one
+        # immutable Provider row per caller while representing the same exact
+        # target/domain/scope authority. Collapse only records whose complete
+        # dataclass fields are equal apart from their durable row identity, and
+        # retain fail-closed ambiguity for every material difference.
+        equivalent = replace(matches[0], record_id="provider-authority-equivalent")
+        if any(
+            replace(candidate, record_id="provider-authority-equivalent") != equivalent
+            for candidate in matches[1:]
+        ):
+            raise AuthorityDenied("exact Provider authority is missing or ambiguous")
+        return min(matches, key=lambda record: record.record_id)
 
     def _select_grant(
         self,
