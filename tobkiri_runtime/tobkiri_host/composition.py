@@ -289,7 +289,7 @@ class HostV4Composition:
                 )
             )
         actual_route_counts: dict[tuple[str, str, str, str, str], int] = {}
-        for route in routes:
+        for route in unique_routes:
             route_identity = (
                 route.contract_id,
                 route.operation_id,
@@ -297,7 +297,9 @@ class HostV4Composition:
                 route.function_id,
                 route.target_principal_ref.value,
             )
-            actual_route_counts[route_identity] = actual_route_counts.get(route_identity, 0) + 1
+            actual_route_counts[route_identity] = (
+                actual_route_counts.get(route_identity, 0) + 1
+            )
         actual_bindings = set(actual_route_counts)
         if actual_bindings != expected_bindings or actual_route_counts != expected_route_counts:
             raise ResolutionError("OperationCatalog routes must exactly equal ResolvedPlan")
