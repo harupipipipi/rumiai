@@ -130,6 +130,8 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
         "contracts.v4.json",
         "artifact-index.v4.json",
         "executables.v4.json",
+        "host_contract_contributions.v1.json",
+        "update_metadata.v1.json",
     ):
         shutil.copy2(DEFAULTSPACK_ROOT / filename, pack_root / filename)
     shutil.copytree(

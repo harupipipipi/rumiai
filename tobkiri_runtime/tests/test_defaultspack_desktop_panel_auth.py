@@ -243,7 +243,7 @@ def test_desktop_panel_auth_fails_closed_without_host_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from defaultspack import desktop_app
+    from ecosystem.defaultspack.defaultspack import desktop_app
 
     user_data = tmp_path / "standalone-user-data"
     user_data.mkdir(mode=0o700)

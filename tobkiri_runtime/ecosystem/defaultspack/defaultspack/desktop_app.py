@@ -431,12 +431,16 @@ def _restore_active_profile_contracts(
         defaultspack_activation_snapshot_loader,
         defaultspack_packvm_backend_factory,
     )
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        install_defaultspack_profile_runtime,
+    )
     from ecosystem.defaultspack.domain.runtime_surface_v4 import (
         create_runtime_surface_services,
     )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
     from tobkiri_host.runtime import install_dispatch_session
 
+    install_defaultspack_profile_runtime()
     bundle_root = _bundle_root()
     ecosystem_root = _pack_root().parent
     active = capture_active_profile()
