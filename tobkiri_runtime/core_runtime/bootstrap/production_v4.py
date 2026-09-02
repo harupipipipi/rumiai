@@ -1159,6 +1159,25 @@ def _nested_host_provider_session_id(envelope: Any) -> str:
     profile_id = getattr(context, "profile_id", None)
     activation_id = getattr(context, "activation_id", None)
     plan_digest = getattr(context, "plan_digest", None)
+    return _nested_host_provider_session_id_for(
+        caller_session_id=caller_session_id,
+        target_principal_id=target_principal_id,
+        profile_id=profile_id,
+        activation_id=activation_id,
+        plan_digest=plan_digest,
+    )
+
+
+def _nested_host_provider_session_id_for(
+    *,
+    caller_session_id: object,
+    target_principal_id: object,
+    profile_id: object,
+    activation_id: object,
+    plan_digest: object,
+) -> str:
+    """Derive one stable nested session solely from Host-authenticated fields."""
+
     if (
         not isinstance(caller_session_id, str)
         or not caller_session_id
@@ -2502,11 +2521,17 @@ def capture_production_dispatch(
 
         def context_for_interactive_effect(
             route: CapturedInteractiveEffectRoute,
-            _presentation_context: RequestContext,
+            presentation_context: RequestContext,
         ) -> RequestContext:
-            """Create one Host session locked to the coordinator execute edge."""
+            """Recreate the signed prepare caller for the execute-only edge."""
 
-            session_id = "session.interactive-effect." + secrets.token_hex(16)
+            session_id = _nested_host_provider_session_id_for(
+                caller_session_id=presentation_context.caller_session_id,
+                target_principal_id=route.coordinator_principal.value,
+                profile_id=presentation_context.profile_id,
+                activation_id=presentation_context.activation_id,
+                plan_digest=presentation_context.plan_digest,
+            )
             with caller_session_bindings_lock:
                 caller_session_bindings[session_id] = route.coordinator_principal.value
             try:
