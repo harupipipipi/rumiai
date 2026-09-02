@@ -19,6 +19,7 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
 import signal
 import shutil
@@ -28,7 +29,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Mapping, Protocol
+from typing import Callable, Mapping, Protocol
 
 
 PROTOCOL = "io.tobkiri.packvm-supervisor.v1"
@@ -89,12 +90,16 @@ _CANONICAL_DEADLINE = re.compile(
 )
 _SCMP_ACT_ALLOW = 0x7FFF0000
 _SCMP_ACT_ERRNO = 0x00050000
-# ``fork`` and ``vfork`` are not native syscalls on every architecture; on
-# arm64 their libc implementations use ``clone``.  Process creation and image
-# replacement remain mandatory, while architecture-absent aliases are optional.
+# ``clone3`` and ``execveat`` are separate process-creation and image-replacement
+# entry points.  The supported guest kernel/libseccomp contract must resolve
+# them: accepting a resolver failure would leave a known entry point outside the
+# filter.  ``fork`` and ``vfork`` are different: arm64 Linux does not expose
+# those legacy syscall aliases and libc implements them through ``clone``.
 _REQUIRED_CHILD_PROCESS_SYSCALLS = (
     b"clone",
+    b"clone3",
     b"execve",
+    b"execveat",
     # A new network namespace is not, by itself, a VSOCK boundary: Linux may
     # place child namespaces in global VSOCK mode.  Pack code has no socket ABI,
     # so deny every socket endpoint before import rather than trying to maintain
@@ -103,7 +108,8 @@ _REQUIRED_CHILD_PROCESS_SYSCALLS = (
     b"socket",
     b"socketpair",
 )
-_OPTIONAL_CHILD_PROCESS_SYSCALLS = (b"clone3", b"execveat", b"fork", b"vfork")
+_FORK_VFORK_CHILD_PROCESS_SYSCALLS = (b"fork", b"vfork")
+_FORK_VFORK_ABSENT_LINUX_ABIS = frozenset({"aarch64", "arm64"})
 _VSOCK_CONSOLE_PHASES = frozenset(
     {
         "vsock-service-start",
@@ -1602,23 +1608,55 @@ def _install_child_process_seccomp_filter() -> None:
         raise ValueError("PackVM child process policy initialization failed")
     deny_action = _SCMP_ACT_ERRNO | errno.EPERM
     try:
-        resolved: dict[bytes, int] = {}
-        for name in (
-            *_REQUIRED_CHILD_PROCESS_SYSCALLS,
-            *_OPTIONAL_CHILD_PROCESS_SYSCALLS,
-        ):
-            syscall = seccomp.seccomp_syscall_resolve_name(name)
-            if syscall >= 0:
-                resolved[name] = syscall
-        if any(name not in resolved for name in _REQUIRED_CHILD_PROCESS_SYSCALLS):
-            raise ValueError("PackVM child process policy is incomplete")
-        for syscall in set(resolved.values()):
+        resolved = _resolved_child_process_syscalls(
+            seccomp.seccomp_syscall_resolve_name
+        )
+        for syscall in resolved:
             if seccomp.seccomp_rule_add(context, deny_action, syscall, 0) != 0:
                 raise ValueError("PackVM child process policy rule failed")
         if seccomp.seccomp_load(context) != 0:
             raise ValueError("PackVM child process policy could not be loaded")
     finally:
         seccomp.seccomp_release(context)
+
+
+def _resolved_child_process_syscalls(
+    resolve_name: Callable[[bytes], int],
+    *,
+    machine: str | None = None,
+) -> tuple[int, ...]:
+    """Resolve every child-process syscall required by the guest ABI.
+
+    ``clone3`` and ``execveat`` are mandatory on every supported guest.  Only
+    arm64 can omit the legacy ``fork``/``vfork`` aliases, because that syscall
+    table genuinely has no such entries.  A negative libseccomp resolution for
+    any other syscall is a configuration mismatch and must fail before Pack
+    code is imported.
+    """
+
+    machine_name = machine if machine is not None else platform.machine()
+    architecture = machine_name.strip().casefold()
+    required = _REQUIRED_CHILD_PROCESS_SYSCALLS
+    if architecture not in _FORK_VFORK_ABSENT_LINUX_ABIS:
+        required += _FORK_VFORK_CHILD_PROCESS_SYSCALLS
+
+    resolved: list[int] = []
+    missing: list[str] = []
+    for name in required:
+        syscall = resolve_name(name)
+        if syscall < 0:
+            missing.append(name.decode("ascii"))
+            continue
+        resolved.append(syscall)
+    if missing:
+        raise ValueError(
+            "PackVM child process policy is incomplete: " + ", ".join(missing)
+        )
+
+    # Aliases can share a syscall number on future Linux ABIs.  A single deny
+    # rule is sufficient, while preserving the stable manifest order keeps
+    # diagnostics and tests deterministic.
+    return tuple(dict.fromkeys(resolved))
 
 
 def _sandbox_argv(target: Path, implementation: Path) -> tuple[str, ...]:

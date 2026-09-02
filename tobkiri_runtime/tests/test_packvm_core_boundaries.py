@@ -105,6 +105,7 @@ def test_guest_child_policy_denies_all_available_process_and_socket_syscalls(
         seccomp_release=Callable(lambda value: released.append(value)),
     )
     monkeypatch.setattr(packvm_guest_runner.sys, "platform", "linux")
+    monkeypatch.setattr(packvm_guest_runner.platform, "machine", lambda: "aarch64")
     monkeypatch.setattr(packvm_guest_runner.ctypes, "CDLL", lambda *_args, **_kwargs: seccomp)
 
     packvm_guest_runner._install_child_process_seccomp_filter()
@@ -115,7 +116,7 @@ def test_guest_child_policy_denies_all_available_process_and_socket_syscalls(
 
 @pytest.mark.parametrize(
     "missing",
-    (b"clone", b"execve", b"socket", b"socketpair"),
+    (b"clone", b"clone3", b"execve", b"execveat", b"socket", b"socketpair"),
 )
 def test_guest_child_policy_rejects_missing_required_syscall(
     missing: bytes,
@@ -152,9 +153,52 @@ def test_guest_child_policy_rejects_missing_required_syscall(
         seccomp_release=Callable(lambda value: released.append(value)),
     )
     monkeypatch.setattr(packvm_guest_runner.sys, "platform", "linux")
+    monkeypatch.setattr(packvm_guest_runner.platform, "machine", lambda: "aarch64")
     monkeypatch.setattr(packvm_guest_runner.ctypes, "CDLL", lambda *_args, **_kwargs: seccomp)
 
     with pytest.raises(ValueError, match="policy is incomplete"):
+        packvm_guest_runner._install_child_process_seccomp_filter()
+
+    assert released == [context]
+
+
+def test_guest_child_policy_rejects_missing_legacy_aliases_off_arm64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only arm64 may omit fork/vfork, which do not exist in its syscall ABI."""
+
+    class Callable:
+        def __init__(self, callback: object) -> None:
+            self.callback = callback
+
+        def __call__(self, *args: object) -> object:
+            assert callable(self.callback)
+            return self.callback(*args)
+
+    released: list[object] = []
+    context = object()
+    syscall_numbers = {
+        b"clone": 56,
+        b"clone3": 435,
+        b"execve": 59,
+        b"execveat": 322,
+        b"socket": 41,
+        b"socketpair": 53,
+        b"fork": -1,
+        b"vfork": -1,
+    }
+    seccomp = SimpleNamespace(
+        seccomp_init=Callable(lambda _default: context),
+        seccomp_rule_add=Callable(lambda *_args: 0),
+        seccomp_syscall_resolve_name=Callable(lambda name: syscall_numbers[name]),
+        seccomp_load=Callable(lambda _context: 0),
+        seccomp_release=Callable(lambda value: released.append(value)),
+    )
+    monkeypatch.setattr(packvm_guest_runner.sys, "platform", "linux")
+    monkeypatch.setattr(packvm_guest_runner.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(packvm_guest_runner.ctypes, "CDLL", lambda *_args, **_kwargs: seccomp)
+
+    with pytest.raises(ValueError, match="incomplete: fork, vfork"):
         packvm_guest_runner._install_child_process_seccomp_filter()
 
     assert released == [context]
