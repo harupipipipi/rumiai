@@ -39,8 +39,12 @@ test('PackDiagnostics copies every visible blocking diagnostic field', async () 
         }]} />,
       );
     });
+    const errorIcon = container.querySelector('[data-diagnostic-icon="error"]');
     const copy = container.querySelector<HTMLButtonElement>('button[aria-label="Copy Pack diagnostic"]');
+    assert.ok(errorIcon);
     assert.ok(copy);
+    assert.ok(copy.querySelector('svg.lucide-copy'));
+    assert.notEqual(errorIcon, copy.querySelector('svg'));
     await act(async () => {
       copy.click();
       await Promise.resolve();
@@ -89,6 +93,7 @@ test('PackDiagnostics does not add a copy action to an informational message', a
         }]} />,
       );
     });
+    assert.ok(container.querySelector('[data-diagnostic-icon="info"]'));
     assert.equal(container.querySelector('button[aria-label="Copy Pack diagnostic"]'), null);
   } finally {
     await act(async () => root?.unmount());

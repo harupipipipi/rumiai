@@ -8,7 +8,7 @@ import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card, CardHeader, CardTitle, CardContent } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { ArrowLeft } from 'lucide-react';
+import {AlertCircle, ArrowLeft} from 'lucide-react';
 import { InlineLoadError } from '@/src/components/ui/InlineLoadError';
 import { FileInspectOperation } from '@/src/components/packs/FileInspectOperation';
 import { PackDiagnostics } from '@/src/components/packs/PackDiagnostics';
@@ -378,6 +378,7 @@ export function PackDetail() {
               <p className="text-sm text-text-muted" role="status">Loading the verified capability catalog…</p>
             ) : frontendCatalogError ? (
               <div className="flex items-start gap-2 text-sm text-destructive" role="alert">
+                <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
                 <p className="min-w-0 flex-1 break-words">{userSafePackVMError(frontendCatalogError)}</p>
                 <CopyErrorButton label="Copy PackVM catalog error" text={userSafePackVMError(frontendCatalogError)} />
               </div>

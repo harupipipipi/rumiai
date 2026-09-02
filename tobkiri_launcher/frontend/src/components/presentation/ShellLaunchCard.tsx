@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Monitor, Route} from 'lucide-react';
+import {AlertCircle, Monitor, Route} from 'lucide-react';
 import {Link} from 'react-router';
 
 import {Badge} from '@/src/components/ui/Badge';
@@ -119,6 +119,7 @@ export function ShellLaunchCard({
           <p className="text-sm text-text-muted" role="status">Loading the selected Shell…</p>
         ) : error ? (
           <div className="flex flex-wrap items-center gap-3" role="alert">
+            <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-destructive" />
             <p className="flex-1 text-sm text-destructive">{error}</p>
             <CopyErrorButton label="Copy Shell launch error" text={error} />
             <Button variant="outline" size="sm" onClick={() => void loadSurfaceState()}>

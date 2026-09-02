@@ -8,6 +8,13 @@ import {JSDOM} from 'jsdom';
 const splashPath = fileURLToPath(new URL('../../src-tauri/splash/index.html', import.meta.url));
 const splashHtml = readFileSync(splashPath, 'utf8');
 
+test('hidden startup actions remain absent from layout before an error', () => {
+  assert.match(
+    splashHtml,
+    /\.startup-error-icon\[hidden\], \.copy-error\[hidden\] \{ display: none; \}/,
+  );
+});
+
 async function renderSplash({listen, invoke}) {
   const dom = new JSDOM(splashHtml, {
     beforeParse(window) {
@@ -31,11 +38,13 @@ test('transient progress failure clears stale error copy when progress recovers'
   });
   try {
     const progress = dom.window.document.querySelector('#progress');
+    const errorIcon = dom.window.document.querySelector('#startup-error-icon');
     const copy = dom.window.document.querySelector('#copy-error');
     const feedback = dom.window.document.querySelector('#copy-feedback');
     assert.equal(progress?.textContent, 'Checking Python environment...');
     assert.equal(progress?.getAttribute('role'), 'status');
     assert.equal(progress?.getAttribute('aria-live'), 'polite');
+    assert.equal(errorIcon?.hidden, true);
     assert.equal(copy?.hidden, true);
     assert.equal(feedback?.textContent, '');
   } finally {
@@ -57,8 +66,11 @@ test('terminal startup error exposes the stable double-square copy action', asyn
     });
     progressListener?.({payload: 'Error: Python setup failed'});
     const progress = dom.window.document.querySelector('#progress');
+    const errorIcon = dom.window.document.querySelector('#startup-error-icon');
     const copy = dom.window.document.querySelector('#copy-error');
     assert.equal(progress?.getAttribute('role'), 'alert');
+    assert.equal(errorIcon?.hidden, false);
+    assert.equal(errorIcon?.querySelectorAll('circle, path').length, 3);
     assert.equal(copy?.hidden, false);
     assert.equal(copy?.querySelectorAll('rect, path').length, 2);
     copy?.click();

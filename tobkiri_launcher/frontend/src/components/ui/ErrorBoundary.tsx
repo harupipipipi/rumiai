@@ -4,6 +4,7 @@
  */
 
 import { Component, type ReactNode, type ErrorInfo } from 'react';
+import {AlertCircle} from 'lucide-react';
 
 import {CopyErrorButton} from './CopyErrorButton';
 
@@ -42,7 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex min-h-screen items-center justify-center bg-bg-main p-8">
           <div className="max-w-md text-center" role="alert">
-            <h1 className="mb-4 text-2xl font-bold text-text-main">描画を安全に立て直しています</h1>
+            <h1 className="mb-4 flex items-center justify-center gap-2 text-2xl font-bold text-text-main"><AlertCircle aria-hidden="true" className="h-6 w-6 shrink-0 text-destructive" data-error-icon="rendering" />描画を安全に立て直しています</h1>
             <div className="mb-6 flex items-start gap-2 text-sm text-text-muted">
               <p className="min-w-0 flex-1 break-words">
                 {diagnostic}

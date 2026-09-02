@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {ArrowRight, CheckCircle2, LockKeyhole, PackagePlus, ShieldCheck, XCircle} from 'lucide-react';
+import {AlertTriangle, ArrowRight, CheckCircle2, LockKeyhole, PackagePlus, ShieldCheck, XCircle} from 'lucide-react';
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
@@ -813,6 +813,7 @@ export function ProfileCeremonyPanel({
             ) : null}
             {!catalogEntry.available ? (
               <div className="mt-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+                <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="min-w-0 flex-1">
                 <p>This Profile is unavailable in the verified catalog.</p>
                 <ul className="mt-1 list-disc pl-5">{catalogEntry.diagnostics.map((diagnostic) => <li key={`${diagnostic.code}:${diagnostic.subject}`}>{diagnostic.code}: {diagnostic.subject}</li>)}</ul>

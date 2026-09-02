@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
+import {AlertCircle} from 'lucide-react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { viewerLayers } from '@/src/lib/layers';
@@ -128,6 +129,7 @@ export function DialogContainer() {
             aria-live="assertive"
             className="mt-3 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200"
           >
+            <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
             <span className="min-w-0 flex-1 break-words">{confirmationError}</span>
             <CopyErrorButton label="Copy confirmation error" text={confirmationError} />
           </div>

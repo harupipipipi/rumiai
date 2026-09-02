@@ -94,6 +94,9 @@ test('activation denial remains visible and disables confirmation controls', () 
   />);
 
   assert.match(html, /Profile revision is stale/);
+  assert.match(html, /data-error-icon="activation-denied"/);
+  assert.match(html, /lucide-shield-alert/);
+  assert.match(html, /lucide-copy/);
   assert.match(html, /disabled=""/);
 });
 

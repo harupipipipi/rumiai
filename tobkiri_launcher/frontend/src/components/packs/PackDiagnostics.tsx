@@ -1,4 +1,5 @@
 import type {ApiFrontendDiagnostic} from '@/src/lib/apiTypes';
+import {AlertCircle, AlertTriangle, Info} from 'lucide-react';
 import {userSafePackVMError} from '@/src/lib/packvmLifecycle';
 import {Badge} from '@/src/components/ui/Badge';
 import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
@@ -17,6 +18,22 @@ function severityVariant(severity: DiagnosticSeverity): 'destructive' | 'warning
   if (severity === 'error') return 'destructive';
   if (severity === 'warning') return 'warning';
   return 'secondary';
+}
+
+function DiagnosticSeverityIcon({
+  severity,
+  blocking,
+}: {
+  severity: DiagnosticSeverity;
+  blocking: boolean;
+}) {
+  if (blocking || severity === 'error') {
+    return <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-destructive" data-diagnostic-icon="error" />;
+  }
+  if (severity === 'warning') {
+    return <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0 text-amber-600" data-diagnostic-icon="warning" />;
+  }
+  return <Info aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" data-diagnostic-icon="info" />;
 }
 
 export interface PackDiagnosticsProps {
@@ -77,6 +94,7 @@ export function PackDiagnostics({diagnostics, title = 'Capability diagnostics'}:
                   </span>
                 </div>
                 <div className="mt-2 flex items-start gap-2">
+                  <DiagnosticSeverityIcon blocking={blocking} severity={severity} />
                   <p className="min-w-0 flex-1 break-words text-text-muted">{userSafePackVMError(diagnostic.message)}</p>
                   {blocking ? <CopyErrorButton label="Copy Pack diagnostic" text={copiedDiagnostic} /> : null}
                 </div>

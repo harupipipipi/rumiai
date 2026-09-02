@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router';
 import type {ReactNode} from 'react';
+import {AlertCircle, AlertTriangle} from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ViewerVersionLabel } from './ViewerVersionLabel';
@@ -13,6 +14,15 @@ export function shouldShowRuntimeErrorCopy(
   banner: Pick<ReturnType<typeof describeRuntimeBanner>, 'tone' | 'detail'>,
 ): boolean {
   return banner.tone === 'danger' && Boolean(banner.detail.trim());
+}
+
+export function runtimeBannerIconKind(
+  tone: ReturnType<typeof describeRuntimeBanner>['tone'],
+  runtimeStatus: string,
+): 'error' | 'warning' | 'progress' {
+  if (tone === 'danger') return 'error';
+  if (runtimeStatus === 'profile_reconfirmation_required') return 'warning';
+  return 'progress';
 }
 
 export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
@@ -31,6 +41,7 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
     lastRuntimeHealthyAt,
   });
   const canCopyRuntimeError = shouldShowRuntimeErrorCopy(runtimeBanner);
+  const runtimeIconKind = runtimeBannerIconKind(runtimeBanner.tone, runtimeStatus);
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-main text-text-main">
@@ -48,7 +59,13 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
                   : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-300'
               }`}
             >
-              <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${runtimeBanner.tone === 'danger' ? 'bg-red-500' : 'bg-amber-500 animate-pulse'}`} />
+              {runtimeIconKind === 'error' ? (
+                <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" data-runtime-banner-icon="error" />
+              ) : runtimeIconKind === 'warning' ? (
+                <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" data-runtime-banner-icon="warning" />
+              ) : (
+                <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500" data-runtime-banner-icon="progress" />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{runtimeBanner.title}</p>
                 <p className="text-xs opacity-80">{runtimeBanner.detail}</p>

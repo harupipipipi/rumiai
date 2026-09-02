@@ -123,6 +123,7 @@ function OptionalConversationCapability({
         </dl>
       ) : (
         <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border px-3 py-3 text-sm text-text-muted" role={capabilityErrorDiagnostic ? 'alert' : 'status'}>
+          {capabilityErrorDiagnostic ? <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /> : null}
           <p className="min-w-0 flex-1">{capabilityErrorDiagnostic ?? 'No verified conversation capability is published for this Profile.'}</p>
           {capabilityErrorDiagnostic ? <CopyErrorButton label="Copy Profile capability error" text={capabilityErrorDiagnostic} /> : null}
         </div>

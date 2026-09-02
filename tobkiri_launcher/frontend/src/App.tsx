@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router';
+import {ShieldAlert} from 'lucide-react';
 import {
   cancelPackMutationReconciliation,
   useAppStore,
@@ -277,6 +278,7 @@ function VerificationMessage({
         </h1>
       )}
       <div className="mt-3 flex items-start gap-2">
+        {state === 'denied' ? <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" data-error-icon="setup-verification" /> : null}
         <p className="min-w-0 flex-1 text-sm leading-6 text-text-muted">{copy.detail}</p>
         {state === 'denied' ? (
           <CopyErrorButton

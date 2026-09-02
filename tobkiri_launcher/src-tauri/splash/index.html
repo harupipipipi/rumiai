@@ -18,6 +18,9 @@
     .progress.visible { opacity: 1; }
     .progress.error { color: #c52626; user-select: text; }
     .progress.ready { color: #167a3d; }
+    .startup-error-icon { display: inline-flex; flex: 0 0 auto; width: 1.9rem; height: 1.9rem; align-items: center; justify-content: center; color: #c52626; }
+    .startup-error-icon[hidden], .copy-error[hidden] { display: none; }
+    .startup-error-icon svg { width: 1rem; height: 1rem; stroke: currentColor; stroke-width: 1.8; fill: none; }
     .copy-error { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border: 1px solid #d1d1d1; border-radius: .375rem; background: #ffffff; color: #555555; cursor: pointer; }
     .copy-error svg { width: 1rem; height: 1rem; stroke: currentColor; stroke-width: 1.7; fill: none; }
     .copy-error:hover { background: #f4f4f4; color: #171717; }
@@ -35,6 +38,7 @@
     <object id="startup-animation" data="./tobkiri_launcher_startup_blade_cut.svg" type="image/svg+xml" aria-label="Tobkiri startup animation"></object>
   </div>
   <div class="progress-row">
+    <span class="startup-error-icon" id="startup-error-icon" hidden aria-hidden="true"><svg focusable="false" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v6"></path><path d="M12 16.5h.01"></path></svg></span>
     <div class="progress visible" id="progress" role="status" aria-live="polite">Initializing...</div>
     <button class="copy-error" id="copy-error" type="button" hidden aria-label="Copy startup error" title="Copy startup error" aria-describedby="copy-feedback"><svg aria-hidden="true" class="copy-icon" focusable="false" viewBox="0 0 24 24"><rect height="14" rx="2" ry="2" width="14" x="8" y="8"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button>
   </div>
@@ -44,6 +48,7 @@
       var el = document.getElementById('progress');
       var loader = document.getElementById('loader');
       var animation = document.getElementById('startup-animation');
+      var errorIcon = document.getElementById('startup-error-icon');
       var copyButton = document.getElementById('copy-error');
       var copyFeedback = document.getElementById('copy-feedback');
       var errorMessage = '';
@@ -58,6 +63,7 @@
         el.setAttribute('role', type === 'error' ? 'alert' : 'status');
         el.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
         errorMessage = type === 'error' ? msg : '';
+        errorIcon.hidden = type !== 'error';
         copyButton.hidden = type !== 'error';
         copyButton.className = 'copy-error';
         copyButton.setAttribute('aria-label', 'Copy startup error');

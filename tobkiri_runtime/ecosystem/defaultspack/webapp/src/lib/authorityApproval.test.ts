@@ -136,12 +136,13 @@ test("interactive approval window is tokenless and uses the dedicated resource",
   assert.doesNotMatch(resourceSource, /sendMessage|approveAuthorityApproval|denyAuthorityApproval|AuthorityApprovalDecision/);
 });
 
-test("interactive approval errors use one stable accessible copy action", () => {
+test("interactive approval errors keep a semantic alert icon separate from one stable copy action", () => {
   const source = authorityApprovalWindowSource();
 
   assert.match(source, /import \{[\s\S]*Copy,[\s\S]*\} from "lucide-react"/);
   assert.match(source, /function ApprovalError\([\s\S]*role="alert"/);
   assert.match(source, /aria-live="assertive"/);
+  assert.match(source, /<CircleAlert[\s\S]*data-error-icon="approval"/);
   assert.match(source, /<Copy aria-hidden="true" size=\{14\} \/>/);
   assert.match(source, /<ApprovalError message="request_id が見つかりません。" \/>/);
   assert.match(source, /<ApprovalError message="この承認に必要な確認情報を取得できませんでした。安全のため操作できません。" \/>/);

@@ -1,5 +1,6 @@
 import {Component, Suspense, type ErrorInfo, type ReactNode} from 'react';
 import {useLocation} from 'react-router';
+import {AlertCircle} from 'lucide-react';
 
 import {Button} from '@/src/components/ui/Button';
 import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
@@ -43,7 +44,7 @@ class RouteLoadErrorBoundary extends Component<
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-xl rounded-xl border border-red-200 bg-red-50 p-5 dark:border-red-900/40 dark:bg-red-950/20" role="alert">
-          <h2 className="font-semibold text-text-main">This page could not be loaded</h2>
+          <h2 className="flex items-center gap-2 font-semibold text-text-main"><AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-destructive" data-error-icon="route-load" />This page could not be loaded</h2>
           <div className="mt-2 flex items-start gap-2">
             <p className="min-w-0 flex-1 break-words text-sm text-text-muted">{this.state.error.message}</p>
             <CopyErrorButton label="Copy page load error" text={this.state.error.message} />

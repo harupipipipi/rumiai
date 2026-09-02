@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  CircleAlert,
   Check,
   Copy,
   ExternalLink,
@@ -103,6 +104,11 @@ function ApprovalError({ message, compact = false }: { message: string; compact?
       )}
       role="alert"
     >
+      <CircleAlert
+        aria-hidden="true"
+        className="mt-0.5 h-4 w-4 shrink-0 text-red-300"
+        data-error-icon="approval"
+      />
       <span className="min-w-0 flex-1 break-words">{message}</span>
       <span className="inline-flex shrink-0 items-center gap-1.5">
         <button

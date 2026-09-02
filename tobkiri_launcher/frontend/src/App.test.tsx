@@ -109,7 +109,10 @@ test('only a failed setup verification gets an error-copy action', () => {
   );
 
   assert.doesNotMatch(needsReconfirm, /Copy setup verification error/);
+  assert.doesNotMatch(needsReconfirm, /data-error-icon="setup-verification"/);
   assert.match(denied, /Copy setup verification error/);
+  assert.match(denied, /data-error-icon="setup-verification"/);
+  assert.match(denied, /lucide-copy/);
 });
 
 test('empty bootstrap keeps Home recovery-gated even when generic runtime health is ready', () => {

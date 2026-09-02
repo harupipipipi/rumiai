@@ -281,6 +281,7 @@ export function PresentationSelector({
           })}
           {selectedBase && compatibleShells.length === 0 ? (
             <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-muted">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
               <span className="min-w-0 flex-1">No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family.</span>
               <CopyErrorButton label="Copy Shell Provider error" text="No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family." />
             </div>

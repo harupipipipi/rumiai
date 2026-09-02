@@ -3,51 +3,44 @@ import test from 'node:test';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
+import {MemoryRouter} from 'react-router';
 
-import {ErrorBoundary} from './ErrorBoundary';
+import {RouteBoundary} from './RouteBoundary';
 
-function ThrowingChild(): never {
-  throw new Error('The authoritative panel failed to render.');
+function ThrowingRoute(): never {
+  throw new Error('The route failed to load.');
 }
 
-test('ErrorBoundary renders a semantic error icon beside its stable copy action', async () => {
+test('RouteBoundary renders a semantic error icon separate from the copy action', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const previousNavigator = globalThis.navigator;
   const previousConsoleError = console.error;
   let root: Root | null = null;
-  let copied = '';
+
   try {
     Object.defineProperties(globalThis, {
       window: {value: dom.window, configurable: true},
       document: {value: dom.window.document, configurable: true},
       navigator: {value: dom.window.navigator, configurable: true},
     });
-    Object.defineProperty(dom.window.navigator, 'clipboard', {
-      configurable: true,
-      value: {writeText: async (text: string) => { copied = text; }},
-    });
     console.error = () => undefined;
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     const container = dom.window.document.querySelector<HTMLElement>('#root');
     assert.ok(container);
     root = createRoot(container);
+
     await act(async () => {
-      root?.render(<ErrorBoundary><ThrowingChild /></ErrorBoundary>);
+      root?.render(<MemoryRouter><RouteBoundary><ThrowingRoute /></RouteBoundary></MemoryRouter>);
     });
-    assert.match(container.textContent ?? '', /The authoritative panel failed to render\./);
-    const errorIcon = container.querySelector('[data-error-icon="rendering"]');
+
+    const errorIcon = container.querySelector('[data-error-icon="route-load"]');
+    const copy = container.querySelector<HTMLButtonElement>('button[aria-label="Copy page load error"]');
     assert.ok(errorIcon);
-    const copy = container.querySelector<HTMLButtonElement>('button[aria-label="Copy rendering error"]');
     assert.ok(copy);
     assert.ok(copy.querySelector('svg.lucide-copy'));
     assert.notEqual(errorIcon, copy.querySelector('svg'));
-    await act(async () => {
-      copy.click();
-      await Promise.resolve();
-    });
-    assert.equal(copied, 'The authoritative panel failed to render.');
   } finally {
     await act(async () => root?.unmount());
     console.error = previousConsoleError;

@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "212fb8110326da92d38b74fbf3c55d3cb37f317832586f07707e9dcf610f5b22",
+    "digest": "58391031306c81bb4b451c0e5307b5b31fee7012f5fdb85d656d18ed7a92afc7",
     "entries": [
       {
         "path": "index.html",
@@ -365,8 +365,8 @@
       },
       {
         "path": "src/components/AuthorityApprovalWindow.tsx",
-        "size": 26680,
-        "sha256": "e461c763d4ea2feaeed69b0a1d4920cdb5031287dd218d7b7caa55c9eb4522fb"
+        "size": 26842,
+        "sha256": "215bc1f5ac6fb00e065340019b0723fb07970c19f4b8d2f2df720ab7fcc5fbe4"
       },
       {
         "path": "src/components/ConversationSpotlight.tsx",
@@ -1125,8 +1125,8 @@
       },
       {
         "path": "src/lib/authorityApproval.test.ts",
-        "size": 25975,
-        "sha256": "45eecd6be563556752784382c5c4a8baa386ac4c9fd939f31f2be039a435103c"
+        "size": 26074,
+        "sha256": "302e96f9e9ea06babdb2a067c4676ddacbcc1e57727a68d8b130346b83b626ea"
       },
       {
         "path": "src/lib/authorityApproval.ts",
@@ -1861,7 +1861,7 @@
     ]
   },
   "bundle": {
-    "digest": "02b3e250c7b740aea5196257f8911b85bbfeedad6f6b607546441f966d26b4e5",
+    "digest": "8a1dbc3ce702c045bc9767809b5fa1d5a1dd6d8b9b874ab34fd52cf36567771b",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1875,8 +1875,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2201483,
-        "sha256": "7f3070b6333e2daa89dc23d4f398967bfc81acfd5babd11e6478408db5bb4abf"
+        "size": 2201598,
+        "sha256": "863caa08bcd6cbc1e33cfdec5f3289a9d008c7b5a1b0954cedf77842aa10dea2"
       },
       {
         "path": "shell-rolldown-runtime.js",

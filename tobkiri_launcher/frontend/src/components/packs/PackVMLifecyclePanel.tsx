@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState, type ReactNode} from 'react';
+import {AlertCircle, AlertTriangle} from 'lucide-react';
 import {
   cancelPackVM,
   cleanupPackVM,
@@ -90,6 +91,7 @@ function failureDiagnostic(operation: ApiPackVMOperation): ReactNode {
       role="alert"
     >
       <div className="flex items-start gap-2">
+        <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
         <dl className="min-w-0 flex-1 grid gap-2 sm:grid-cols-2">
           {operation.error_type ? (
             <div>
@@ -424,12 +426,14 @@ export function PackVMLifecyclePanel() {
           ) : null}
           {packVmError ? (
             <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" data-packvm-error-icon="readiness-warning" />
               <p className="min-w-0 flex-1 break-words">{formatPackVMRecoveryError(packVmError, safeUserError(packVmError, 'PackVM readiness could not be verified.'))}</p>
               <CopyErrorButton label="Copy PackVM readiness error" text={formatPackVMRecoveryError(packVmError, safeUserError(packVmError, 'PackVM readiness could not be verified.'))} />
             </div>
           ) : null}
           {lifecycleError ? (
             <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
+              <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
               <p className="min-w-0 flex-1 break-words">{lifecycleError}</p>
               <CopyErrorButton label="Copy PackVM lifecycle error" text={lifecycleError} />
             </div>
@@ -612,6 +616,7 @@ export function PackVMLifecyclePanel() {
               </ol>
               {operation.error ? (
                 <div className="mt-3 flex items-start gap-2 text-sm text-destructive" role="alert">
+                  <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
                   <p className="min-w-0 flex-1 break-words">{userSafePackVMError(operation.error)}</p>
                   <CopyErrorButton label="Copy PackVM operation error" text={userSafePackVMError(operation.error)} />
                 </div>

@@ -206,6 +206,14 @@ test('PackVM GUI completes prepare, consent, provision, doctor, and hides host p
   });
   assert.ok(surface);
   await renderPanel(surface.root);
+  assert.ok(
+    surface.container.querySelector('[data-packvm-error-icon="readiness-warning"]'),
+  );
+  assert.equal(
+    surface.container.querySelector('[data-packvm-error-icon="readiness-warning"]')
+      ?.classList.contains('lucide-triangle-alert'),
+    true,
+  );
 
   await act(async () => buttonWithText(surface.container, 'Prepare plan').click());
   await settle();
