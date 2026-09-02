@@ -110,7 +110,11 @@ def _bridge_result(bridge_request: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _invoke_payload(request_id: str) -> dict[str, object]:
+def _invoke_payload(
+    request_id: str,
+    config: runner._VsockAgentConfig | None = None,
+) -> dict[str, object]:
+    config = config or _config()
     return {
         "operation": "invoke",
         "request_id": request_id,
@@ -158,7 +162,7 @@ def _host_result(
         "version": runner.PACKVM_BRIDGE_VERSION,
         "request_id": request_id,
         "target_domain": config.domain_id,
-        "guest_artifact_identity": "sha256:" + "3" * 64,
+        "guest_artifact_identity": _guest_artifact_identity(config),
         "request_digest": "sha256:" + "4" * 64,
         "bridge_request_digest": _digest(bridge_request),
         "continuation_nonce": "a" * 48,
@@ -276,7 +280,7 @@ def test_guest_agent_persists_only_a_verified_pending_bridge_then_resumes_once(
         ledger,
         signer,
     )
-    assert final["success"] is True
+    assert final["success"] is True, json.dumps(final, indent=2, sort_keys=True)
     assert final["data"]["content"][0]["text"] == "done"
     assert resumed[0] == invoked
     assert resumed[1] == bridge_request

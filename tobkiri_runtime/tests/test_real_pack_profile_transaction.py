@@ -715,10 +715,11 @@ def _exercise_real_pack_profile_transaction(
             "/api/runtime-surface/profile-change/activate",
             body=first_activation_request,
         )
-        assert status == 200, replay
-        assert replay["data"]["state"] == "active"
-        assert replay["data"]["activation_id"] == first_activation["activation_id"]
-        assert replay["data"]["activation_id"] != second_activation["activation_id"]
+        # Profile activation authority is one-shot. Replaying an approval from
+        # the previous capture must fail closed instead of rolling authority
+        # back to the earlier activation.
+        assert status == 403, replay
+        assert replay["data"]["code"] == "UNAPPROVED"
         assert second_activation_request != first_activation_request
         first_auth = _authenticate(int(first_state["port"]))
         enabled_disk = second_ceremony_disk
