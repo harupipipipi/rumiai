@@ -261,27 +261,23 @@ struct ProtocolTests {
     }
 
     @Test
-    func rejectsOversizedUnterminatedPipeLineWithoutGrowingTheBuffer() throws {
-        var descriptors: [Int32] = [0, 0]
-        #expect(pipe(&descriptors) == 0)
-        let reader = BoundedLineReader(
-            handle: FileHandle(fileDescriptor: descriptors[0], closeOnDealloc: true)
+    func rejectsOversizedUnterminatedLineWithoutGrowingTheBuffer() throws {
+        // Pipe framing itself is covered above with a short request.  Use a
+        // finite regular-file fixture for the one-megabyte limit: once the
+        // reader rejects the full buffer, a concurrent pipe writer can race
+        // the closing descriptor and turn an intended assertion into SIGPIPE.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "tobkiri-packvm-vz-oversized-line-\(UUID().uuidString)"
         )
-        let writer = FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: true)
-        defer { try? writer.close() }
+        defer { try? FileManager.default.removeItem(at: path) }
+        try Data(repeating: 0x61, count: maxProtocolLineBytes).write(to: path)
+        let handle = try FileHandle(forReadingFrom: path)
+        defer { try? handle.close() }
+        let reader = BoundedLineReader(handle: handle)
 
-        let payload = Data(repeating: 0x61, count: maxProtocolLineBytes)
-        let writeCompletion = DispatchSemaphore(value: 0)
-        let writeResult = LockedWriteResult()
-        DispatchQueue.global(qos: .userInitiated).async {
-            defer { writeCompletion.signal() }
-            writeResult.store(Result { try writer.write(contentsOf: payload) })
-        }
         #expect(throws: HelperError.protocolTooLarge) {
             _ = try reader.nextLine()
         }
-        #expect(writeCompletion.wait(timeout: .now() + .seconds(1)) == .success)
-        try writeResult.load().get()
     }
 }
 
@@ -310,25 +306,5 @@ private final class SendableLineReader: @unchecked Sendable {
 
     init(_ value: BoundedLineReader) {
         self.value = value
-    }
-}
-
-private final class LockedWriteResult: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value: Result<Void, Error>?
-
-    func store(_ result: Result<Void, Error>) {
-        lock.lock()
-        value = result
-        lock.unlock()
-    }
-
-    func load() throws -> Result<Void, Error> {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let value else {
-            throw HelperError.invalidState("TEST_RESULT_MISSING")
-        }
-        return value
     }
 }
