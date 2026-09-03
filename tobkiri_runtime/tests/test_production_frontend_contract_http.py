@@ -1199,6 +1199,8 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
     assert install_status == 200, install_payload
 
     log_entered = threading.Event()
+    initial_denials_logged = threading.Event()
+    initial_access_logged = threading.Event()
     all_access_logged = threading.Event()
     release_log = threading.Event()
     denial_log_count = 0
@@ -1217,6 +1219,8 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
                 )
                 with log_count_lock:
                     denial_log_count += 1
+                    if denial_log_count == len(request_ids):
+                        initial_denials_logged.set()
             elif message.startswith("API:"):
                 assert '"POST /api/contracts/defaultspack/' in message
                 status_and_length = message.rsplit(" ", 2)
@@ -1225,6 +1229,8 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
                 if not delay_access_logs.is_set():
                     with log_count_lock:
                         initial_access_log_count += 1
+                        if initial_access_log_count == len(request_ids):
+                            initial_access_logged.set()
                     return
                 with log_count_lock:
                     access_log_count += 1
@@ -1249,7 +1255,13 @@ def test_revoke_denials_respond_before_logging_and_release_for_retry(
         payload["data"]["retryable"] is False
         for _status, payload in initial
     )
+    assert initial_denials_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert denial_log_count == len(request_ids)
+    # ``_request`` returns after it receives the complete response body; the
+    # server deliberately writes its access entry later, after closing that
+    # response.  Wait for that post-response boundary instead of assuming the
+    # final handler has already reached ``finish`` on a loaded CI worker.
+    assert initial_access_logged.wait(timeout=FRONTEND_MUTATION_TIMEOUT_SECONDS)
     assert initial_access_log_count == len(request_ids)
     audit_after_initial = len(authority.audit_events())
     delay_access_logs.set()
