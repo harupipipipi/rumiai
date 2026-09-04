@@ -2,6 +2,7 @@ import { Check, ChevronDown, FolderOpen, Link2, Loader2, Plus, Search, X } from 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { CodingWorkspaceRecord } from "../../lib/api";
+import { ErrorNotice } from "../../components/ErrorNotice";
 import { addProject, filterProjects, newProjectId, type ProjectInfo } from "./projectStorage";
 
 type ProjectPickerProps = {
@@ -163,7 +164,13 @@ export function ProjectPicker({
                   {folderPath && <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-500">{folderPath}</span>}
                 </span>
               </button>
-              {error && <p role="alert" className="rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 py-2 text-[10px] text-red-200">{error}</p>}
+              {error && (
+                <ErrorNotice
+                  className="px-2.5 py-2 text-[10px]"
+                  copyLabel="プロジェクト選択エラーをコピー"
+                  message={error}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => void createProject()}

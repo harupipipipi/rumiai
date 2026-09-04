@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { CredentialTransferModal } from "../../../components/CredentialTransferModal";
+import { ErrorNotice } from "../../../components/ErrorNotice";
 import { cn } from "../../../lib/cn";
 import { allowCleartextMobileQr } from "../../../lib/mobileCleartextQr";
 import {
@@ -221,20 +222,25 @@ export function BuiltinApiKeySetupRenderer({ sectionId, field, value, sectionVal
           </details>
         </div>
         {feedback?.text && (
-          <div className={cn(
-            "rounded-lg border px-3 py-2 text-[11px]",
-            feedback.tone === "success"
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-              : "border-amber-500/30 bg-amber-500/10 text-amber-100",
-          )}
-          >
-            {feedback.text}
-          </div>
+          feedback.tone === "success" ? (
+            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-300">
+              {feedback.text}
+            </div>
+          ) : (
+            <ErrorNotice
+              className="px-3 py-2 text-[11px]"
+              copyLabel="APIキー設定の警告をコピー"
+              message={feedback.text}
+              severity="warning"
+            />
+          )
         )}
         {saveError && (
-          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-            {saveError}
-          </div>
+          <ErrorNotice
+            className="px-3 py-2 text-[11px]"
+            copyLabel="APIキー保存エラーをコピー"
+            message={saveError}
+          />
         )}
         {credentialTransfer && (
           <CredentialTransferModal

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, Copy, KeyRound, Link2, Loader2, RefreshCw, Route, Server, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { cn } from "../../lib/cn";
+import { ErrorNotice } from "../../components/ErrorNotice";
 import type { SettingsFieldRendererProps } from "../../renderers/settings/fieldRendererRegistry";
 import {
   continuityApi,
@@ -275,9 +276,11 @@ export function ContinuitySettingsField({
       </div>
 
       {error && (
-        <div className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-          {error}
-        </div>
+        <ErrorNotice
+          className="text-xs"
+          copyLabel="継続性設定エラーをコピー"
+          message={error}
+        />
       )}
 
       <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">

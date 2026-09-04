@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   ConversationV4View,
+  ConversationV4Unavailable,
   conversationV4AssistantText,
   conversationV4CapabilityPayload,
   isConversationV4Contribution,
@@ -93,4 +94,15 @@ test("ConversationV4View provides an accessible transcript and composer without 
   assert.match(markup, /<textarea/);
   assert.match(markup, />Send</);
   assert.doesNotMatch(source, /api\/chat|defaultspackApiFetch|\bfetch\s*\(/);
+});
+
+test("ConversationV4Unavailable keeps a distinct error icon and fixed copy glyph", () => {
+  const markup = renderToStaticMarkup(
+    <ConversationV4Unavailable reason="Resolved profile is unavailable." onRetry={() => undefined} />,
+  );
+
+  assert.match(markup, /data-error-icon="conversation-v4-unavailable"/);
+  assert.match(markup, /data-copy-icon=""/);
+  assert.match(markup, /aria-label="Copy unavailable conversation error"/);
+  assert.match(markup, />Retry</);
 });

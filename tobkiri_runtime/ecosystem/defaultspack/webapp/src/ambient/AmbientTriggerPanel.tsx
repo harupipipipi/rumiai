@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
+import { ErrorNotice } from "../components/ErrorNotice";
 import { api, defaultspackUrlWithLocalAuth, type Conversation } from "../lib/api";
 import {
   authorityRequestSettledStatus,
@@ -73,6 +74,8 @@ export type AmbientApprovalTarget = {
   canApprove?: boolean;
   canReject?: boolean;
 };
+
+type TestStatusTone = "status" | "success" | "error";
 
 type Props = {
   conversationId?: string | null;
@@ -163,9 +166,11 @@ export function AmbientTriggerPanel({
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [micTestBusy, setMicTestBusy] = useState(false);
   const [micTestStatus, setMicTestStatus] = useState("未実行");
+  const [micTestTone, setMicTestTone] = useState<TestStatusTone>("status");
   const [micTestLevel, setMicTestLevel] = useState<number | null>(null);
   const [transcriptionTestBusy, setTranscriptionTestBusy] = useState(false);
   const [transcriptionTestStatus, setTranscriptionTestStatus] = useState("未実行");
+  const [transcriptionTestTone, setTranscriptionTestTone] = useState<TestStatusTone>("status");
   const [transcriptionTestText, setTranscriptionTestText] = useState("");
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraStreamCleanupRef = useRef<(() => void) | null>(null);
@@ -1331,29 +1336,35 @@ export function AmbientTriggerPanel({
   async function runMicInputTest() {
     if (!micRumiPermissionGranted || rumiApprovalPending) {
       setMicTestStatus("Tobkiriのマイク利用許可を完了してください。");
+      setMicTestTone("error");
       setExpanded(true);
       return;
     }
     if (pinchRecording || pinchRecorderRef.current) {
       setMicTestStatus("録音中はマイクテストを実行できません。");
+      setMicTestTone("error");
       return;
     }
     setMicTestBusy(true);
     setMicTestLevel(null);
     setMicTestStatus("確認中です。1秒ほど話してください。");
+    setMicTestTone("status");
     try {
       const result = await testMicrophoneInput(1400, selectedMicId || undefined);
       const level = Math.max(result.peak, result.rms * 4);
       setMicTestLevel(level);
       if (level >= 0.03) {
         setMicTestStatus(`入力OK: 音量 ${formatMicLevel(level)}`);
+        setMicTestTone("success");
         await ambientTriggerClient.checkOsPermissions({ [AMBIENT_MIC_PERMISSION]: "granted" }).catch(() => undefined);
         await refresh().catch(() => undefined);
       } else {
         setMicTestStatus(`入力が小さいです: 音量 ${formatMicLevel(level)}。マイク選択やOS許可を確認してください。`);
+        setMicTestTone("error");
       }
     } catch (error) {
       setMicTestStatus(error instanceof Error ? error.message : "マイクテストに失敗しました。");
+      setMicTestTone("error");
       await ambientTriggerClient.checkOsPermissions({ [AMBIENT_MIC_PERMISSION]: "denied" }).catch(() => undefined);
       await refresh().catch(() => undefined);
     } finally {
@@ -1364,16 +1375,19 @@ export function AmbientTriggerPanel({
   async function runTranscriptionTest() {
     if (!micRumiPermissionGranted || !ambientDispatchGranted || rumiApprovalPending) {
       setTranscriptionTestStatus("Tobkiriのマイク/トリガー利用許可を完了してください。");
+      setTranscriptionTestTone("error");
       setExpanded(true);
       return;
     }
     if (pinchRecording || pinchRecorderRef.current) {
       setTranscriptionTestStatus("録音中は文字起こしテストを実行できません。");
+      setTranscriptionTestTone("error");
       return;
     }
     setTranscriptionTestBusy(true);
     setTranscriptionTestText("");
     setTranscriptionTestStatus("録音中です。3秒ほど話してください。");
+    setTranscriptionTestTone("status");
     let recorder: ActiveAudioRecorder | null = null;
     try {
       recorder = await startPinchAudioRecorder(selectedMicId || undefined);
@@ -1381,6 +1395,7 @@ export function AmbientTriggerPanel({
       const recording = await recorder.stop();
       recorder = null;
       setTranscriptionTestStatus("文字起こし中です。");
+      setTranscriptionTestTone("status");
       const result = await ambientTriggerClient.submitEvent({
         source: "microphone",
         trigger: "transcription_test",
@@ -1405,12 +1420,15 @@ export function AmbientTriggerPanel({
       if (transcript) {
         setTranscriptionTestText(transcript);
         setTranscriptionTestStatus(`文字起こしOK: ${String(transcription.source || transcription.model || "local")}`);
+        setTranscriptionTestTone("success");
       } else {
         const detail = String(transcription.reason || transcription.code || result.reason || "").trim();
         setTranscriptionTestStatus(detail ? `文字起こしできませんでした: ${detail}` : "文字起こしできませんでした。もう少し長く、はっきり話してください。");
+        setTranscriptionTestTone("error");
       }
     } catch (error) {
       setTranscriptionTestStatus(error instanceof Error ? error.message : "文字起こしテストに失敗しました。");
+      setTranscriptionTestTone("error");
     } finally {
       recorder?.cancel();
       setTranscriptionTestBusy(false);
@@ -1787,10 +1805,18 @@ export function AmbientTriggerPanel({
           </button>
         </div>
         <div className="space-y-1 text-[11px] leading-5 text-zinc-400">
-          <p className={cn("flex items-center gap-1", micTestLevel !== null && micTestLevel >= 0.03 ? "text-emerald-200" : "")}>
-            {micTestLevel !== null && micTestLevel >= 0.03 ? <Check size={12} /> : null}
-            <span>{micTestStatus}</span>
-          </p>
+          {micTestTone === "error" ? (
+            <ErrorNotice
+              className="px-2 py-1 text-[11px] leading-5"
+              copyLabel="マイクテストエラーをコピー"
+              message={micTestStatus}
+            />
+          ) : (
+            <p className={cn("flex items-center gap-1", micTestTone === "success" ? "text-emerald-200" : "")}>
+              {micTestTone === "success" ? <Check size={12} /> : null}
+              <span>{micTestStatus}</span>
+            </p>
+          )}
           {micTestLevel !== null && (
             <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
               <div
@@ -1799,7 +1825,13 @@ export function AmbientTriggerPanel({
               />
             </div>
           )}
-          <p>{transcriptionTestStatus}</p>
+          {transcriptionTestTone === "error" ? (
+            <ErrorNotice
+              className="px-2 py-1 text-[11px] leading-5"
+              copyLabel="文字起こしテストエラーをコピー"
+              message={transcriptionTestStatus}
+            />
+          ) : <p>{transcriptionTestStatus}</p>}
           {transcriptionTestText && (
             <p className="rounded-md border border-emerald-400/25 bg-emerald-400/10 px-2 py-1 text-emerald-100">
               {transcriptionTestText}

@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CircleAlert,
   Check,
-  Copy,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -29,6 +27,7 @@ import {
 import { broadcastAuthorityApprovalSettlement } from "../lib/authorityApprovalEvents";
 import { closeCurrentWindow, getAuthorityApprovalContext, openFingerRecordingWindow } from "../lib/desktopApproval";
 import { cn } from "../lib/cn";
+import { ErrorNotice } from "./ErrorNotice";
 
 type DecisionState = "idle" | "approved" | "denied";
 
@@ -46,92 +45,18 @@ const DISPLAY_METADATA_LABELS: Record<string, string> = {
   title: "タイトル",
 };
 
-async function copyApprovalError(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Fall through to the selection-based WebView fallback.
-  }
-  if (!document.body || typeof document.execCommand !== "function") return false;
-  const selection = document.createElement("textarea");
-  selection.value = text;
-  selection.readOnly = true;
-  selection.setAttribute("aria-hidden", "true");
-  selection.style.position = "fixed";
-  selection.style.opacity = "0";
-  selection.style.pointerEvents = "none";
-  document.body.appendChild(selection);
-  selection.select();
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    selection.remove();
-  }
-}
-
 function ApprovalError({ message, compact = false }: { message: string; compact?: boolean }) {
-  const [feedback, setFeedback] = useState<"idle" | "copied" | "failed">("idle");
-  const feedbackId = useId();
-
-  useEffect(() => {
-    setFeedback("idle");
-  }, [message]);
-
-  useEffect(() => {
-    if (feedback === "idle") return undefined;
-    const timer = window.setTimeout(() => setFeedback("idle"), 3_000);
-    return () => window.clearTimeout(timer);
-  }, [feedback]);
-
-  const feedbackMessage = feedback === "copied"
-    ? "エラーをクリップボードにコピーしました。"
-    : feedback === "failed"
-      ? "コピーできませんでした。エラー本文を選択してコピーしてください。"
-      : "";
-  const label = feedbackMessage || "エラーをコピー";
-
   return (
-    <div
-      aria-live="assertive"
+    <ErrorNotice
       className={cn(
-        "flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-100",
+        "text-red-100",
         compact ? "p-2 text-xs" : "px-3 py-2 text-sm",
       )}
-      role="alert"
-    >
-      <CircleAlert
-        aria-hidden="true"
-        className="mt-0.5 h-4 w-4 shrink-0 text-red-300"
-        data-error-icon="approval"
-      />
-      <span className="min-w-0 flex-1 break-words">{message}</span>
-      <span className="inline-flex shrink-0 items-center gap-1.5">
-        <button
-          aria-describedby={feedbackId}
-          aria-label={label}
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-700 bg-zinc-950 text-zinc-300 hover:border-zinc-500 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-300",
-            feedback === "copied" && "border-emerald-500/60 text-emerald-200",
-            feedback === "failed" && "border-red-400/60 text-red-100",
-          )}
-          onClick={() => void copyApprovalError(message).then((copied) => {
-            setFeedback(copied ? "copied" : "failed");
-          })}
-          title={label}
-          type="button"
-        >
-          <Copy aria-hidden="true" size={14} />
-        </button>
-        <span className="sr-only" id={feedbackId} role="status" aria-live="polite">
-          {feedbackMessage}
-        </span>
-      </span>
-    </div>
+      copyLabel="承認エラーをコピー"
+      errorIcon="approval"
+      message={message}
+      messageClassName="break-words"
+    />
   );
 }
 

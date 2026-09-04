@@ -138,15 +138,18 @@ test("interactive approval window is tokenless and uses the dedicated resource",
 
 test("interactive approval errors keep a semantic alert icon separate from one stable copy action", () => {
   const source = authorityApprovalWindowSource();
+  const noticeSource = readFileSync(resolve(SRC_ROOT, "components", "ErrorNotice.tsx"), "utf8");
 
-  assert.match(source, /import \{[\s\S]*Copy,[\s\S]*\} from "lucide-react"/);
-  assert.match(source, /function ApprovalError\([\s\S]*role="alert"/);
-  assert.match(source, /aria-live="assertive"/);
-  assert.match(source, /<CircleAlert[\s\S]*data-error-icon="approval"/);
-  assert.match(source, /<Copy aria-hidden="true" size=\{14\} \/>/);
+  assert.match(source, /import \{ ErrorNotice \} from "\.\/ErrorNotice"/);
+  assert.match(source, /function ApprovalError\([\s\S]*errorIcon="approval"/);
+  assert.match(source, /copyLabel="承認エラーをコピー"/);
+  assert.match(noticeSource, /noticeRole = severity === "warning" \? "status" : "alert"/);
+  assert.match(noticeSource, /liveMode = severity === "warning" \? "polite" : "assertive"/);
+  assert.match(noticeSource, /CircleAlert/);
+  assert.match(noticeSource, /<Copy aria-hidden="true" data-copy-icon="" size=\{14\} \/>/);
   assert.match(source, /<ApprovalError message="request_id が見つかりません。" \/>/);
   assert.match(source, /<ApprovalError message="この承認に必要な確認情報を取得できませんでした。安全のため操作できません。" \/>/);
-  assert.doesNotMatch(source, /feedback === "copied"[^\n]*\? <Check/);
+  assert.doesNotMatch(noticeSource, /<Check\b/);
 });
 
 test("interactive approval API exposes only the redacted projection and exact decision bodies", () => {

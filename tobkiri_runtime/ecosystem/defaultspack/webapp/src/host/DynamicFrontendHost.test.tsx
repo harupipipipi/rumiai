@@ -200,7 +200,7 @@ test("renders a declarative route without importing a product screen", () => {
   assert.doesNotMatch(markup, /iframe/);
 });
 
-test("missing pack contribution has a generic isolated fallback", () => {
+test("missing pack contribution has a copyable isolated fallback", () => {
   resetFrontendHostQuarantineForTests();
   const markup = renderToStaticMarkup(
     <DynamicFrontendHost
@@ -211,8 +211,11 @@ test("missing pack contribution has a generic isolated fallback", () => {
     />,
   );
 
-  assert.match(markup, /role="status"/);
+  assert.match(markup, /role="alert"/);
   assert.match(markup, /not available/);
+  assert.match(markup, /data-error-icon="frontend-availability"/);
+  assert.match(markup, /data-copy-icon=""/);
+  assert.match(markup, /aria-label="Copy frontend availability error"/);
 });
 
 test("isolated contribution URLs are owner-bound and receive an opaque frame sandbox", () => {

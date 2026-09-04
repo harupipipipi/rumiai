@@ -14,6 +14,9 @@ import {
 } from "./settings/renderers/slashCommandsField";
 import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
+import { SettingsStatusBar } from "./settings/SettingsStatusBar";
+import { ProfileSettingsPanel } from "./settings/ProfileSettingsPanel";
+import { ModelSearchPicker } from "../features/models/ModelSearchPicker";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
 
@@ -26,6 +29,49 @@ function makeModelOption(index: number) {
     model_id: `model-${index}`,
   };
 }
+
+test("settings error surfaces keep severity glyphs separate from stable copy controls", () => {
+  const statusHtml = renderToStaticMarkup(createElement(SettingsStatusBar, {
+    backendNote: "Kernel is unreachable.",
+    backendState: "offline",
+    loadState: { status: "error", message: "Settings refresh failed." },
+    locale: "en",
+    saveState: {
+      dirtyKeys: ["profiles.active_profile"],
+      message: "Profile save failed.",
+      status: "error",
+    },
+  }));
+  const profileHtml = renderToStaticMarkup(createElement(ProfileSettingsPanel, {
+    loadState: { status: "error", message: "Profiles could not load." },
+    locale: "en",
+    onSettingChange: () => undefined,
+    workspace: {
+      activeProfileId: "",
+      defaultProfileId: "",
+      editableCollection: null,
+      modelRoutesText: "",
+      profiles: [],
+    },
+  }));
+  const modelHtml = renderToStaticMarkup(createElement(ModelSearchPicker, {
+    error: "Model search failed.",
+    onChange: () => undefined,
+    onOpenChange: () => undefined,
+    onQueryChange: () => undefined,
+    open: true,
+    query: "demo",
+    value: "",
+  }));
+
+  assert.equal((statusHtml.match(/data-copy-action=""/g) ?? []).length, 3);
+  assert.match(statusHtml, /data-error-icon="error"/);
+  assert.match(profileHtml, /aria-label="Copy profile load error"/);
+  assert.match(profileHtml, /data-copy-action=""/);
+  assert.match(modelHtml, /aria-label="モデル検索エラーをコピー"/);
+  assert.match(modelHtml, /data-error-icon="error"/);
+  assert.match(modelHtml, /data-copy-action=""/);
+});
 
 
 test("settings close guard allows in-flight autosaves and guards only failed dirty changes", () => {

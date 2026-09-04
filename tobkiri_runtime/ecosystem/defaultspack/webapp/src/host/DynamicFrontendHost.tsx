@@ -22,6 +22,7 @@ import {
   frontendActionErrorMessage,
   isConversationV4Contribution,
 } from "./ConversationV4View";
+import { ErrorNotice } from "../components/ErrorNotice";
 
 export { frontendActionErrorMessage } from "./ConversationV4View";
 
@@ -242,7 +243,14 @@ function DeclarativeView({
           {busy ? "Working…" : String(view.action_label ?? "Continue")}
         </button>
       )}
-      {actionError && <p role="alert">{actionError}</p>}
+      {actionError ? (
+        <ErrorNotice
+          copyLabel="Copy dynamic frontend action error"
+          copyText={actionError}
+          errorIcon="dynamic-frontend-action"
+          message={actionError}
+        />
+      ) : null}
       {result !== null && <GenericValue value={result} />}
     </section>
   );
@@ -351,7 +359,14 @@ function IsolatedView({
       aria-label={item.accessibility.name}
       data-contribution-id={item.contribution_id}
     >
-      {frameError && <p role="alert">{frameError}</p>}
+      {frameError ? (
+        <ErrorNotice
+          copyLabel="Copy isolated frontend error"
+          copyText={frameError}
+          errorIcon="isolated-frontend"
+          message={frameError}
+        />
+      ) : null}
       <iframe
         ref={frameRef}
         title={item.accessibility.name}
@@ -457,7 +472,7 @@ function VerifiedBuiltinModule({
     }
   }), [item, module.export, module.path]);
   return (
-    <Suspense fallback={<HostFallback title={`Loading ${item.label}`} />}>
+    <Suspense fallback={<HostStatus title={`Loading ${item.label}`} />}>
       <Loaded />
     </Suspense>
   );
@@ -490,6 +505,17 @@ function GenericValue({ value }: { value: unknown }) {
 }
 
 function HostFallback({ title }: { title: string }) {
+  return (
+    <ErrorNotice
+      copyLabel="Copy frontend availability error"
+      copyText={title}
+      errorIcon="frontend-availability"
+      message={title}
+    />
+  );
+}
+
+function HostStatus({ title }: { title: string }) {
   return <section role="status" aria-live="polite">{title}</section>;
 }
 

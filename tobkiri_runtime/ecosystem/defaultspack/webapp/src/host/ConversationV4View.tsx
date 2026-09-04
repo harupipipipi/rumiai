@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 
+import { ErrorNotice } from "../components/ErrorNotice";
 import type {
   FrontendCapabilityClient,
   VerifiedFrontendContribution,
@@ -220,9 +221,13 @@ export function ConversationV4View({
             </p>
           ) : null}
           {error ? (
-            <div className="mt-3 flex flex-wrap items-center gap-3" role="alert">
-              <p className="text-sm text-red-200">{error}</p>
-              {retryMessages ? (
+            <ErrorNotice
+              className="mt-3 text-sm"
+              copyLabel="Copy conversation error"
+              copyText={error}
+              errorIcon="conversation-v4"
+              message={error}
+              trailing={retryMessages ? (
                 <button
                   className="rounded-lg border border-red-300/40 px-3 py-1.5 text-sm font-semibold text-red-100 hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                   onClick={() => void complete(retryMessages)}
@@ -230,8 +235,8 @@ export function ConversationV4View({
                 >
                   Try again
                 </button>
-              ) : null}
-            </div>
+              ) : undefined}
+            />
           ) : null}
           <div className="mt-4 flex justify-end">
             <button
@@ -269,16 +274,22 @@ export function ConversationV4Unavailable({
         <h1 className="mt-2 text-xl font-semibold" id="conversation-v4-unavailable-title">
           Tobkiri Conversation is unavailable
         </h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-300" role="status">
-          {reason}
-        </p>
-        <button
-          className="mt-5 rounded-xl border border-zinc-600 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
-          onClick={onRetry}
-          type="button"
-        >
-          Retry
-        </button>
+        <ErrorNotice
+          className="mt-3 text-sm leading-6"
+          copyLabel="Copy unavailable conversation error"
+          copyText={reason}
+          errorIcon="conversation-v4-unavailable"
+          message={reason}
+          trailing={(
+            <button
+              className="rounded-xl border border-zinc-600 px-4 py-2 text-sm font-semibold text-zinc-100 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300"
+              onClick={onRetry}
+              type="button"
+            >
+              Retry
+            </button>
+          )}
+        />
       </section>
     </main>
   );

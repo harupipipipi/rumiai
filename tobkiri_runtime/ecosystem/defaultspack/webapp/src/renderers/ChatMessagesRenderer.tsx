@@ -1,10 +1,11 @@
-import { AlertTriangle, Box, Calculator, Check, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, RefreshCw, Terminal, Wrench, X } from "lucide-react";
+import { Box, Calculator, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, RefreshCw, Terminal, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
+import { ErrorNotice, copyTextWithFallback } from "../components/ErrorNotice";
 import { PromptUsageDisclosure } from "../components/prompts/PromptUsageDisclosure";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
@@ -508,8 +509,8 @@ function UntrustedImageBlock({
   }, [loadedSrc]);
 
   const copyUrl = () => {
-    if (!rawUrl || typeof navigator === "undefined" || !navigator.clipboard) return;
-    void navigator.clipboard.writeText(rawUrl).then(() => setCopied(true), () => setCopied(false));
+    if (!rawUrl) return;
+    void copyTextWithFallback(rawUrl).then(setCopied, () => setCopied(false));
   };
   const openPreview = () => onOpenImagePreview?.({
     src: loadedSrc,
@@ -551,10 +552,16 @@ function UntrustedImageBlock({
         <span>{alt}</span>
       </div>
       {policy.disposition === "blocked" ? (
-        <div role="alert" className="rounded-md border border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-200">
-          <p>Image blocked for safety.</p>
-          <p className="mt-1 break-all text-amber-300/80">Source: {policy.sourceLabel} ({policy.reason})</p>
-        </div>
+        <ErrorNotice
+          className="rounded-md border-amber-900/70 bg-amber-950/30 p-3 text-xs text-amber-200"
+          copyLabel="画像ブロックの詳細をコピー"
+          errorIcon="blocked-image"
+          message={`Source: ${policy.sourceLabel} (${policy.reason})`}
+          messageClassName="mt-1 break-all text-amber-300/80"
+          severity="warning"
+          title="Image blocked for safety."
+          titleClassName="text-amber-200"
+        />
       ) : !consented ? (
         <div className="rounded-md border border-zinc-700 bg-zinc-950/50 p-3 text-xs text-zinc-300">
           <p>Remote image hidden. Loading it will contact this source.</p>
@@ -564,10 +571,15 @@ function UntrustedImageBlock({
           </button>
         </div>
       ) : failed ? (
-        <div role="alert" className="rounded-md border border-red-900/70 bg-red-950/30 p-3 text-xs text-red-200">
-          Image could not be loaded from {policy.sourceLabel}.
-          {!trusted ? <button type="button" className="ml-2 underline" onClick={revokeRemote}>Revoke access</button> : null}
-        </div>
+        <ErrorNotice
+          className="rounded-md border-red-900/70 bg-red-950/30 p-3 text-xs text-red-200"
+          copyLabel="画像読み込みエラーをコピー"
+          errorIcon="image-load"
+          message={`Image could not be loaded from ${policy.sourceLabel}.`}
+          messageClassName="text-red-200"
+        >
+          {!trusted ? <button type="button" className="mt-2 underline" onClick={revokeRemote}>Revoke access</button> : null}
+        </ErrorNotice>
       ) : (
         <button type="button" className="block max-w-full cursor-zoom-in rounded-lg border border-zinc-800 bg-black/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500" onClick={openPreview}>
           <img
@@ -785,34 +797,7 @@ export function formatMessageTimestamp(value: unknown): string {
 }
 
 async function writeClipboardText(text: string): Promise<void> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // Fall through to the textarea fallback for in-app browsers that expose but deny Clipboard API.
-  }
-
-  if (typeof document !== "undefined" && document.body) {
-    const textarea = document.createElement("textarea");
-    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    textarea.value = text;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "0";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-    const copied = document.execCommand("copy");
-    textarea.remove();
-    activeElement?.focus({ preventScroll: true });
-    if (copied) {
-      return;
-    }
-  }
+  if (await copyTextWithFallback(text)) return;
 
   await chatMessageResources.writeClipboard(text);
 }
@@ -826,54 +811,34 @@ function MessageActionBar({
 
   const text = messageCopyText(message);
   const timestampLabel = formatMessageTimestamp(message.createdAt);
-  const actions: Array<{
-    id: string;
-    label: string;
-    icon: typeof Copy;
-    run: () => Promise<void> | void;
-  }> = [
-    {
-      id: "copy",
-      label: copyState === "failed" ? "コピー失敗" : copyState === "copied" ? "コピー済み" : "コピー",
-      icon: copyState === "failed" ? AlertTriangle : copyState === "copied" ? Check : Copy,
-      run: async () => {
-        if (!text) return;
-        try {
-          await writeClipboardText(text);
-          setCopyState("copied");
-        } catch {
-          setCopyState("failed");
-        }
-        window.setTimeout(() => setCopyState("idle"), 1800);
-      },
-    },
-  ];
+
+  const copyMessage = async () => {
+    if (!text) return;
+    try {
+      await writeClipboardText(text);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    window.setTimeout(() => setCopyState("idle"), 1800);
+  };
 
   return (
     <div className="rumi-message-actions mt-1.5 flex min-h-8 items-center justify-start gap-1 opacity-85 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
-      {actions.map((action) => {
-        const Icon = action.icon;
-        return (
-          <button
-            key={action.id}
-            type="button"
-            aria-label={action.label}
-            title={action.label}
-            onClick={() => {
-              void action.run();
-            }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800/85 hover:text-zinc-100 focus-visible:bg-zinc-800/85 focus-visible:text-zinc-100"
-          >
-            <Icon
-              size={14}
-              className={cn(
-                copyState === "copied" && "rumi-copy-icon-pop text-emerald-300",
-                copyState === "failed" && "rumi-copy-icon-pop text-red-300",
-              )}
-            />
-          </button>
-        );
-      })}
+      <button
+        aria-label="コピー"
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-800/85 hover:text-zinc-100 focus-visible:bg-zinc-800/85 focus-visible:text-zinc-100",
+          copyState === "copied" && "rumi-copy-icon-pop text-emerald-300",
+          copyState === "failed" && "rumi-copy-icon-pop text-red-300",
+        )}
+        data-copy-action="message"
+        onClick={() => void copyMessage()}
+        title="コピー"
+        type="button"
+      >
+        <Copy aria-hidden="true" data-copy-icon="message" size={14} />
+      </button>
       <span className="sr-only" aria-live="polite">{copyState === "copied" ? "メッセージをコピーしました" : copyState === "failed" ? "メッセージをコピーできませんでした" : ""}</span>
       {timestampLabel && (
         <span className="ml-1 shrink-0 font-mono text-[10px] leading-none text-zinc-600 opacity-50 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
@@ -1715,36 +1680,37 @@ export function ChatMessagesRenderer({
   return (
     <>
       {error && (
-        <div className="rumi-chat-error mx-4 mt-3 rounded-xl border border-red-400/25 bg-red-500/[0.09] px-3.5 py-3 text-red-100" role="alert" aria-live="assertive">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-300" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-semibold text-red-100">処理を完了できませんでした</p>
-              <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-5 text-red-100/80">{error}</p>
-              {onRetry && (
-                <button
-                  type="button"
-                  onClick={onRetry}
-                  className="mt-2.5 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-200/25 bg-red-100/[0.06] px-3 text-[12px] font-semibold text-red-50 hover:bg-red-100/[0.11]"
-                >
-                  <RefreshCw size={13} aria-hidden="true" />
-                  再試行
-                </button>
-              )}
-            </div>
-            {onDismissError && (
-              <button
-                type="button"
-                onClick={onDismissError}
-                aria-label="エラーを閉じる"
-                title="閉じる"
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-200/70 hover:bg-red-100/10 hover:text-red-50"
-              >
-                <X size={15} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        </div>
+        <ErrorNotice
+          className="rumi-chat-error mx-4 mt-3 rounded-xl border-red-400/25 bg-red-500/[0.09] px-3.5 py-3 text-red-100"
+          copyLabel="チャットエラーをコピー"
+          errorIcon="chat"
+          message={error}
+          messageClassName="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-red-100/80"
+          title="処理を完了できませんでした"
+          titleClassName="text-[12px] text-red-100"
+          trailing={onDismissError ? (
+            <button
+              aria-label="エラーを閉じる"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-200/70 hover:bg-red-100/10 hover:text-red-50"
+              onClick={onDismissError}
+              title="閉じる"
+              type="button"
+            >
+              <X aria-hidden="true" size={15} />
+            </button>
+          ) : undefined}
+        >
+          {onRetry ? (
+            <button
+              className="mt-2.5 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-red-200/25 bg-red-100/[0.06] px-3 text-[12px] font-semibold text-red-50 hover:bg-red-100/[0.11]"
+              onClick={onRetry}
+              type="button"
+            >
+              <RefreshCw aria-hidden="true" size={13} />
+              再試行
+            </button>
+          ) : null}
+        </ErrorNotice>
       )}
 
       {!isMessagesRegionVisible ? null : isLoading ? (
@@ -1848,22 +1814,27 @@ export function ChatMessagesRenderer({
                             ))
                           : shouldShowEmptyResponseWarning(message, hasToolActivity)
                             ? (
-                                <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
-                                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
-                                  <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
-                                </div>
+                                <ErrorNotice
+                                  className="rounded-lg border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
+                                  copyLabel="空の応答エラーをコピー"
+                                  errorIcon="empty-response"
+                                  message="レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。"
+                                  messageClassName="text-amber-100"
+                                  severity="warning"
+                                />
                               )
                             : <MessageMarkdown text={messageDisplayText(message, message.rawText)} />}
                       </div>
 
                       {message.role === "agent" && message.metadata?.interrupted && (
-                        <div
-                          className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
-                          role="status"
-                        >
-                          <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
-                          <span>応答は途中で中断されました。表示内容は中断前までに届いたものです。</span>
-                        </div>
+                        <ErrorNotice
+                          className="mt-3 rounded-lg border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100"
+                          copyLabel="中断した応答の詳細をコピー"
+                          errorIcon="interrupted-response"
+                          message="応答は途中で中断されました。表示内容は中断前までに届いたものです。"
+                          messageClassName="text-amber-100"
+                          severity="warning"
+                        />
                       )}
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { ErrorNotice } from './ErrorNotice';
 import {
   DndContext,
   DragOverlay,
@@ -2064,7 +2065,13 @@ export function HistoryBoard({
             </div>
           )}
 
-          {newGroupError && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-2 text-[10px] text-red-200">{newGroupError}</p>}
+          {newGroupError && (
+            <ErrorNotice
+              className="px-2.5 py-2 text-[10px]"
+              copyLabel="プロジェクト作成エラーをコピー"
+              message={newGroupError}
+            />
+          )}
 
           <div className="grid grid-cols-[auto_1fr] gap-2">
             <button

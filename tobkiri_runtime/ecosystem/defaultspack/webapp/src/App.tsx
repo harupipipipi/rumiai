@@ -14,6 +14,7 @@ import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
+import { ErrorNotice } from "./components/ErrorNotice";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -1269,14 +1270,19 @@ function CalendarComposerPanel({
               )}
             </div>
           )}
-          {(draftError || lastAgentResult || activeItem?.scheduleId) && (
-            <div className={cn(
-              "mt-3 rounded-lg border px-2.5 py-2 text-xs",
-              draftError ? "border-red-500/40 bg-red-500/10 text-red-100" : "border-blue-500/30 bg-blue-500/10 text-blue-100",
-            )}>
-              {draftError ?? lastAgentResult ?? `Agentスケジュール: ${activeItem?.scheduleStatus ?? "有効"}`}
+          {draftError ? (
+            <ErrorNotice
+              className="mt-3 rounded-lg px-2.5 py-2 text-xs"
+              copyLabel="Copy calendar action error"
+              copyText={draftError}
+              errorIcon="calendar-action"
+              message={draftError}
+            />
+          ) : lastAgentResult || activeItem?.scheduleId ? (
+            <div className="mt-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-xs text-blue-100">
+              {lastAgentResult ?? `Agentスケジュール: ${activeItem?.scheduleStatus ?? "有効"}`}
             </div>
-          )}
+          ) : null}
           {activeEditor.mode === "edit" && (
             <div className="mt-3 flex items-center justify-between gap-2">
               <button
@@ -7387,26 +7393,15 @@ function ChatApp() {
             )}
 
             {backendConnectionState !== "online" && (
-              <div
-                role="status"
-                className={cn(
-                  "mx-3 mt-3 rounded-2xl border px-4 py-3",
-                  backendConnectionState === "offline"
-                    ? "border-red-500/20 bg-red-500/10 text-red-100"
-                    : "border-amber-500/20 bg-amber-500/10 text-amber-100",
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={cn(
-                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
-                      backendConnectionState === "offline" ? "bg-red-400" : "bg-amber-300 animate-pulse",
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{backendConnectionBanner.title}</p>
-                    <p className="mt-1 text-xs leading-5 opacity-90">{backendConnectionBanner.detail}</p>
-                  </div>
+              <ErrorNotice
+                className="mx-3 mt-3 rounded-2xl px-4 py-3"
+                copyLabel="Copy backend connection error"
+                copyText={`${backendConnectionBanner.title}\n${backendConnectionBanner.detail}`}
+                errorIcon={`backend-connection-${backendConnectionState}`}
+                message={backendConnectionBanner.detail}
+                severity={backendConnectionState === "offline" ? "error" : "warning"}
+                title={backendConnectionBanner.title}
+                trailing={(
                   <button
                     type="button"
                     onClick={() => void refreshHealth("focus")}
@@ -7414,8 +7409,8 @@ function ChatApp() {
                   >
                     いま確認
                   </button>
-                </div>
-              </div>
+                )}
+              />
             )}
 
             {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
@@ -7797,7 +7792,15 @@ function ChatApp() {
                 <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
               </div>
               {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
-              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
+              {shareDialogError ? (
+                <ErrorNotice
+                  className="mt-4 text-sm"
+                  copyLabel="Copy share dialog error"
+                  copyText={shareDialogError}
+                  errorIcon="share-dialog"
+                  message={shareDialogError}
+                />
+              ) : null}
               {shareCreatedUrl && <div className={`mt-4 border p-3 ${shareRevoked ? "border-red-500/25 bg-red-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}><p className={`break-all text-sm ${shareRevoked ? "text-red-100 line-through" : "text-emerald-100"}`}>{shareCreatedUrl}</p><div className="mt-3 flex flex-wrap gap-2">{!shareRevoked && <button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button>}{shareCreatedToken && !shareRevoked && <button type="button" onClick={() => void api.revokeShare(shareCreatedToken).then(() => setShareRevoked(true)).catch((reason) => setShareDialogError(reason instanceof Error ? reason.message : "Could not revoke link."))} className="inline-flex h-9 items-center gap-2 border border-red-400/25 px-3 text-xs font-semibold text-red-200 hover:bg-red-500/10"><X size={14} /> Revoke link</button>}</div>{shareRevoked && <p role="status" className="mt-2 text-xs text-red-200">Revoked. This link can no longer be viewed or imported.</p>}</div>}
               <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
             </section>
