@@ -407,7 +407,7 @@ fn development_launcher_handoff_root() -> Result<PathBuf> {
     // same per-user cache directory without inherited environment state.
     let cache_dir = dirs::cache_dir().context("platform cache directory is unavailable")?;
     Ok(cache_dir
-        .join("dev.tobkiri.launcher")
+        .join(LAUNCHER_BUNDLE_IDENTIFIER)
         .join("development")
         .join(HANDOFF_DIRECTORY))
 }
