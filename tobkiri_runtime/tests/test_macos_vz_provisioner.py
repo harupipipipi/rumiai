@@ -660,8 +660,22 @@ def test_instance_creation_compares_descriptor_bare_sha512(
         image_sha512=hashlib.sha512(base.read_bytes()).hexdigest(),
     )
 
+    root = provisioner._state_dir / "sha512-instance"
+    provisioner._ensure_state_root()
+    recovery = {
+        "version": macos_vz_provisioner.VZ_STATE_VERSION,
+        "backend_id": macos_vz_provisioner.PACKVM_BACKEND_ID,
+        "instance": macos_vz_provisioner.VZ_INSTANCE,
+        "instance_root": str(root),
+        **provisioner.recovery_identity(),
+    }
+    macos_vz_provisioner._atomic_private_json(
+        provisioner.recovery_path,
+        provisioner._signed_recovery(recovery),
+    )
+
     provisioner._create_instance(
-        provisioner._state_dir / "sha512-instance",
+        root,
         image,
         with_sha512,
         None,
@@ -1010,7 +1024,9 @@ def test_development_default_accepts_only_the_launcher_selected_app_bundle(
     monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
     monkeypatch.setenv("TOBKIRI_DEVELOPMENT_PACKVM_BUNDLE_ROOT", str(bundle))
 
-    lifecycle = PackVMLifecycleV4()
+    lifecycle = PackVMLifecycleV4(
+        provisioner=macos_vz_provisioner.default_packvm_provisioner()
+    )
 
     assert lifecycle._provisioner._bundle_root == bundle.resolve()
     assert lifecycle._provisioner._asset_manifest_path == manifest.resolve()
@@ -1025,7 +1041,9 @@ def test_production_ignores_development_packvm_bundle_override(
         str(tmp_path / "Untrusted.app"),
     )
 
-    lifecycle = PackVMLifecycleV4()
+    lifecycle = PackVMLifecycleV4(
+        provisioner=macos_vz_provisioner.default_packvm_provisioner()
+    )
 
     assert lifecycle._provisioner._bundle_root is None
 
