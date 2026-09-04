@@ -8,7 +8,9 @@ import binascii
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass
+import errno
 import fcntl
 import hashlib
 import hmac
@@ -74,6 +76,14 @@ _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _BRIDGE_NONCE = re.compile(r"^[a-f0-9]{48}$")
 _AGENT_CHALLENGE = re.compile(r"^[a-f0-9]{64}$")
+_SCMP_ACT_ALLOW = 0x7FFF0000
+_SCMP_ACT_ERRNO = 0x00050000
+# ``fork`` and ``vfork`` do not exist as native syscalls on every Linux
+# architecture (notably arm64); their libc implementations use ``clone``.
+# Resolve every name that exists for the running guest architecture, while
+# requiring the architecture-independent process and image replacement gates.
+_REQUIRED_CHILD_PROCESS_SYSCALLS = (b"clone", b"execve")
+_OPTIONAL_CHILD_PROCESS_SYSCALLS = (b"clone3", b"execveat", b"fork", b"vfork")
 
 
 def main() -> int:
@@ -1322,6 +1332,7 @@ def _execute_staged_module(path: Path) -> int:
     try:
         if os.geteuid() == 0:
             raise ValueError("PackVM implementation may not execute as root")
+        _install_child_process_seccomp_filter()
         request = json.loads(sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1))
         if not isinstance(request, dict) or set(request) != {
             "contract_id",
@@ -1348,6 +1359,63 @@ def _execute_staged_module(path: Path) -> int:
     except Exception as error:
         sys.stderr.write(f"{type(error).__name__}: {error}\n")
         return 1
+
+
+def _install_child_process_seccomp_filter() -> None:
+    """Deny process creation and image replacement before loading Pack code.
+
+    Bubblewrap supplies namespaces, mounts, dropped capabilities, and an empty
+    network namespace, but those controls do not stop the Pack from forking or
+    executing guest binaries.  Install the syscall boundary in the already
+    spawned, non-root Pack process.  Any missing required libseccomp capability
+    rejects the invocation instead of silently weakening the sandbox.
+    """
+
+    if not sys.platform.startswith("linux"):
+        raise ValueError("PackVM child process policy requires Linux seccomp")
+    try:
+        seccomp = ctypes.CDLL("libseccomp.so.2", use_errno=True)
+    except OSError as exc:
+        raise ValueError("PackVM child process policy is unavailable") from exc
+
+    seccomp.seccomp_init.argtypes = [ctypes.c_uint32]
+    seccomp.seccomp_init.restype = ctypes.c_void_p
+    seccomp.seccomp_rule_add.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_int,
+        ctypes.c_uint,
+    ]
+    seccomp.seccomp_rule_add.restype = ctypes.c_int
+    seccomp.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    seccomp.seccomp_syscall_resolve_name.restype = ctypes.c_int
+    seccomp.seccomp_load.argtypes = [ctypes.c_void_p]
+    seccomp.seccomp_load.restype = ctypes.c_int
+    seccomp.seccomp_release.argtypes = [ctypes.c_void_p]
+    seccomp.seccomp_release.restype = None
+
+    context = seccomp.seccomp_init(_SCMP_ACT_ALLOW)
+    if not context:
+        raise ValueError("PackVM child process policy initialization failed")
+    deny_action = _SCMP_ACT_ERRNO | errno.EPERM
+    try:
+        resolved: dict[bytes, int] = {}
+        for syscall_name in (
+            *_REQUIRED_CHILD_PROCESS_SYSCALLS,
+            *_OPTIONAL_CHILD_PROCESS_SYSCALLS,
+        ):
+            syscall = seccomp.seccomp_syscall_resolve_name(syscall_name)
+            if syscall >= 0:
+                resolved[syscall_name] = syscall
+        if any(name not in resolved for name in _REQUIRED_CHILD_PROCESS_SYSCALLS):
+            raise ValueError("PackVM child process policy is incomplete")
+        for syscall in set(resolved.values()):
+            if seccomp.seccomp_rule_add(context, deny_action, syscall, 0) != 0:
+                raise ValueError("PackVM child process policy rule failed")
+        if seccomp.seccomp_load(context) != 0:
+            raise ValueError("PackVM child process policy could not be loaded")
+    finally:
+        seccomp.seccomp_release(context)
 
 
 def _sandbox_argv(target: Path, implementation: Path) -> tuple[str, ...]:

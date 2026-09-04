@@ -139,6 +139,65 @@ def test_prepare_dev_fails_with_actionable_repo_path_when_uv_is_missing(
         module.prepare_dev(tmp_path, "x86_64-unknown-linux-gnu")
 
 
+def test_dev_environment_prepares_uv_pack_shell_then_defaults(tmp_path, monkeypatch):
+    module = _load_module()
+    calls = []
+    monkeypatch.setattr(module, "prepare_dev", lambda root, target: calls.append(("uv", root, target)))
+    monkeypatch.setattr(
+        module,
+        "prepare_dev_pack_shell",
+        lambda root, target: calls.append(("pack-shell", root, target)),
+    )
+    monkeypatch.setattr(
+        module,
+        "prepare_dev_defaults",
+        lambda root, target: calls.append(("defaults", root, target)),
+    )
+
+    module.prepare_dev_environment(tmp_path, "aarch64-apple-darwin")
+
+    assert [call[0] for call in calls] == ["uv", "pack-shell", "defaults"]
+
+
+def test_macos_dev_shell_spec_uses_debug_unsigned_app(tmp_path):
+    module = _load_module()
+
+    spec = module._target_shell_spec(tmp_path, "aarch64-apple-darwin")
+
+    assert spec["bundle"] == "app"
+    assert spec["platform"] == "macos"
+    assert spec["architecture"] == "arm64"
+    assert spec["relative_path"] == "Tobkiri.app"
+    assert str(spec["artifact"]).endswith(
+        "src-tauri/target/aarch64-apple-darwin/debug/bundle/macos/Tobkiri.app"
+    )
+
+
+def test_prepare_dev_pack_shell_writes_verified_debug_digest(tmp_path, monkeypatch):
+    module = _load_module()
+    target = "aarch64-apple-darwin"
+    binary = tmp_path / "pack-shell" / "target" / target / "debug" / "pack-shell"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"development pack shell")
+    catalog = tmp_path / "tobkiri_launcher/src-tauri/bundled/presentation_catalog.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"schema":"test"}\n', encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(module, "run_command", lambda command, **kwargs: calls.append((command, kwargs)))
+
+    result = module.prepare_dev_pack_shell(tmp_path, target)
+
+    assert result == binary
+    assert calls[0][0][:3] == ["cargo", "build", "--target"]
+    assert binary.with_name("pack-shell.sha256").read_text(encoding="ascii") == (
+        "09c7e24d31c73da978ebed794be79537edf9d0f2e2f7ff6f1ffa985f4db676a1\n"
+    )
+    assert (tmp_path / "tobkiri_runtime/bundled/pack-shell").read_bytes() == binary.read_bytes()
+    assert (tmp_path / "tobkiri_runtime/bundled/presentation_catalog.json").read_text(
+        encoding="utf-8"
+    ) == catalog.read_text(encoding="utf-8")
+
+
 def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(
     tmp_path,
     monkeypatch,

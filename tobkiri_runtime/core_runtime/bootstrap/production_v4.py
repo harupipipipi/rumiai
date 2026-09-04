@@ -76,6 +76,52 @@ from ..host_provider_backend_v4 import (
 from ..host_provider_hooks_v4 import load_host_provider_factory
 
 
+def _allow_unsigned_development_shell(catalog: BundledCatalog) -> bool:
+    """Allow only the generated checkout Shell to omit a macOS signature."""
+
+    if os.environ.get("RUMI_ENVIRONMENT") != "development":
+        return False
+    runtime_root = Path(__file__).resolve().parents[2]
+    configured_app = os.environ.get("RUMI_APP_DIR")
+    artifact_root = catalog.artifact_root
+    if artifact_root is None:
+        return False
+    expected_artifacts = (
+        runtime_root.parent
+        / "tobkiri_launcher"
+        / "src-tauri"
+        / "target"
+        / "dev-defaults"
+        / "platform-artifacts"
+    )
+    bundled_artifacts = (
+        runtime_root / "bundled" / "dev-defaults" / "platform-artifacts"
+    )
+    try:
+        checkout_artifacts_match = (
+            expected_artifacts.is_dir()
+            and not expected_artifacts.is_symlink()
+            and artifact_root.resolve(strict=True)
+            == expected_artifacts.resolve(strict=True)
+        )
+        bundled_artifacts_match = (
+            bundled_artifacts.is_dir()
+            and not bundled_artifacts.is_symlink()
+            and artifact_root.resolve(strict=True)
+            == bundled_artifacts.resolve(strict=True)
+        )
+        configured_app_matches = (
+            configured_app is not None
+            and Path(configured_app).resolve(strict=True)
+            == runtime_root.resolve(strict=True)
+        )
+        return bundled_artifacts_match or (
+            configured_app_matches and checkout_artifacts_match
+        )
+    except OSError:
+        return False
+
+
 _PACK_CATALOG_KEY = (PACK_CONTROL_CONTRACT, "catalog.read")
 _CONTROL_CONTRACTS = {PACK_CONTROL_CONTRACT, CONTROL_PRESENTATION_CONTRACT}
 _PYTHON_PACK_BACKEND_ID = "tobkiri.python-pack-v4"
@@ -267,7 +313,7 @@ def _shell_artifact(
         verify_platform_artifact(
             catalog.artifact_root,
             selected_variant,
-            require_macos_code_signature=True,
+            require_macos_code_signature=not _allow_unsigned_development_shell(catalog),
         )
     except ProtocolError as exc:
         raise AuthorityDenied(f"captured Shell artifact verification failed: {exc}") from exc

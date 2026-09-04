@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from core_runtime.api.setup_handlers import SetupHandlersMixin
+from core_runtime.bootstrap import profile_capture
+from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
 
 
 class _Handler(SetupHandlersMixin):
@@ -72,6 +74,49 @@ def test_setup_lists_one_typed_finite_v4_transaction() -> None:
         "activation.commit",
         "runtime.capture",
     ]
+
+
+def test_setup_reports_unavailable_development_shell_without_dropping_request() -> None:
+    with patch.object(
+        SetupHandlersMixin,
+        "_recommended_default_profile_preview",
+        side_effect=ProfileResolutionDenied(
+            "Shell artifact is unavailable for this source/build: shell.tauri.default"
+        ),
+    ):
+        result = _Handler()._setup_list_packs()
+
+    assert result == {
+        "error": "Shell artifact is unavailable for this source/build: shell.tauri.default",
+        "status_code": 409,
+        "state": "activation_denied",
+        "write_set": [],
+    }
+
+
+def test_development_bundle_requires_exact_source_runtime_and_generated_artifacts(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    runtime_root = tmp_path / "tobkiri_runtime"
+    runtime_root.mkdir()
+    generated_root = (
+        tmp_path
+        / "tobkiri_launcher"
+        / "src-tauri"
+        / "target"
+        / "dev-defaults"
+    )
+    bundle = generated_root / "v4"
+    artifacts = generated_root / "platform-artifacts"
+    bundle.mkdir(parents=True)
+    artifacts.mkdir()
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+    monkeypatch.setenv("RUMI_APP_DIR", str(runtime_root))
+
+    assert profile_capture._development_bundle_root(runtime_root) == bundle
+
+    monkeypatch.setenv("RUMI_APP_DIR", str(tmp_path / "different-runtime"))
+    assert profile_capture._development_bundle_root(runtime_root) is None
 
 
 def test_setup_rejects_tampered_confirmation() -> None:

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import threading
+from typing import Any
 
 import pytest
 
@@ -64,6 +65,108 @@ def test_private_pack_entrypoint_refuses_root_execution(
     )
     monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 0)
     assert packvm_guest_runner._execute_staged_module(implementation) == 1
+
+
+def test_private_pack_entrypoint_installs_seccomp_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    implementation = tmp_path / "handler.py"
+    implementation.write_text(
+        "def tobkiri_packvm_invoke(operation_id, payload): return payload\n",
+        encoding="utf-8",
+    )
+    installed = False
+
+    def install_filter() -> None:
+        nonlocal installed
+        installed = True
+
+    original_spec = packvm_guest_runner.importlib.util.spec_from_file_location
+
+    def checked_spec(*args: object, **kwargs: object) -> object:
+        assert installed is True
+        return original_spec(*args, **kwargs)
+
+    stdin = SimpleNamespace(
+        buffer=io.BytesIO(
+            json.dumps(
+                {
+                    "contract_id": "contract.v1",
+                    "operation_id": "invoke",
+                    "payload": {"ok": True},
+                }
+            ).encode()
+        )
+    )
+    stdout = SimpleNamespace(buffer=io.BytesIO())
+    monkeypatch.setattr(packvm_guest_runner.os, "geteuid", lambda: 65534)
+    monkeypatch.setattr(
+        packvm_guest_runner,
+        "_install_child_process_seccomp_filter",
+        install_filter,
+    )
+    monkeypatch.setattr(
+        packvm_guest_runner.importlib.util,
+        "spec_from_file_location",
+        checked_spec,
+    )
+    monkeypatch.setattr(packvm_guest_runner.sys, "stdin", stdin)
+    monkeypatch.setattr(packvm_guest_runner.sys, "stdout", stdout)
+
+    assert packvm_guest_runner._execute_staged_module(implementation) == 0
+    assert json.loads(stdout.buffer.getvalue()) == {"ok": True}
+
+
+class _FakeSeccompCall:
+    def __init__(self, callback: Any) -> None:
+        self.callback = callback
+        self.argtypes: object = None
+        self.restype: object = None
+
+    def __call__(self, *args: object) -> object:
+        return self.callback(*args)
+
+
+def _fake_seccomp(resolved: dict[bytes, int]) -> SimpleNamespace:
+    rules: list[int] = []
+    return SimpleNamespace(
+        rules=rules,
+        seccomp_init=_FakeSeccompCall(lambda _action: 1),
+        seccomp_rule_add=_FakeSeccompCall(
+            lambda _context, _action, syscall, _count: rules.append(syscall) or 0
+        ),
+        seccomp_syscall_resolve_name=_FakeSeccompCall(
+            lambda name: resolved.get(name, -1)
+        ),
+        seccomp_load=_FakeSeccompCall(lambda _context: 0),
+        seccomp_release=_FakeSeccompCall(lambda _context: None),
+    )
+
+
+def test_child_process_seccomp_accepts_absent_arch_specific_syscalls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library = _fake_seccomp(
+        {b"clone": 220, b"clone3": 435, b"execve": 221, b"execveat": 281}
+    )
+    monkeypatch.setattr(packvm_guest_runner.sys, "platform", "linux")
+    monkeypatch.setattr(packvm_guest_runner.ctypes, "CDLL", lambda *_args, **_kwargs: library)
+
+    packvm_guest_runner._install_child_process_seccomp_filter()
+
+    assert set(library.rules) == {220, 221, 281, 435}
+
+
+def test_child_process_seccomp_rejects_missing_required_syscall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library = _fake_seccomp({b"clone": 220, b"clone3": 435})
+    monkeypatch.setattr(packvm_guest_runner.sys, "platform", "linux")
+    monkeypatch.setattr(packvm_guest_runner.ctypes, "CDLL", lambda *_args, **_kwargs: library)
+
+    with pytest.raises(ValueError, match="policy is incomplete"):
+        packvm_guest_runner._install_child_process_seccomp_filter()
 
 
 def test_guest_cancel_requires_exact_owned_identity_and_token(

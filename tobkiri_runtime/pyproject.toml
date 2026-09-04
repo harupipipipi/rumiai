@@ -40,7 +40,7 @@ py-modules = ["app"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core_runtime*", "backend_core*", "tobkiri*", "rumi_ai*", "tobkiri_protocol*"]
+include = ["core_runtime*", "backend_core*", "ecosystem*", "tobkiri*", "rumi_ai*", "tobkiri_protocol*"]
 
 [tool.setuptools.package-data]
 tobkiri_protocol = ["schemas/*.json", "fixtures/*.json", "fixtures/*.yaml"]

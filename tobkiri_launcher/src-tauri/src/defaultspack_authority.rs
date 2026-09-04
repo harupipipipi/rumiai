@@ -212,12 +212,56 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
         &bundle_root.join(DEFAULTSPACK_PACK_PATH),
         "Defaultspack Pack v4",
     )?)?;
+    let packaged_application_pack = read_json(
+        &bundle_root.join(RUNTIME_PACK_PATH),
+        "Defaultspack application Pack v4",
+    )?;
+    #[cfg(debug_assertions)]
+    let (application_pack_root, application_pack) = if let Some(workspace_root) =
+        config.dev_workspace_root.as_ref()
+    {
+        let bundled_development_root = config.app_dir.join("bundled/dev-defaults");
+        let development_root_path = if bundled_development_root.is_dir() {
+            bundled_development_root
+        } else {
+            workspace_root
+                .join("tobkiri_launcher")
+                .join("src-tauri")
+                .join("target")
+                .join("dev-defaults")
+        };
+        let development_root = canonical_directory(
+            &development_root_path,
+            "development application Pack root",
+        )?;
+        verify_symlink_free_tree(&development_root, &development_root)?;
+        let development_bundle_root = canonical_child_directory(
+            &development_root,
+            Path::new("v4"),
+            "development Pack v4 root",
+        )?;
+        let development_lock = verify_bundle_lock(&development_bundle_root)?;
+        if !development_lock
+            .authority_digests
+            .contains_key(RUNTIME_PACK_PATH)
+        {
+            bail!("development application Pack is absent from its bundle lock");
+        }
+        let development_pack = read_json(
+            &development_bundle_root.join(RUNTIME_PACK_PATH),
+            "development Defaultspack application Pack v4",
+        )?;
+        (development_root, development_pack)
+    } else {
+        (pack_root.clone(), packaged_application_pack)
+    };
+    #[cfg(not(debug_assertions))]
+    let (application_pack_root, application_pack) = (pack_root.clone(), packaged_application_pack);
+
     let launch = validate_application_pack(
+        &application_pack_root,
         &pack_root,
-        &read_json(
-            &bundle_root.join(RUNTIME_PACK_PATH),
-            "Defaultspack application Pack v4",
-        )?,
+        &application_pack,
         selected_variant,
     )?;
     verify_pack_artifact_index(&pack_root, &bundle_root)?;
@@ -237,7 +281,8 @@ pub(crate) fn resolve(config: &AppConfig) -> Result<GuardianAuthority> {
 }
 
 fn validate_application_pack(
-    pack_root: &Path,
+    application_pack_root: &Path,
+    contract_map_root: &Path,
     pack: &Value,
     selected_variant: &crate::presentation::ArtifactVariant,
 ) -> Result<GuardianLaunch> {
@@ -296,8 +341,17 @@ fn validate_application_pack(
     let entrypoint_digest = value_str(&artifacts[0], "/entrypoint_digest")
         .context("application Pack entrypoint digest is missing")?;
     #[cfg(not(test))]
-    if selected_variant.sha256.as_deref() != Some(artifact_digest)
-        || selected_variant.entrypoint_sha256.as_deref() != Some(entrypoint_digest)
+    if selected_variant
+        .sha256
+        .as_deref()
+        .is_some_and(|digest| digest != artifact_digest)
+        || selected_variant
+            .entrypoint_sha256
+            .as_deref()
+            .is_some_and(|digest| digest != entrypoint_digest)
+        || (!cfg!(debug_assertions)
+            && (selected_variant.sha256.is_none()
+                || selected_variant.entrypoint_sha256.is_none()))
     {
         bail!("application Pack differs from its signed release artifact");
     }
@@ -342,7 +396,7 @@ fn validate_application_pack(
     if !relative.starts_with(&artifact_relative) {
         bail!("application Pack entrypoint escapes its selected artifact");
     }
-    let artifact_root = pack_root.join("platform-artifacts");
+    let artifact_root = application_pack_root.join("platform-artifacts");
     let artifact_candidate = artifact_root.join(&artifact_relative);
     let candidate = artifact_root.join(relative);
     let bytes = read_regular_file(&candidate, "application Pack entrypoint")?;
@@ -360,7 +414,7 @@ fn validate_application_pack(
         .context("application Pack frontend contract map path is missing")?;
     let contract_map_digest = value_str(&artifacts[1], "/digest")
         .context("application Pack frontend contract map digest is missing")?;
-    let contract_map_candidate = pack_root.join(safe_relative(contract_map_path)?);
+    let contract_map_candidate = contract_map_root.join(safe_relative(contract_map_path)?);
     let contract_map_bytes = read_regular_file(
         &contract_map_candidate,
         "application Pack frontend contract map",
@@ -368,7 +422,7 @@ fn validate_application_pack(
     let contract_map_canonical = contract_map_candidate
         .canonicalize()
         .context("failed to canonicalize application Pack frontend contract map")?;
-    if !contract_map_canonical.starts_with(pack_root)
+    if !contract_map_canonical.starts_with(contract_map_root)
         || sha256(&contract_map_bytes) != contract_map_digest
     {
         bail!("application Pack frontend contract map escaped or failed artifact verification");
