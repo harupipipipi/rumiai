@@ -6819,9 +6819,10 @@ mod tests {
         let reseal = stage
             .find("rebase_staged_sealed_python(&staged_root)")
             .expect("sealed application closure must be rebuilt");
-        let manifest = stage
-            .find("write_runtime_resource_manifest(&staged_root)")
-            .expect("outer runtime manifest must be final");
+        let manifest = reseal
+            + stage[reseal..]
+                .find("write_runtime_resource_manifest(&staged_root)")
+                .expect("outer runtime manifest must be final");
         assert!(generate < reseal && reseal < manifest);
         let rebase = &source[source.find("fn rebase_staged_sealed_python").unwrap()
             ..source.find("fn bind_sealed_python_root").unwrap()];
@@ -7511,6 +7512,7 @@ mod tests {
 
     #[test]
     fn release_stage_then_verify_uses_exact_catalog_file_paths() {
+        let _environment_lock = environment_lock();
         let tree = TestTree::new("stage-verify");
         let (release_root, staged_root, catalog) = release_fixture(&tree);
 
