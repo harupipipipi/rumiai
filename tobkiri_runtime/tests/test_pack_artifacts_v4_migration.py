@@ -279,6 +279,20 @@ def test_all_packs_have_valid_deterministic_v4_artifacts() -> None:
         assert {name: (pack_root / name).read_text(encoding="utf-8") for name in files} == files
 
 
+def test_active_shell_policy_pack_is_not_a_read_only_compatibility_projection() -> None:
+    """A sandboxed Defaults provider must remain admissible after activation."""
+    record = next(
+        item
+        for item in _catalog()["packs"]
+        if item["pack_id"] == "rumi_shell_policy_pack"
+    )
+
+    assert record["kind"] == "normal_sandbox"
+    assert record["migration"]["compatibility"] == "none"
+    manifest = json.loads(_render_record(record)["pack.v4.json"])
+    assert manifest["migration"]["compatibility"] == "none"
+
+
 def test_normal_generation_has_no_v3_or_legacy_authority_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

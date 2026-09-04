@@ -365,9 +365,11 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
 
 #[tauri::command]
 fn reauthorize_panel_session(
+    window: tauri::WebviewWindow,
     config: tauri::State<'_, AppConfig>,
     km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
 ) -> Result<String, String> {
+    presentation::validate_presentation_caller(&window, config.inner())?;
     request_fresh_panel_session_code(&config, km.inner())
         .map_err(|error| format!("panel reauthorization failed: {error}"))
 }

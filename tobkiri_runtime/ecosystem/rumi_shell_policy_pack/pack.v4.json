@@ -1,7 +1,7 @@
 {
   "artifacts": [
     {
-      "digest": "sha256:e126eb406b5f86bb809dc386ec8d051943b0d46d8ac63edb95ccd5a8bb31155f",
+      "digest": "sha256:6b658ff288e408894864244af0a2de3d8192cbb54f95206064cfad4cf0840e8e",
       "kind": "sidecar",
       "path": "executables.v4.json"
     },
@@ -33,12 +33,12 @@
     }
   ],
   "integrity": {
-    "artifact_set_digest": "sha256:c265ee39455a140c60871dd65a11167e2ba471caddfc0e657a260c030df66d8d",
-    "contract_catalog_digest": "sha256:800d09b7e9aed296deb1a5ece2111ce9d0e7f887c661e0603068552ce9aeb9ba",
-    "source_identity": "sha256:1a766fedb33307d93248edee37353a62f4717c9df0779cafe9ee4c5cf8cea04a"
+    "artifact_set_digest": "sha256:5a1d4d491b35ff437f1a831c3993d05b9bca1ef445e330276e63075a874c1be0",
+    "contract_catalog_digest": "sha256:45002f4a1c0e9e121e1d3ee1b9d6f1a6a69ef38b760b24c58534faea54eb5ed2",
+    "source_identity": "sha256:dde1dd3d89b52be72606ac2605dde644c073721e7ea6b44e7d0b18c17ee70f94"
   },
   "migration": {
-    "compatibility": "read_only",
+    "compatibility": "none",
     "legacy_ids": [
       "rumi.service.shell.inspect.v1",
       "rumi:ecosystem/rumi_shell_policy_pack",
@@ -60,7 +60,7 @@
     }
   ],
   "pack": {
-    "artifact_digest": "sha256:c265ee39455a140c60871dd65a11167e2ba471caddfc0e657a260c030df66d8d",
+    "artifact_digest": "sha256:5a1d4d491b35ff437f1a831c3993d05b9bca1ef445e330276e63075a874c1be0",
     "display_name": "Rumi Shell Policy",
     "id": "rumi_shell_policy_pack",
     "kind": "normal_sandbox",
@@ -70,7 +70,7 @@
   "provenance": {
     "evidence": [
       {
-        "digest": "sha256:1a766fedb33307d93248edee37353a62f4717c9df0779cafe9ee4c5cf8cea04a",
+        "digest": "sha256:dde1dd3d89b52be72606ac2605dde644c073721e7ea6b44e7d0b18c17ee70f94",
         "path": "schemas/pack_v4_catalog.v1.json",
         "rule_id": "canonical-pack-v4-source-record"
       }
@@ -81,7 +81,7 @@
     "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
     "repository_tree": "8820370fd87572920444d7c9dc642735b35194e6e1610ad99d242a5958fb876c",
     "schema": "io.tobkiri.provenance.v1",
-    "source_digest": "sha256:1a766fedb33307d93248edee37353a62f4717c9df0779cafe9ee4c5cf8cea04a",
+    "source_digest": "sha256:dde1dd3d89b52be72606ac2605dde644c073721e7ea6b44e7d0b18c17ee70f94",
     "source_kind": "migration",
     "source_path": "schemas/pack_v4_catalog.v1.json#/packs/rumi_shell_policy_pack"
   },

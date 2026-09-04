@@ -439,12 +439,12 @@
     {
       "path": "packs/rumi_shell_policy_pack.executables.v4.json",
       "kind": "executable_catalog",
-      "digest": "sha256:16217dc25072e1ae4ff4d5f489c55d6def5e0451d77e45a0951cdbad6f929fa5"
+      "digest": "sha256:66740154a6a4dc1a9b0fc51c92aae4251c007ff3e0f7a61fae9764250d292b05"
     },
     {
       "path": "packs/rumi_shell_policy_pack.pack.v4.json",
       "kind": "pack",
-      "digest": "sha256:ded503f3d245214e952a2821a3328aac3155a389a658d903ba9d705d9edbb012"
+      "digest": "sha256:4e80a13f34b1a54254a2afba1bd21dbd5307ade8deb475dfee38fd2597bb681c"
     },
     {
       "path": "packs/rumi_slack_connector_pack.executables.v4.json",

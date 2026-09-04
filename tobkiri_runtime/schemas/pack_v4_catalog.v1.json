@@ -12651,6 +12651,7 @@
       ],
       "legacy_operations": [],
       "migration": {
+        "compatibility": "none",
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
       },

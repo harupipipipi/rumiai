@@ -236,6 +236,7 @@ fn main() {
             "debug_approval_status",
             "arm_debug_approval",
             "revoke_debug_approval",
+            "reauthorize_panel_session",
             "coding_approval_operator",
             "open_authority_approval_window",
             "authority_approval_context",

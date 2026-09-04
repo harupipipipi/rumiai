@@ -95,7 +95,16 @@ fn validate_presentation_caller_context(
     Ok(())
 }
 
-fn validate_presentation_caller(window: &WebviewWindow, config: &AppConfig) -> Result<(), String> {
+/// Reject IPC that does not originate from the live Launcher panel.
+///
+/// Tauri capabilities intentionally allow both loopback host spellings and a
+/// dynamic port so a restarted Kernel can continue to use IPC.  Callers must
+/// still pass this live-WebView check; a loopback capability pattern alone is
+/// not an authentication boundary.
+pub(crate) fn validate_presentation_caller(
+    window: &WebviewWindow,
+    config: &AppConfig,
+) -> Result<(), String> {
     let url = window.url().map_err(|error| {
         error!("presentation IPC caller inspection failed: {error}");
         PRESENTATION_CALLER_DENIED.to_string()
@@ -2134,6 +2143,13 @@ mod tests {
         serde_json::from_str(include_str!("../capabilities/presentation-control.json")).unwrap()
     }
 
+    fn panel_session_reauthorization_capability() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../capabilities/panel-session-reauthorization.json"
+        ))
+        .unwrap()
+    }
+
     fn capability_allows_origin(
         capability: &serde_json::Value,
         window_label: &str,
@@ -2201,6 +2217,72 @@ mod tests {
         assert_eq!(
             control["remote"]["urls"],
             serde_json::json!(["http://127.0.0.1:*/*", "http://localhost:*/*"])
+        );
+    }
+
+    #[test]
+    fn panel_session_reauthorization_acl_is_narrow_and_uses_live_caller_checks() {
+        // The broad port pattern deliberately survives an authenticated Kernel
+        // restart. It is safe only because the command shares the strict live
+        // Launcher-panel caller validation used by presentation commands.
+        let capability = panel_session_reauthorization_capability();
+        assert_eq!(capability["local"], false);
+        assert_eq!(capability["windows"], serde_json::json!(["main"]));
+        assert_eq!(
+            capability["remote"]["urls"],
+            serde_json::json!(["http://127.0.0.1:*/*", "http://localhost:*/*"])
+        );
+        assert_eq!(
+            capability_permissions(&capability),
+            vec!["allow-reauthorize-panel-session"]
+        );
+
+        for origin in [
+            "http://127.0.0.1:8765/panel/",
+            "http://localhost:8765/panel/setup",
+            "http://127.0.0.1:18772/panel/?code=after-restart",
+        ] {
+            assert!(capability_allows_origin(&capability, "main", origin));
+        }
+
+        for label in ["defaultspack-main", "authority-approval", "panel"] {
+            assert!(!capability_allows_origin(
+                &capability,
+                label,
+                "http://127.0.0.1:8765/panel/"
+            ));
+        }
+        for origin in [
+            "tauri://localhost/panel/",
+            "https://127.0.0.1:8765/panel/",
+            "http://example.invalid:8765/panel/",
+        ] {
+            assert!(!capability_allows_origin(&capability, "main", origin));
+        }
+
+        // A forged page can match the capability's loopback wildcard but
+        // cannot reauthorize: the Rust check binds it to the configured port
+        // and the /panel route before the command gets a session code.
+        let forged = Url::parse("http://127.0.0.1:8766/console").unwrap();
+        assert!(capability_allows_origin(
+            &capability,
+            "main",
+            forged.as_str()
+        ));
+        assert_eq!(
+            validate_presentation_caller_context("main", &forged, LAUNCHER_PANEL_PORT),
+            Err(PresentationCallerDenial::Port)
+        );
+
+        let wrong_route = Url::parse("http://127.0.0.1:8765/console").unwrap();
+        assert!(capability_allows_origin(
+            &capability,
+            "main",
+            wrong_route.as_str()
+        ));
+        assert_eq!(
+            validate_presentation_caller_context("main", &wrong_route, LAUNCHER_PANEL_PORT),
+            Err(PresentationCallerDenial::Route)
         );
     }
 

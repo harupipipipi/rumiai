@@ -4021,6 +4021,14 @@ mod tests {
             &ordinary_application
         ));
 
+        let mut ordinary_sandbox = host_extension.clone();
+        ordinary_sandbox["pack"]["kind"] = Value::String("normal_sandbox".into());
+        assert!(!profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &ordinary_sandbox
+        ));
+
         let mut unknown_compatibility = host_extension;
         unknown_compatibility["migration"]["compatibility"] = Value::String("legacy".into());
         assert!(!profile_pack_migration_is_admissible(
