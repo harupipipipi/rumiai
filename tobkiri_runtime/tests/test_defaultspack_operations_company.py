@@ -32,13 +32,12 @@ def _reset_defaultspack_singletons():
     ToolRegistry._instance = None
 
 
-def test_operations_company_profile_coexists_with_default_profile():
+def test_operations_company_catalog_owns_its_company_profiles():
     from domain.capability.catalog import CapabilityCatalog
 
     manifest = CapabilityCatalog(DEFAULTSPACK_ROOT).manifest()
     profile_ids = {profile["profile_id"] for profile in manifest["profiles"]}
 
-    assert "defaultspack.local_agent" in profile_ids
     assert "defaultspack.operations_company" in profile_ids
     assert "defaultspack.mimo_coding_company" in profile_ids
     assert manifest["counts"]["profiles"] >= 2

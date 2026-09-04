@@ -402,7 +402,11 @@ def test_production_composition_registers_only_verified_direct_vz_facts(
     monkeypatch.setattr(macos_vz_supervisor, "MacOSVZSupervisorDriver", CapturedDriver)
     monkeypatch.setattr(platform_backends, "MacOSVZBackend", CapturedBackend)
 
-    backend = _authenticated_packvm_backend(Lifecycle())
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_packvm_backend_factory,
+    )
+
+    backend = defaultspack_packvm_backend_factory(Lifecycle())()
 
     assert isinstance(backend, CapturedBackend)
     assert transport_factory_calls == []

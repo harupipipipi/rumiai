@@ -431,11 +431,13 @@ class CommandProtocolRegistry:
                 },
             }
             try:
-                self.events.set_state(
+                self.events.settle_terminal(
                     operation_id,
                     "failed",
                     owner_key=owner_key,
                     result=failure,
+                    event_type="failed",
+                    event_payload={"error": failure["error"]},
                     expected_states={"executing"},
                     lease_id=resume_lease_id,
                 )
@@ -445,12 +447,6 @@ class CommandProtocolRegistry:
                     owner_key,
                     payload,
                 )
-            self.events.append(
-                operation_id,
-                "failed",
-                {"error": failure["error"]},
-                owner_key=owner_key,
-            )
             failure["progress"] = self.events.snapshot(
                 operation_id,
                 owner_key=owner_key,
@@ -464,22 +460,6 @@ class CommandProtocolRegistry:
         approval_request_id = str(
             (result.get("approval") or {}).get("request_id") or ""
         ) or None
-        try:
-            self.events.set_state(
-                operation_id,
-                str(result.get("status") or "failed"),
-                owner_key=owner_key,
-                result=result,
-                approval_request_id=approval_request_id,
-                expected_states={"executing"},
-                lease_id=resume_lease_id,
-            )
-        except InvocationEventError:
-            return self._state_conflict_result(
-                operation_id,
-                owner_key,
-                payload,
-            )
         audit_projection = {
             "command_ref": result.get("command_ref"),
             "state_change_refs": [
@@ -492,15 +472,39 @@ class CommandProtocolRegistry:
             "approval_request_id": approval_request_id,
         }
         try:
-            self.events.append(
+            if event_type in {"completed", "failed"}:
+                self.events.settle_terminal(
+                    operation_id,
+                    str(result.get("status") or "failed"),
+                    owner_key=owner_key,
+                    result=result,
+                    event_type=event_type,
+                    event_payload=audit_projection,
+                    approval_request_id=approval_request_id,
+                    expected_states={"executing"},
+                    lease_id=resume_lease_id,
+                )
+            else:
+                self.events.set_state(
+                    operation_id,
+                    str(result.get("status") or "failed"),
+                    owner_key=owner_key,
+                    result=result,
+                    approval_request_id=approval_request_id,
+                    expected_states={"executing"},
+                    lease_id=resume_lease_id,
+                )
+                self.events.append(
+                    operation_id,
+                    event_type,
+                    audit_projection,
+                    owner_key=owner_key,
+                )
+        except InvocationEventError:
+            return self._state_conflict_result(
                 operation_id,
-                event_type,
-                audit_projection,
-                owner_key=owner_key,
-            )
-        except Exception:
-            result["progress_storage_warning"] = (
-                "operation result is durable but its terminal audit event failed"
+                owner_key,
+                payload,
             )
         result["progress"] = self.events.snapshot(
             operation_id,
@@ -765,23 +769,65 @@ class CommandProtocolRegistry:
         payload: dict[str, Any],
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        from domain.safety.approval import (
-            create_approval_request,
-            hash_arguments,
-            verify_execution_token,
-        )
-
         execution = (
             command.get("execution")
             if isinstance(command.get("execution"), dict)
             else {}
         )
         action = str(execution.get("action") or "").strip()
-        args = (
+        raw_args = (
             legacy_payload.get("args")
             if isinstance(legacy_payload.get("args"), dict)
             else {}
         )
+        if execution.get("type") != "frontend" or action not in LEGACY_FRONTEND_HANDLERS:
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                "HOST_OPERATION_NOT_REGISTERED",
+                "approved host operation is not registered",
+            )
+        authorization = (
+            resolved.get("authorization")
+            if isinstance(resolved.get("authorization"), dict)
+            else {}
+        )
+        policy_ref = str(authorization.get("executor_policy_ref") or "")
+        policy = EXECUTOR_POLICIES.get(policy_ref)
+        if policy is None or policy.get("high_risk") is not True:
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                "EXECUTOR_POLICY_DENIED",
+                "high-risk command executor policy is not registered",
+            )
+        if str(legacy_payload.get("mode") or "chat") not in command.get("modes", []):
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                "COMMAND_UNAVAILABLE",
+                "command is not available in this mode",
+            )
+        args = self.operations.source_registry.coerce_operation_args(
+            command,
+            raw_args,
+        )
+        if isinstance(args, dict) and args.get("status") == "error":
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                str((args.get("error") or {}).get("code") or "INVALID_COMMAND"),
+                str((args.get("error") or {}).get("message") or "command arguments are invalid"),
+            )
+        try:
+            self.operations.binding_contract(command, resolved)
+        except ValueError as exc:
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                "HOST_OPERATION_NOT_REGISTERED",
+                str(exc),
+            )
         try:
             operation_plan = self.operations.prepare_high_risk_plan(
                 action,
@@ -789,131 +835,35 @@ class CommandProtocolRegistry:
                 context,
             )
         except ValueError as exc:
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "failed",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "error": {
-                    "code": "OPERATION_PLAN_INVALID",
-                    "message": str(exc),
-                },
-            }
-        authority_result = self._enforce_runtime_authority(
+            return self._high_risk_failure(
+                resolved,
+                legacy_payload,
+                "OPERATION_PLAN_INVALID",
+                str(exc),
+            )
+        return self._enforce_runtime_authority(
             resolved,
             legacy_payload,
             payload,
             context,
             operation_plan,
         )
-        if authority_result is not None:
-            return authority_result
-        operation_binding = {
-            "version": int(operation_plan.get("version") or 1),
-            "action": action,
-            "plan_sha256": str(operation_plan["plan_sha256"]),
-        }
-        approval_args = {
-            "command_ref": resolved["canonical_id"],
-            "operation_id": resolved["execution"].get("operation_ref")
-            or resolved["canonical_id"],
-            "invocation_id": legacy_payload.get("invocation_id"),
-            "args_sha256": hash_arguments(args),
-            "conversation_id": legacy_payload.get("conversation_id"),
-            "mode": legacy_payload.get("mode"),
-            "catalog_revision": self.catalog()["catalog_revision"],
-            "pack_generation": resolved.get("pack_generation"),
-            "owner_key": self._owner_key({}, context),
-            "expected_revision": payload.get("expected_revision"),
-            "operation_binding": operation_binding,
-        }
-        operation = f"command:{resolved['canonical_id']}"
-        approval_token = str(payload.get("approval_token") or "").strip()
-        if not approval_token:
-            request = create_approval_request(
-                operation,
-                str(command.get("risk") or "high"),
-                approval_args,
-                details={
-                    "function_id": action,
-                    "pack_id": PACK_ID,
-                    "conversation_id": str(
-                        legacy_payload.get("conversation_id") or ""
-                    ),
-                    "command_ref": resolved["canonical_id"],
-                    "invocation_id": str(
-                        legacy_payload.get("invocation_id") or ""
-                    ),
-                },
-            )
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "approval_required",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "approval": {
-                    "required": True,
-                    "request_id": request["request_id"],
-                    "expires_at": request["expires_at"],
-                    "permission_ids": resolved.get("authorization", {}).get(
-                        "permissions",
-                        [],
-                    ),
-                    "details": {
-                        "mode": legacy_payload.get("mode"),
-                        "conversation_id": legacy_payload.get("conversation_id"),
-                        "operation_ref": resolved["execution"].get("operation_ref"),
-                        "operation_binding": deepcopy(operation_binding),
-                    },
-                },
-                "message": "Approval is required before this command can resume.",
-                "legacy_result": {
-                    "command": deepcopy(command),
-                    "executed": False,
-                    "requires_approval": True,
-                    "approval_request_id": request["request_id"],
-                    "message": "Approve this request, then resume the command.",
-                },
-            }
 
-        verification = verify_execution_token(
-            approval_token,
-            operation,
-            hash_arguments(approval_args),
-            consume=True,
-            pack_id=PACK_ID,
-            conversation_id=str(legacy_payload.get("conversation_id") or ""),
-        )
-        if not verification.valid:
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "failed",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "error": {
-                    "code": verification.code,
-                    "message": verification.message,
-                },
-            }
-        if execution.get("type") != "frontend" or action not in LEGACY_FRONTEND_HANDLERS:
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "failed",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "error": {
-                    "code": "HOST_OPERATION_NOT_REGISTERED",
-                    "message": "approved host operation is not registered",
-                },
-            }
-        legacy_payload["_approval_verified"] = True
-        legacy_payload["_approval_request_id"] = verification.request_id
-        context["_approved_operation_plan"] = operation_plan
-        return None
+    @staticmethod
+    def _high_risk_failure(
+        resolved: dict[str, Any],
+        legacy_payload: dict[str, Any],
+        code: str,
+        message: str,
+    ) -> dict[str, Any]:
+        return {
+            "api_version": API_VERSION,
+            "operation_id": str(legacy_payload.get("invocation_id") or ""),
+            "status": "failed",
+            "command_ref": resolved["canonical_id"],
+            "state_changes": [],
+            "error": {"code": code, "message": message},
+        }
 
     def _enforce_runtime_authority(
         self,
@@ -942,82 +892,6 @@ class CommandProtocolRegistry:
                     "message": "high-risk command executor policy is not registered",
                 },
             }
-        from core_runtime.legacy_runtime_removed import removed_authority_service
-
-        owner_key = self._owner_key({}, context)
-        principal_id, _, profile_id = owner_key.partition(":")
-        resource = {
-            "kind": "command_host_operation",
-            "pack_id": PACK_ID,
-            "function_id": str(
-                resolved.get("execution", {}).get("operation_ref") or ""
-            ),
-            "metadata": {
-                "command_ref": resolved["canonical_id"],
-                "executor_policy_ref": policy_ref,
-                "operation_plan_sha256": operation_plan["plan_sha256"],
-            },
-        }
-        try:
-            decision = removed_authority_service().check(
-                principal_id=principal_id,
-                permission_id="host.process.exec_guarded",
-                resource=resource,
-                reason="Command Protocol high-risk host operation",
-                conversation_id=str(
-                    legacy_payload.get("conversation_id") or ""
-                )
-                or None,
-                profile_id=profile_id or None,
-                request_id=str(
-                    payload.get("authority_request_id") or ""
-                )
-                or None,
-                approval_token=str(
-                    payload.get("authority_approval_token") or ""
-                )
-                or None,
-                consume_approval_token=bool(payload.get("approval_token")),
-            )
-        except Exception:
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "failed",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "error": {
-                    "code": "AUTHORITY_UNAVAILABLE",
-                    "message": "runtime authority service is unavailable",
-                },
-            }
-        if decision.allowed and not decision.approval_required:
-            return None
-        if decision.approval_required:
-            return {
-                "api_version": API_VERSION,
-                "operation_id": str(legacy_payload.get("invocation_id") or ""),
-                "status": "approval_required",
-                "command_ref": resolved["canonical_id"],
-                "state_changes": [],
-                "approval": {
-                    "required": True,
-                    "kind": "authority",
-                    "request_id": decision.request_id,
-                    "permission_ids": [decision.permission_id],
-                    "details": {
-                        "executor_policy_ref": policy_ref,
-                        "operation_binding": {
-                            "version": int(operation_plan.get("version") or 1),
-                            "action": str(operation_plan.get("action") or ""),
-                            "plan_sha256": str(
-                                operation_plan.get("plan_sha256") or ""
-                            ),
-                        },
-                    },
-                },
-                "message": decision.reason,
-            }
         return {
             "api_version": API_VERSION,
             "operation_id": str(legacy_payload.get("invocation_id") or ""),
@@ -1025,8 +899,11 @@ class CommandProtocolRegistry:
             "command_ref": resolved["canonical_id"],
             "state_changes": [],
             "error": {
-                "code": "AUTHORITY_DENIED",
-                "message": decision.reason or "runtime authority denied execution",
+                "code": "HIGH_RISK_COMMAND_ADAPTER_REQUIRED",
+                "message": (
+                    "high-risk commands must use the captured Host interactive "
+                    "approval adapter"
+                ),
             },
         }
 
@@ -1106,7 +983,10 @@ class CommandProtocolRegistry:
     ) -> dict[str, Any]:
         """Replay queued state commands, preserving explicit conflict results."""
 
-        results: list[dict[str, Any]] = []
+        results = self.offline.reconcile_expired_effect_commits(
+            owner_key=owner_key,
+            limit=limit,
+        )
         worker_id = f"replay:{uuid.uuid4().hex}"
         for record in self.offline.claim_pending(
             limit=limit,
@@ -1115,18 +995,7 @@ class CommandProtocolRegistry:
         ):
             request = record["request"]
             lease_id = str(record["lease_id"])
-            if self.offline.cancellation_requested(
-                record["queue_id"],
-                owner_key=owner_key,
-                lease_id=lease_id,
-            ):
-                result = {
-                    "api_version": API_VERSION,
-                    "status": "cancelled",
-                    "state_changes": [],
-                }
-                terminal_state = "cancelled"
-            elif int(request.get("pack_generation") or -1) != self._pack_generation():
+            if int(request.get("pack_generation") or -1) != self._pack_generation():
                 result = {
                     "api_version": API_VERSION,
                     "status": "failed",
@@ -1136,6 +1005,14 @@ class CommandProtocolRegistry:
                     },
                 }
             else:
+                barrier = self.offline.begin_effect_commit(
+                    record["queue_id"],
+                    owner_key=owner_key,
+                    lease_id=lease_id,
+                )
+                if barrier["status"] == "cancelled":
+                    results.append(barrier["queue"])
+                    continue
                 result = self.invoke(
                     {
                         "command_ref": request["command_ref"],
@@ -1228,11 +1105,13 @@ class CommandProtocolRegistry:
             "state_changes": [],
         }
         try:
-            self.events.set_state(
+            self.events.settle_terminal(
                 invocation_id,
                 "cancelled",
                 owner_key=owner_key,
                 result=result,
+                event_type="cancelled",
+                event_payload={"reason": str(payload.get("reason") or "denied")},
                 expected_states={str(stored["state"])},
             )
         except InvocationEventError:
@@ -1241,12 +1120,6 @@ class CommandProtocolRegistry:
                 owner_key,
                 payload,
             )
-        self.events.append(
-            invocation_id,
-            "cancelled",
-            {"reason": str(payload.get("reason") or "denied")},
-            owner_key=owner_key,
-        )
         result["progress"] = self.events.snapshot(
             invocation_id,
             owner_key=owner_key,
@@ -1281,21 +1154,17 @@ class CommandProtocolRegistry:
             "state_changes": [],
         }
         try:
-            self.events.set_state(
+            self.events.settle_terminal(
                 invocation_id,
                 terminal,
                 owner_key=owner_key,
                 result=result,
+                event_type=terminal,
+                event_payload={"approval_request_id": request_id},
                 expected_states={"approval_required"},
             )
         except InvocationEventError:
             return
-        self.events.append(
-            invocation_id,
-            terminal,
-            {"approval_request_id": request_id},
-            owner_key=owner_key,
-        )
 
     def query_datasource(self, payload: dict[str, Any]) -> dict[str, Any]:
         datasource_ref = str(payload.get("datasource_ref") or "").strip()
@@ -1416,6 +1285,12 @@ class CommandProtocolRegistry:
                 "executor_policy_ref": "tobkiri.command.standard",
             },
         )
+        # The five high-risk command presentations stay available.  The
+        # browser routes them to the signed Host Adapter at
+        # ``/api/command-protocol/v1/high-risk`` before it can request an
+        # approval or execute.  Marking them unavailable here would disable
+        # that sole approved path in the Composer, even though the Host
+        # adapter and its one-shot interactive approval port are captured.
         return {
             "canonical_id": canonical_id,
             "pack_id": PACK_ID,

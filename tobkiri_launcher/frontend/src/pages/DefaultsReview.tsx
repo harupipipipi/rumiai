@@ -1,4 +1,7 @@
+import {AlertCircle, ShieldAlert} from 'lucide-react';
+
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import type {DefaultsSetupState} from '@/src/lib/defaultsSetup';
 
 type Props = {
@@ -26,7 +29,7 @@ export function DefaultsReview({
 }: Props) {
   const canActivate = setup?.state === 'review_required' && !activationCommitted;
   return <section className="rounded-[18px] border border-border bg-bg-card p-7 shadow-lg" aria-labelledby="defaults-review-title">
-    <p className="text-xs font-medium uppercase tracking-wider text-text-muted">Defaults v4 bootstrap</p>
+    <p className="text-xs font-medium text-text-muted">Defaults v4 bootstrap</p>
     <h1 id="defaults-review-title" className="mt-3 text-2xl font-semibold text-text-main">
       {reconfirmationRequired ? 'Profile reconfirmation required' : 'Activate Defaults Profile'}
     </h1>
@@ -41,9 +44,11 @@ export function DefaultsReview({
       <div className="mt-4"><Button variant="outline" onClick={onRecover} loading={activating}>Verify activation</Button></div>
     </div>}
     {!setup && !error && <p role="status" className="mt-6 text-sm text-text-muted">Loading verified catalog…</p>}
-    {setup?.state === 'activation_denied' && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">
-      {setup.denial_diagnostic}
-    </p>}
+    {setup?.state === 'activation_denied' && <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">
+      <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" data-error-icon="activation-denied" />
+      <p className="min-w-0 flex-1 break-words">{setup.denial_diagnostic}</p>
+      <CopyErrorButton label="Copy activation denial" text={setup.denial_diagnostic} />
+    </div>}
     {setup && <div className="mt-6 space-y-3 text-sm">
       <Identity label="Base" value={setup.recommended_default_profile.base_pack} />
       <Identity label="Shell" value={setup.recommended_default_profile.shell.provider_id} />
@@ -74,7 +79,7 @@ export function DefaultsReview({
       </label>
       <Button size="lg" className="w-full" disabled={!reviewed || activating || !canActivate} loading={activating} onClick={onActivate}>Activate Defaults Profile</Button>
     </div>}
-    {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
+    {error && <div role="alert" className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500"><AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" data-error-icon="setup" /><p className="min-w-0 flex-1 break-words">{error}</p><CopyErrorButton label="Copy setup error" text={error} /></div>}
   </section>;
 }
 

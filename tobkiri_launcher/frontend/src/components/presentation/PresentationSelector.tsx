@@ -18,6 +18,7 @@ import {
 } from '@/src/lib/presentation';
 import { Badge } from '@/src/components/ui/Badge';
 import { Button } from '@/src/components/ui/Button';
+import { CopyErrorButton } from '@/src/components/ui/CopyErrorButton';
 import { Card } from '@/src/components/ui/Card';
 
 export interface PresentationSelectorProps {
@@ -60,7 +61,7 @@ function AuthoritySummary({
       <div className="flex items-start gap-2">
         <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">{label} authority</p>
+          <p className="text-xs font-semibold text-text-muted">{label} authority</p>
           <p className="mt-1 text-sm font-medium text-text-main">{authorityLabel(authority.authority_mode)}</p>
           <p className="mt-1 text-xs leading-5 text-text-muted">{authority.blast_radius}</p>
         </div>
@@ -97,7 +98,7 @@ function IdentitySummary({
   return (
     <Card className="p-5" data-testid="presentation-profile-identity">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">
+        <p className="text-xs font-semibold text-text-muted">
           Verified profile identity
         </p>
         <p className="mt-2 text-sm leading-6 text-text-muted">
@@ -106,11 +107,11 @@ function IdentitySummary({
       </div>
       <dl className="mt-4 grid gap-x-6 gap-y-3 text-xs text-text-muted sm:grid-cols-2">
         <div>
-          <dt className="font-medium text-text-main">Default profile</dt>
+          <dt className="font-medium text-text-main">Selected catalog Profile</dt>
           <dd className="mt-1 break-words">{state.catalog.default_profile_id}</dd>
         </div>
         <div>
-          <dt className="font-medium text-text-main">Profile source</dt>
+          <dt className="font-medium text-text-main">Catalog source</dt>
           <dd className="mt-1 break-words">{state.catalog.default_profile_source}</dd>
         </div>
         <div data-testid="default-profile-digest">
@@ -181,7 +182,7 @@ export function PresentationSelector({
   return (
     <div className="space-y-5" data-testid="presentation-selector">
       <div>
-        <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">Presentation</p>
+        <p className="text-xs font-medium text-text-muted">Presentation</p>
         <h2 className="mt-2 text-xl font-semibold tracking-[-.02em] text-text-main">
           Choose a Base Pack, then its Shell
         </h2>
@@ -197,7 +198,8 @@ export function PresentationSelector({
       {error ? (
         <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-main">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-          <span>{error}</span>
+          <span className="min-w-0 flex-1 break-words">{error}</span>
+          <CopyErrorButton label="Copy presentation error" text={error} />
         </div>
       ) : null}
 
@@ -288,8 +290,10 @@ export function PresentationSelector({
             );
           })}
           {selectedBase && compatibleShells.length === 0 ? (
-            <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-muted">
-              No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family.
+            <div role="alert" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-text-muted">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+              <span className="min-w-0 flex-1">No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family.</span>
+              <CopyErrorButton label="Copy Shell Provider error" text="No Shell Provider satisfies this Base Pack's required capabilities. The Launcher will not fall back to another presentation family." />
             </div>
           ) : null}
         </div>
@@ -298,7 +302,7 @@ export function PresentationSelector({
       <Card className="p-5" data-testid="presentation-materialization">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">Selected presentation</p>
+            <p className="text-xs font-semibold text-text-muted">Selected presentation</p>
             <p className="mt-2 text-sm font-semibold text-text-main">
               {materializationLabel(state.materialization)}
             </p>

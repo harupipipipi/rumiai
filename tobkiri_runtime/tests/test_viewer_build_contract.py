@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 pytestmark = pytest.mark.contract
@@ -78,13 +79,20 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _read_yaml(path: Path) -> dict:
+    """Read one workflow document with its YAML structure intact."""
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    return document
+
+
 def test_tauri_hooks_prepare_runtime_for_dev_and_release():
     config = _read_json(TAURI_CONFIG)
 
-    assert (
-        "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev"
-        in config["build"]["beforeDevCommand"]
-    )
+    before_dev = config["build"]["beforeDevCommand"]
+    assert isinstance(before_dev, dict)
+    assert before_dev["wait"] is True
+    assert "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev" in before_dev["script"]
     assert (
         "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release"
         in config["build"]["beforeBuildCommand"]
@@ -106,14 +114,22 @@ def test_local_startup_splash_has_progress_authority_and_visible_failures():
     assert ".catch(function () {})" not in splash
 
 
-def test_local_startup_splash_can_copy_the_complete_error_message():
+def test_local_startup_splash_copies_visible_startup_failures_without_react():
     splash = STARTUP_SPLASH.read_text(encoding="utf-8")
 
     assert 'id="copy-error"' in splash
-    assert 'aria-label="Copy error message"' in splash
-    assert "copyError.hidden = type !== 'error'" in splash
+    assert 'copyButton.hidden = type !== \'error\';' in splash
+    assert "function copyStartupError()" in splash
     assert "navigator.clipboard.writeText(errorMessage)" in splash
-    assert "fallbackCopy(errorMessage)" in splash
+    assert "function fallbackCopy(text)" in splash
+    assert "document.execCommand('copy')" in splash
+    assert "Startup error copied to the clipboard." in splash
+    assert "Could not copy the startup error." in splash
+    assert 'class="copy-icon"' in splash
+    assert '<svg aria-hidden="true" class="copy-icon"' in splash
+    assert "copyButton.textContent" not in splash
+    assert "⧉" not in splash
+    assert "copyButton.textContent = copied ? '✓' : '!';" not in splash
 
 
 def test_remote_panel_can_only_invoke_the_declared_session_renewal_command():
@@ -197,14 +213,15 @@ def test_ci_uses_tauri_as_the_single_release_preparation_entrypoint():
     for workflow in VIEWER_BUILD_WORKFLOWS:
         contents = workflow.read_text(encoding="utf-8")
         build_contents = contents.split("\n  gather:", 1)[0]
-        assert "cargo tauri build" in build_contents
+        assert "scripts/run_tauri_build.py build" in build_contents
         assert "Prepare bundled Rumi runtime" not in build_contents
         assert "python .github/scripts/prepare_tauri_resources.py" not in build_contents
         rootless_at = build_contents.index("Build rootless sealed packaging Python")
         source_at = build_contents.index("Resolve checked-out source revision")
         assert rootless_at < source_at
         cargo_positions = [
-            match.start() for match in re.finditer(r"cargo tauri build", build_contents)
+            match.start()
+            for match in re.finditer(r"scripts/run_tauri_build\.py build", build_contents)
         ]
         assert cargo_positions and all(position > source_at for position in cargo_positions)
         clean_at = build_contents.index("source_clean = subprocess.run(")
@@ -520,11 +537,12 @@ def test_package_macos_dmg_retains_identity_verification_without_guard_attach():
         encoding="utf-8"
     )
     release_macos = release_workflow[
-        release_workflow.index("Build signed macOS application") :
+        release_workflow.index("Build unsigned macOS application") :
     ]
     assert "--bundles app" in release_macos
     assert "scripts/package_macos_dmg.sh" in release_macos
     assert "2>&1 | tee" in release_macos
+    assert "--ad-hoc" in release_macos
 
     for workflow in (desktop_workflow, release_workflow):
         assert "Capture macOS installer diagnostics" in workflow
@@ -621,7 +639,7 @@ def test_release_pack_shell_rebuilds_from_empty_or_cached_targets_and_seals_both
     rust_test_at = contents.index("Run Rust release smoke tests")
     release_build_at = contents.index("Build release Pack Shell for verified Tauri Shell artifact")
     release_seal_at = contents.index("Seal release Pack Shell for verified Tauri Shell artifact")
-    shell_build_at = contents.index("Build verified Tauri Shell artifact")
+    shell_build_at = contents.index("Build unsigned Tauri Shell artifact")
 
     assert clean_at < debug_build_at < debug_seal_at < rust_test_at
     assert rust_test_at < release_build_at < release_seal_at < shell_build_at
@@ -669,82 +687,88 @@ def test_build_and_sign_rebuilds_canonical_defaultspack_before_staging():
     assert "DEFAULTSPACK_WEBAPP_ROOT" in helper
 
 
-def test_release_platform_signing_is_fail_closed_and_ad_hoc_is_dev_only():
+def test_release_is_a_single_unsigned_ad_hoc_macos_artifact_path():
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-    release_gate = RELEASE_GATE.read_text(encoding="utf-8")
+    release = _read_yaml(RELEASE_WORKFLOW)
     verifier = MACOS_RELEASE_VERIFIER.read_text(encoding="utf-8")
-    mac_config = _read_json(MACOS_CONFIG)
-    dev_config = _read_json(MACOS_DEV_CONFIG)
+    build = release["jobs"]["build"]
+    matrix = build["strategy"]["matrix"]["include"]
+    assert matrix == [
+        {
+            "os": "macos-latest",
+            "target": "aarch64-apple-darwin",
+            "shell_bundles": "app",
+            "signing_args": "--no-sign",
+            "presentation_variant": "shell.tauri.default.macos-arm64",
+            "presentation_platform": "macos",
+            "presentation_architecture": "arm64",
+        }
+    ]
 
-    for required in (
-        "APPLE_CERTIFICATE_BASE64",
-        "APPLE_CERTIFICATE_PASSWORD",
-        "APPLE_SIGNING_IDENTITY",
-        "APPLE_ID",
-        "APPLE_APP_SPECIFIC_PASSWORD",
-        "APPLE_TEAM_ID",
-        "scripts/release_gate.py sign-artifacts",
-    ):
-        assert required in workflow
+    steps = {
+        step["name"]: step
+        for step in build["steps"]
+        if isinstance(step, dict) and isinstance(step.get("name"), str)
+    }
+    shell_build = steps["Build unsigned Tauri Shell artifact"]["run"]
+    app_build = steps["Build unsigned macOS application"]["run"]
+    for build_command in (shell_build, app_build):
+        assert "scripts/run_tauri_build.py build" in build_command
+        assert "${{ matrix.signing_args }}" in build_command
+    assert "tauri.shell.conf.json" in shell_build
+    assert "--bundles app" in app_build
 
-    for required in (
-        "signtool.exe",
-        '"sign"',
-        '"verify"',
-        '"notarytool"',
-        '"stapler"',
-        '"spctl"',
-        '"ditto"',
-    ):
-        assert required in release_gate
+    signing = steps[
+        "Stage and ad-hoc sign macOS PackVM VZ helper and application"
+    ]["run"]
+    assert signing.count("/usr/bin/codesign --force --sign - --timestamp=none") == 2
+    assert "--identifier dev.tobkiri.launcher.packvm-vz-helper" in signing
+    assert "--expected-signing-mode ad-hoc" in signing
+    assert "test \"$bundle_identifier\" = dev.rumiai.app" in signing
+    assert "Signature=adhoc" in signing
 
-    for required in (
-        "Developer ID Application: ",
-        "codesign --verify --deep --strict",
-        "codesign --display --verbose=4",
-        "Authority=-",
-    ):
-        assert required in verifier
+    app_verification = steps["Verify ad-hoc macOS application"]["run"]
+    assert "scripts/verify_macos_release.sh" in app_verification
+    assert "Tobkiri Launcher.app" in app_verification
+    dmg_build = steps["Build macOS DMG installer"]["run"]
+    assert "--ad-hoc" in dmg_build
+    assert "--signing-identity" not in dmg_build
 
-    assert mac_config["bundle"]["targets"] == ["dmg"]
-    assert "signingIdentity" not in mac_config["bundle"].get("macOS", {})
-    assert dev_config["bundle"]["macOS"]["signingIdentity"] == "-"
-    assert "tauri.macos.dev.conf.json" not in workflow
-    desktop_workflow = (
-        ROOT / ".github" / "workflows" / "desktop-installers.yml"
-    ).read_text(encoding="utf-8")
-    assert "--config src-tauri/tauri.macos.dev.conf.json" in desktop_workflow
-    assert "--ci-e2e-cert-sha256" in desktop_workflow
     for forbidden in (
-        "--allow-ad-hoc-local",
-        "add-trusted-cert",
-        "create-keychain",
-        "set-key-partition-list",
-        "security ",
         "APPLE_CERTIFICATE",
         "APPLE_SIGNING_IDENTITY",
         "APPLE_TEAM_ID",
-        "Developer ID",
-        "softprops/action-gh-release",
-        "Upload one reviewable draft release",
+        "APPLE_ID",
+        "APPLE_PASSWORD",
+        "Developer ID Application:",
+        "sign-artifacts",
+        "staple",
+        "--signing-identity",
+        "TOBKIRI_MACOS_ARTIFACT_POLICY",
+        "ci-e2e",
     ):
-        assert forbidden not in desktop_workflow
-    assert "--allow-ad-hoc-local" not in workflow
-    assert "TOBKIRI_MACOS_ARTIFACT_POLICY" not in workflow
-    assert "ci-e2e" not in workflow
+        assert forbidden not in workflow
+    assert not any(
+        "notar" in name.lower() or "staple" in name.lower()
+        for name in steps
+    )
 
-    verify_at = workflow.index("Verify Developer ID signed macOS application")
-    dmg_at = workflow.index("Build macOS DMG installer")
-    notarize_at = workflow.index("Notarize and staple macOS release DMG")
-    upload_at = workflow.index("Upload one reviewable draft release")
-    assert verify_at < dmg_at < notarize_at < upload_at
-    assert "WINDOWS_CERTIFICATE_BASE64" not in workflow
-    assert "WINDOWS_CERTIFICATE_PASSWORD" not in workflow
-    assert "Sign and verify Windows installer" not in workflow
-    assert "Linux" not in workflow
-    assert set(re.findall(r"(?:aarch64|x86_64)-apple-darwin", workflow)) == {
-        "aarch64-apple-darwin"
-    }
+    assert "dev.rumiai.app" in verifier
+    assert "Signature=adhoc" in verifier
+    assert "Developer ID" not in verifier
+    assert "--signing-identity" not in verifier
+    assert "codesign --verify --strict --all-architectures" in verifier
+
+    upload_step = next(
+        step
+        for step in release["jobs"]["gather"]["steps"]
+        if step.get("name") == "Upload one reviewable draft release"
+    )
+    upload = upload_step["with"]
+    assert upload["draft"] is True
+    assert upload["generate_release_notes"] is True
+    assert "unsigned/ad-hoc" in upload["body"]
+    assert "not notarized" in upload["body"]
 
 
 def test_pack_shell_profile_is_a_single_safe_path_component():

@@ -74,7 +74,9 @@ export interface ApiFrontendContribution {
   route?: string;
   owner_pack_hash?: string;
   build_identity?: string;
+  resolved_profile_id?: string;
   resolved_profile_revision?: string;
+  resolved_activation_id?: string;
   resolved_plan_hash?: string;
   descriptor_hash?: string;
   view?: {type?: string} | null;
@@ -94,6 +96,7 @@ export interface ApiDynamicFrontendCatalog {
   version: string;
   profile_id: string;
   profile_revision: string;
+  activation_id: string;
   plan_hash: string;
   contributions: ApiFrontendContribution[];
   diagnostics: ApiFrontendDiagnostic[];
@@ -109,6 +112,8 @@ export interface ApiUiCatalogData {
 
 export interface FrontendCapabilityInvocation {
   profileId: string;
+  profileRevision: string;
+  activationId: string;
   planHash: string;
   catalogHash: string;
   contributionId: string;
@@ -558,6 +563,11 @@ export interface HealthResponseData {
   runtime_ready: boolean;
   runtime_status: RuntimeStatus;
   runtime_error: string | null;
+  host_catalog_verified: boolean;
+  profile_ceremony_available: boolean;
+  active_profile_ready: boolean;
+  launch_ready: boolean;
+  defaults_bootstrap_required: boolean;
 }
 
 export interface WindowRuntimeSnapshot {

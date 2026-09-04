@@ -130,6 +130,8 @@ def _minimal_v4_stage(tmp_path: Path) -> Path:
         "contracts.v4.json",
         "artifact-index.v4.json",
         "executables.v4.json",
+        "host_contract_contributions.v1.json",
+        "update_metadata.v1.json",
     ):
         shutil.copy2(DEFAULTSPACK_ROOT / filename, pack_root / filename)
     shutil.copytree(
@@ -248,6 +250,21 @@ def test_stage_uv_only_uses_private_external_root_without_checkout_mutation(
     assert module.main() == 0
     assert calls == [output_root]
     assert output_root.stat().st_mode & 0o077 == 0
+
+
+def test_clean_checkout_creates_private_tauri_resource_owner_root(
+    tmp_path: Path,
+) -> None:
+    """Resource cleanup has a descriptor-bindable owner on a clean checkout."""
+    module = _load_prepare_tauri_resources()
+    repository = (tmp_path / "repository").resolve()
+    (repository / "tobkiri_launcher/src-tauri").mkdir(parents=True)
+
+    owner_root = module.ensure_resource_owner_root(repository)
+
+    assert owner_root == repository / module.APP_RESOURCE_OWNER_DIR
+    assert stat.S_IMODE(owner_root.stat().st_mode) == 0o700
+    assert module.ensure_resource_owner_root(repository) == owner_root
 
 
 def test_formal_sealed_resource_uses_producer_snapshot_without_rebuilding(
@@ -822,6 +839,7 @@ def test_staged_bootstrap_import_and_resource_manifest_are_self_contained(tmp_pa
     assert "core_runtime/bootstrap/runtime.py" in paths
     assert "tobkiri_host/runtime.py" in paths
     assert "tobkiri_host/composition.py" in paths
+    assert "tobkiri_host/credential_store.py" in paths
     assert "tobkiri_host/extension_sdk.py" in paths
     assert "tobkiri_host/platform_backends.py" in paths
     assert "tobkiri_host/tauri_roles.py" in paths

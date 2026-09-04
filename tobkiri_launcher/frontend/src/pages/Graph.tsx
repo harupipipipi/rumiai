@@ -56,12 +56,12 @@ export function Graph() {
             {visibleBindings.map((binding) => (
               <div key={binding.binding_id} className="flex flex-col gap-3 rounded-lg border border-border bg-bg-main p-4 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Function principal</p>
+                  <p className="text-xs font-medium text-text-muted">Function principal</p>
                   <p className="mt-1 break-all font-mono text-xs text-text-main">{binding.source_principal_id}</p>
                 </div>
                 <ArrowRight className="hidden h-4 w-4 shrink-0 text-text-muted sm:block" aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Contract / operation</p>
+                  <p className="text-xs font-medium text-text-muted">Contract / operation</p>
                   <p className="mt-1 break-all font-mono text-xs text-text-main">{binding.target_contract_id} / {binding.operation_id}</p>
                 </div>
                 <Badge variant="outline">{binding.binding_id}</Badge>

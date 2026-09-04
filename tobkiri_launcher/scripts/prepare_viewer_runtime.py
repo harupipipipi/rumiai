@@ -17,6 +17,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Mapping, Sequence
 
+sys.dont_write_bytecode = True
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TAURI_TARGET_ENV = "TAURI_ENV_TARGET_TRIPLE"
 UV_PATH_ENV = "RUMI_UV_PATH"
@@ -124,14 +126,16 @@ def run_command(
     capture_output: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    environment = dict(os.environ if env is None else env)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.run(
         [os.fspath(part) for part in command],
         cwd=cwd,
         check=True,
+        env=environment,
         text=True,
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,
-        env=None if env is None else dict(env),
     )
 
 
@@ -276,6 +280,7 @@ def sign_development_macos_app(application: Path) -> None:
 
 
 def prepare_dev_pack_shell(repo_root: Path, target: str) -> Path:
+    """Build and stage the verified checkout Pack Shell."""
     manifest = repo_root / "pack-shell" / "Cargo.toml"
     run_command(
         ["cargo", "build", "--target", target, "--manifest-path", manifest],
@@ -316,6 +321,7 @@ def _git_identity(repo_root: Path, revision: str) -> str:
 
 
 def prepare_dev_defaults(repo_root: Path, target: str) -> Path:
+    """Build a development Defaults bundle from verified clean source."""
     launcher_root = repo_root / "tobkiri_launcher"
     runtime_root = repo_root / "tobkiri_runtime"
     spec = _target_shell_spec(repo_root, target)
@@ -367,6 +373,16 @@ def prepare_dev_defaults(repo_root: Path, target: str) -> Path:
     provenance = runtime_root / SOURCE_PROVENANCE_FILENAME
     if provenance.exists() or provenance.is_symlink():
         raise RuntimeError(f"Refusing to replace existing source provenance: {provenance}")
+    source_status = run_command(
+        ["git", "status", "--porcelain", "--untracked-files=normal"],
+        cwd=repo_root,
+        capture_output=True,
+    )
+    if source_status.stdout.strip():
+        raise RuntimeError(
+            "Development Defaults packaging requires committed source changes; "
+            "refusing to attest a modified checkout as clean."
+        )
     payload = {
         "schema": "io.tobkiri.packaging-source-provenance.v1",
         "source_commit": _git_identity(repo_root, "HEAD"),
@@ -405,6 +421,7 @@ def prepare_dev_defaults(repo_root: Path, target: str) -> Path:
 
 
 def prepare_dev_environment(repo_root: Path, target: str) -> None:
+    """Prepare development tools and the matching Defaults application."""
     prepare_dev(repo_root, target)
     prepare_dev_pack_shell(repo_root, target)
     prepare_dev_defaults(repo_root, target)

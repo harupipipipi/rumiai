@@ -20,10 +20,20 @@ import sys
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
+from pathlib import PurePosixPath
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 import pytest
 
+from tests.conformance_support.command_protocol_activation import (
+    command_protocol_binding_findings,
+    is_conservative_command_protocol_alias,
+    load_captured_application_bindings,
+    load_current_signed_application_bindings,
+    route_pattern_exposes_command_protocol,
+)
+from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import load_schema, validate_file
 
 
@@ -31,7 +41,6 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tobkiri_runtime"
 ECOSYSTEM = RUNTIME / "ecosystem"
 
-EXPECTED_PRODUCTION_PACK_COUNT = 143
 V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 PACK_ARTIFACTS = {
     "artifact-index.v4.json": "pack_artifact_index",
@@ -120,7 +129,6 @@ FALLBACK_NAMES = frozenset(
     }
 )
 OLD_COMPOSITION_MODULE = "domain.pack_architecture"
-VALID_MANIFEST_AUTHORITIES = frozenset({"v4-authoritative"})
 _CHILD_FAILURE_DIAGNOSTIC_PREFIX = "fresh-home child process failed: "
 
 _CHILD_DIAGNOSTIC_ENV_KEYS = (
@@ -218,13 +226,23 @@ SHELL_ROOT_NAMES = frozenset(
 SAFE_LAUNCH_CONTEXTS = frozenset(
     {
         "host_broker",
-        "defaultspack",
         "uv",
         "codesign",
         "launchservices",
         "dock_registration",
     }
 )
+MIGRATION_STAGES = (
+    "generated-draft",
+    "semantically-reviewed",
+    "signed-installed",
+    "isolated-executed",
+    "release-verified",
+)
+MIGRATION_PROOF_PATH = (
+    ROOT / "tobkiri_runtime" / "scripts" / "quality" / "evidence" / "pack_migration_proof.v1.json"
+)
+MIGRATION_PROOF_GENERATOR = RUNTIME / "scripts" / "quality" / "run_independent_migration_proof.py"
 
 
 def _production_files() -> tuple[Path, ...]:
@@ -288,17 +306,77 @@ def _sha256(path: Path) -> str:
 
 def _production_pack_dirs() -> tuple[Path, ...]:
     """Return exactly the direct Pack roots under ``ecosystem``."""
+    catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
+    excluded = (
+        frozenset(catalog.get("excluded_packs", ()))
+        if isinstance(catalog, Mapping) and isinstance(catalog.get("excluded_packs"), list)
+        else frozenset()
+    )
     return tuple(
         sorted(
             path
             for path in ECOSYSTEM.iterdir()
-            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+            if path.is_dir()
+            and path.name != "setup_pack"
+            and path.name not in excluded
+            and not path.name.startswith(".")
         )
     )
 
 
+def _compatibility_alias_findings() -> list[dict[str, Any]]:
+    """Require catalog exclusions to be finite, read-only non-Pack aliases."""
+    catalog_path = RUNTIME / "schemas" / "pack_v4_catalog.v1.json"
+    catalog = _load_json(catalog_path)
+    raw_excluded = catalog.get("excluded_packs") if isinstance(catalog, Mapping) else None
+    pack_ids = catalog.get("pack_ids") if isinstance(catalog, Mapping) else None
+    if not isinstance(raw_excluded, list) or not all(
+        isinstance(pack_id, str) for pack_id in raw_excluded
+    ):
+        return [_finding(catalog_path, 1, "compatibility_alias_catalog_invalid")]
+    excluded = set(raw_excluded)
+    findings: list[dict[str, Any]] = []
+    if len(excluded) != len(raw_excluded):
+        findings.append(_finding(catalog_path, 1, "duplicate_compatibility_alias"))
+    if isinstance(pack_ids, list) and excluded & set(pack_ids):
+        findings.append(
+            _finding(
+                catalog_path,
+                1,
+                "compatibility_alias_has_pack_authority",
+                pack_ids=sorted(excluded & set(pack_ids)),
+            )
+        )
+    forbidden = set(PACK_ARTIFACTS) | {"ecosystem.json", "rumi.pack.v3.json"}
+    for pack_id in sorted(excluded):
+        pack_dir = ECOSYSTEM / pack_id
+        alias_path = pack_dir / "compatibility-alias.v1.json"
+        alias = _load_json(alias_path)
+        if not isinstance(alias, Mapping):
+            findings.append(_finding(alias_path, 1, "compatibility_alias_missing"))
+            continue
+        if (
+            alias.get("schema") != "io.tobkiri.profile-projection-compatibility-alias.v1"
+            or alias.get("legacy_pack_id") != pack_id
+            or alias.get("runtime_authority") is not False
+            or alias.get("read_only") is not True
+        ):
+            findings.append(_finding(alias_path, 1, "compatibility_alias_invalid"))
+        authority_artifacts = sorted(name for name in forbidden if (pack_dir / name).exists())
+        if authority_artifacts:
+            findings.append(
+                _finding(
+                    alias_path,
+                    1,
+                    "compatibility_alias_contains_authority_artifacts",
+                    artifacts=authority_artifacts,
+                )
+            )
+    return findings
+
+
 def _v4_pack_artifacts() -> list[Path]:
-    """Return only the 141 direct ``pack.v4.json`` files."""
+    """Return direct ``pack.v4.json`` files for the disk inventory."""
     return [path / "pack.v4.json" for path in _production_pack_dirs()]
 
 
@@ -309,7 +387,7 @@ def _v4_profile_artifacts() -> list[Path]:
 
 
 def _v4_artifact_findings() -> list[dict[str, Any]]:
-    """Validate and compile the exact 141 x 4 direct artifact set."""
+    """Validate and compile every direct v4 artifact set on disk."""
     findings: list[dict[str, Any]] = []
     for pack_dir in _production_pack_dirs():
         values: dict[str, Mapping[str, Any]] = {}
@@ -402,6 +480,397 @@ def _v4_artifact_findings() -> list[dict[str, Any]]:
     return findings
 
 
+def _declaration_disk_runtime_findings() -> list[dict[str, Any]]:
+    """Compare catalog, runtime declarations, and regular files on disk."""
+    findings: list[dict[str, Any]] = []
+    catalog_path = RUNTIME / "schemas" / "pack_v4_catalog.v1.json"
+    catalog = _load_json(catalog_path)
+    if not isinstance(catalog, Mapping) or not isinstance(catalog.get("packs"), list):
+        return [_finding(catalog_path, 1, "pack_catalog_invalid")]
+
+    records = {
+        str(record.get("pack_id")): record
+        for record in catalog["packs"]
+        if isinstance(record, Mapping) and isinstance(record.get("pack_id"), str)
+    }
+    for pack_dir in _production_pack_dirs():
+        record = records.get(pack_dir.name)
+        if not isinstance(record, Mapping):
+            findings.append(_finding(pack_dir, 1, "pack_missing_from_v4_catalog"))
+            continue
+
+        pack_root = pack_dir.resolve()
+        declared_artifacts = record.get("runtime_artifacts")
+        if not isinstance(declared_artifacts, list):
+            findings.append(
+                _finding(
+                    pack_dir / "pack.v4.json",
+                    1,
+                    "runtime_artifact_declaration_invalid",
+                )
+            )
+            declared_artifacts = []
+        declared_by_path: dict[str, str] = {}
+        for item in declared_artifacts:
+            if not isinstance(item, Mapping):
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_declaration_invalid",
+                    )
+                )
+                continue
+            relative = item.get("path")
+            digest = item.get("digest")
+            if not isinstance(relative, str) or not isinstance(digest, str):
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_declaration_invalid",
+                    )
+                )
+                continue
+            normalized = Path(relative).as_posix()
+            if normalized in declared_by_path:
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "duplicate_runtime_artifact_declaration",
+                        artifact=normalized,
+                    )
+                )
+            declared_by_path[normalized] = digest
+            candidate = (pack_dir / relative).resolve()
+            if not candidate.is_relative_to(pack_root):
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_escapes_pack",
+                        artifact=relative,
+                    )
+                )
+                continue
+            if (pack_dir / relative).is_symlink():
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_symlink",
+                        artifact=relative,
+                    )
+                )
+            if not candidate.is_file():
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_missing",
+                        artifact=relative,
+                    )
+                )
+            elif _sha256(candidate) != digest:
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_artifact_digest_mismatch",
+                        artifact=relative,
+                    )
+                )
+
+        executable = _load_json(pack_dir / "executables.v4.json")
+        variants = executable.get("variants") if isinstance(executable, Mapping) else None
+        if not isinstance(variants, list):
+            findings.append(
+                _finding(
+                    pack_dir / "executables.v4.json",
+                    1,
+                    "runtime_variant_declaration_invalid",
+                )
+            )
+            variants = []
+        variant_by_function: dict[str, Mapping[str, Any]] = {}
+        for variant in variants:
+            if not isinstance(variant, Mapping) or not isinstance(variant.get("function_id"), str):
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "runtime_variant_declaration_invalid",
+                    )
+                )
+                continue
+            function_id = str(variant["function_id"])
+            if function_id in variant_by_function:
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "duplicate_runtime_variant",
+                        function_id=function_id,
+                    )
+                )
+            variant_by_function[function_id] = variant
+            relative = variant.get("implementation_path")
+            digest = variant.get("implementation_digest")
+            if not isinstance(relative, str) or not isinstance(digest, str):
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "runtime_entrypoint_declaration_invalid",
+                        function_id=function_id,
+                    )
+                )
+                continue
+            candidate = (pack_dir / relative).resolve()
+            if not candidate.is_relative_to(pack_root) or not candidate.is_file():
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "runtime_entrypoint_missing",
+                        function_id=function_id,
+                    )
+                )
+            elif _sha256(candidate) != digest:
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "runtime_entrypoint_digest_mismatch",
+                        function_id=function_id,
+                    )
+                )
+            if declared_by_path.get(Path(relative).as_posix()) != digest:
+                findings.append(
+                    _finding(
+                        pack_dir / "executables.v4.json",
+                        1,
+                        "runtime_entrypoint_not_declared",
+                        function_id=function_id,
+                    )
+                )
+
+        index = _load_json(pack_dir / "artifact-index.v4.json")
+        indexed_runtime = {
+            str(item.get("path")): str(item.get("digest"))
+            for item in (index.get("artifacts", ()) if isinstance(index, Mapping) else ())
+            if isinstance(item, Mapping)
+            and isinstance(item.get("path"), str)
+            and isinstance(item.get("digest"), str)
+            and item.get("path") not in PACK_ARTIFACTS
+        }
+        if indexed_runtime != declared_by_path:
+            findings.append(
+                _finding(
+                    pack_dir / "artifact-index.v4.json",
+                    1,
+                    "runtime_artifact_index_mismatch",
+                    declared=sorted(declared_by_path),
+                    indexed=sorted(indexed_runtime),
+                )
+            )
+
+        manifest = _load_json(pack_dir / "pack.v4.json")
+        functions = manifest.get("functions") if isinstance(manifest, Mapping) else None
+        if not isinstance(functions, list):
+            findings.append(
+                _finding(
+                    pack_dir / "pack.v4.json",
+                    1,
+                    "runtime_function_declaration_invalid",
+                )
+            )
+            functions = []
+        manifest_by_function: dict[str, Mapping[str, Any]] = {}
+        for function in functions:
+            if not isinstance(function, Mapping) or not isinstance(function.get("id"), str):
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_function_declaration_invalid",
+                    )
+                )
+                continue
+            function_id = str(function["id"])
+            manifest_by_function[function_id] = function
+            variant = variant_by_function.get(function_id)
+            if variant is None:
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_function_variant_missing",
+                        function_id=function_id,
+                    )
+                )
+                continue
+            if function.get("implementation_digest") != variant.get("implementation_digest"):
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_function_variant_mismatch",
+                        function_id=function_id,
+                        field="implementation_digest",
+                    )
+                )
+            manifest_operations = set(function.get("operations", ()))
+            variant_operations = {
+                operation.get("operation_id")
+                for operation in variant.get("operations", ())
+                if isinstance(operation, Mapping)
+            }
+            if manifest_operations != variant_operations:
+                findings.append(
+                    _finding(
+                        pack_dir / "pack.v4.json",
+                        1,
+                        "runtime_function_operation_mismatch",
+                        function_id=function_id,
+                    )
+                )
+        for function_id in sorted(set(variant_by_function) - set(manifest_by_function)):
+            findings.append(
+                _finding(
+                    pack_dir / "executables.v4.json",
+                    1,
+                    "runtime_variant_unlisted",
+                    function_id=function_id,
+                )
+            )
+    return findings
+
+
+def _executable_source_findings() -> list[dict[str, Any]]:
+    """Require an explicit owner-approved source record per operation."""
+    path = RUNTIME / "schemas" / "executable_sources.v1.json"
+    payload = _load_json(path)
+    source_records = payload.get("packs") if isinstance(payload, Mapping) else None
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema") != "io.tobkiri.executable-sources.v1"
+        or not isinstance(source_records, Mapping)
+    ):
+        return [_finding(path, 1, "executable_source_registry_invalid")]
+
+    expected: dict[tuple[str, str], dict[str, str]] = {}
+    for pack_dir in _production_pack_dirs():
+        executable = _load_json(pack_dir / "executables.v4.json")
+        variants = executable.get("variants", ()) if isinstance(executable, Mapping) else ()
+        if not isinstance(variants, list):
+            continue
+        for variant in variants:
+            if not isinstance(variant, Mapping):
+                continue
+            function_id = variant.get("function_id")
+            implementation_path = variant.get("implementation_path")
+            implementation_digest = variant.get("implementation_digest")
+            operations = variant.get("operations", ())
+            if not isinstance(function_id, str) or not isinstance(operations, list):
+                continue
+            for operation in operations:
+                if not isinstance(operation, Mapping):
+                    continue
+                operation_id = operation.get("operation_id")
+                contract_id = operation.get("contract_id")
+                if not isinstance(operation_id, str) or not isinstance(contract_id, str):
+                    continue
+                expected[(function_id, operation_id)] = {
+                    "pack_id": pack_dir.name,
+                    "implementation_path": str(implementation_path or ""),
+                    "implementation_digest": str(implementation_digest or ""),
+                    "contract_id": contract_id,
+                }
+
+    actual: dict[tuple[str, str], tuple[str, Mapping[str, Any]]] = {}
+    invalid: list[str] = []
+    duplicate: list[str] = []
+    for record_key, entry in source_records.items():
+        if not isinstance(entry, Mapping):
+            invalid.append(str(record_key))
+            continue
+        function_id = entry.get("function_id")
+        required = (
+            "pack_id",
+            "owner",
+            "function_id",
+            "implementation_path",
+            "implementation_digest",
+        )
+        if not isinstance(function_id, str) or any(
+            not isinstance(entry.get(field), str) or not entry[field].strip() for field in required
+        ):
+            invalid.append(str(function_id or record_key))
+            continue
+        operation_records = entry.get("operations")
+        if operation_records is None:
+            operation_records = [entry]
+        if not isinstance(operation_records, list) or not operation_records:
+            invalid.append(function_id)
+            continue
+        for operation in operation_records:
+            if not isinstance(operation, Mapping):
+                invalid.append(function_id)
+                continue
+            operation_id = operation.get("operation_id")
+            contract_id = operation.get("contract_id")
+            if not isinstance(operation_id, str) or not operation_id.strip():
+                invalid.append(function_id)
+                continue
+            key = (function_id, operation_id)
+            if key in actual:
+                duplicate.append(f"{function_id}:{operation_id}")
+                continue
+            actual[key] = (str(record_key), dict(entry) | dict(operation))
+            if not isinstance(contract_id, str) or not contract_id.strip():
+                invalid.append(f"{function_id}:{operation_id}")
+
+    missing = sorted(set(expected) - set(actual))
+    unexpected = sorted(set(actual) - set(expected))
+    mismatched: list[str] = []
+    for key in sorted(set(expected) & set(actual)):
+        expected_record = expected[key]
+        record_key, entry = actual[key]
+        if (
+            entry.get("pack_id") != expected_record["pack_id"]
+            or entry.get("owner") != expected_record["pack_id"]
+            or record_key not in {expected_record["pack_id"], key[0]}
+            or entry.get("contract_id") != expected_record["contract_id"]
+            or entry.get("implementation_path") != expected_record["implementation_path"]
+            or entry.get("implementation_digest") != expected_record["implementation_digest"]
+        ):
+            mismatched.append(f"{key[0]}:{key[1]}")
+    if missing or unexpected or invalid or duplicate or mismatched:
+        return [
+            _finding(
+                path,
+                1,
+                "executable_source_registry_incomplete",
+                expected_function_count=len({function_id for function_id, _ in expected}),
+                expected_operation_count=len(expected),
+                actual_function_count=len({function_id for function_id, _ in actual}),
+                actual_operation_count=len(actual),
+                missing_count=len(missing),
+                unexpected_count=len(unexpected),
+                invalid_count=len(invalid),
+                duplicate_count=len(duplicate),
+                mismatched_count=len(mismatched),
+                missing_sample=[f"{function}:{operation}" for function, operation in missing[:20]],
+                unexpected_sample=[
+                    f"{function}:{operation}" for function, operation in unexpected[:20]
+                ],
+            )
+        ]
+    return []
+
+
 def _v4_profile_findings() -> list[dict[str, Any]]:
     """Validate the explicit Profile artifact and its exact selection shape."""
     findings: list[dict[str, Any]] = []
@@ -458,20 +927,503 @@ def _source_set_delta(expected: set[str], observed: set[str]) -> dict[str, list[
     }
 
 
+def _load_independent_migration_proof() -> tuple[
+    dict[str, Mapping[str, Any]], list[dict[str, Any]]
+]:
+    """Load staged migration evidence without treating hashes as attestation."""
+    if not MIGRATION_PROOF_PATH.is_file():
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_missing")]
+    payload = _load_json(MIGRATION_PROOF_PATH)
+    if not isinstance(payload, Mapping):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    source = payload.get("source")
+    packs = payload.get("packs")
+    if (
+        payload.get("schema") != "io.tobkiri.quality.pack-migration-proof.v2"
+        or not isinstance(source, Mapping)
+        or source.get("kind") != "repository-generated-evidence"
+        or not isinstance(source.get("generator_id"), str)
+        or not source["generator_id"].strip()
+        or not isinstance(source.get("observed_head_sha"), str)
+        or not re.fullmatch(r"[0-9a-f]{40}", source["observed_head_sha"])
+        or not isinstance(source.get("content_digest"), str)
+        or not source["content_digest"].strip()
+        or not isinstance(packs, Mapping)
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    digest_pattern = re.compile(r"sha256:[0-9a-f]{64}")
+    inputs = source.get("inputs")
+    if (
+        source.get("authority") != "evidence-only"
+        or source.get("attestation") != "none"
+        or source.get("freshness_basis") != "exact-input-digests-and-deterministic-recomputation"
+        or not isinstance(source.get("input_digest"), str)
+        or not digest_pattern.fullmatch(source["input_digest"])
+        or not isinstance(inputs, list)
+        or not inputs
+        or any(
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("kind"), str)
+            or not item["kind"].strip()
+            or not isinstance(item.get("path"), str)
+            or not item["path"].strip()
+            or Path(item["path"]).is_absolute()
+            or item["path"].startswith("external:")
+            or not isinstance(item.get("digest"), str)
+            or not digest_pattern.fullmatch(item["digest"])
+            for item in inputs
+        )
+        or _proof_digest(inputs) != source.get("input_digest")
+        or not isinstance(source.get("input_paths"), list)
+        or not source["input_paths"]
+        or source["input_paths"] != [item["path"] for item in inputs]
+        or any(not isinstance(path, str) or not path.strip() for path in source["input_paths"])
+        or any(
+            Path(path).is_absolute() or path.startswith("external:")
+            for path in source["input_paths"]
+        )
+        or not any("legacy_profile_bundle.v1.json" in path for path in source["input_paths"])
+        or not any("legacy_executable_sources.v1.json" in path for path in source["input_paths"])
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    profile_proof = source.get("profile_collection_proof")
+    if not isinstance(profile_proof, Mapping):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    identity = profile_proof.get("identity_proof")
+    identity_fields = (
+        "profile_ids",
+        "workspace_ids",
+        "conversation_ids",
+        "settings_ids",
+        "credential_ids",
+    )
+    if (
+        not isinstance(identity, Mapping)
+        or any(
+            not isinstance(identity.get(field), list)
+            or not identity[field]
+            or any(not isinstance(value, str) or not value.strip() for value in identity[field])
+            for field in identity_fields
+        )
+        or identity.get("defaults_collapsed") is not False
+        or identity.get("all_ids_distinct") is not True
+        or not isinstance(identity.get("profile_names"), Mapping)
+        or not isinstance(identity.get("digest"), str)
+        or not digest_pattern.fullmatch(identity["digest"])
+        or _proof_digest({key: value for key, value in identity.items() if key != "digest"})
+        != identity.get("digest")
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    identity_values = [value for field in identity_fields for value in identity[field]]
+    if any(
+        value.casefold() == "defaults" or value.casefold().startswith("defaults-")
+        for value in identity_values
+    ) or len(identity_values) != len(set(identity_values)):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    transaction = profile_proof.get("transaction")
+    if (
+        not isinstance(transaction, Mapping)
+        or transaction.get("algorithm") != "profile-definition-store.import_legacy_collection.v1"
+        or transaction.get("lossless") is not True
+        or transaction.get("restart_verified") is not True
+        or transaction.get("replay_rejected_without_mutation") is not True
+        or transaction.get("identity_proof_digest") != identity.get("digest")
+        or not isinstance(transaction.get("source_digest"), str)
+        or not digest_pattern.fullmatch(transaction["source_digest"])
+        or not isinstance(transaction.get("receipt_digest"), str)
+        or not digest_pattern.fullmatch(transaction["receipt_digest"])
+        or _proof_digest(
+            {key: value for key, value in transaction.items() if key != "receipt_digest"}
+        )
+        != transaction.get("receipt_digest")
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    failure_injection = transaction.get("failure_injection")
+    if not isinstance(failure_injection, Mapping) or any(
+        not isinstance(failure_injection.get(name), Mapping)
+        or failure_injection[name].get("raised") is not True
+        or failure_injection[name].get("committed_state") is not False
+        for name in ("symlink_preflight", "state_write")
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    if (
+        not isinstance(source.get("pack_count"), int)
+        or isinstance(source["pack_count"], bool)
+        or source["pack_count"] != len(packs)
+    ):
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+
+    unsigned_payload = dict(payload)
+    unsigned_source = dict(source)
+    unsigned_source.pop("observed_head_sha", None)
+    unsigned_source.pop("content_digest", None)
+    unsigned_payload["source"] = unsigned_source
+    if _proof_digest(unsigned_payload) != source["content_digest"]:
+        return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+    entries: dict[str, Mapping[str, Any]] = {}
+    for pack_id, entry in packs.items():
+        if not isinstance(pack_id, str) or not pack_id.strip() or not isinstance(entry, Mapping):
+            return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+        source_record = entry.get("source")
+        target = entry.get("target")
+        semantic = entry.get("semantic_comparison")
+        artifact_verification = (
+            target.get("artifact_verification") if isinstance(target, Mapping) else None
+        )
+        if (
+            entry.get("status") not in MIGRATION_STAGES
+            or not isinstance(source_record, Mapping)
+            or source_record.get("pack_id") != pack_id
+            or source_record.get("status") not in {"available", "missing"}
+            or not isinstance(source_record.get("files"), list)
+            or not isinstance(target, Mapping)
+            or target.get("pack_id") != pack_id
+            or target.get("status") != "artifact-integrity-verified"
+            or not isinstance(target.get("digest"), str)
+            or not digest_pattern.fullmatch(target["digest"])
+            or not isinstance(artifact_verification, Mapping)
+            or artifact_verification.get("pack_id") != pack_id
+            or artifact_verification.get("artifact_set_digest") != target.get("digest")
+            or not isinstance(semantic, Mapping)
+            or semantic.get("status") not in {"unverified", "verified"}
+            or not isinstance(semantic.get("operation_mappings"), list)
+        ):
+            return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+        if source_record["status"] == "available" and (
+            not isinstance(source_record.get("digest"), str)
+            or not digest_pattern.fullmatch(source_record["digest"])
+            or not source_record["files"]
+        ):
+            return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+        if source_record["status"] == "missing" and source_record.get("digest") is not None:
+            return {}, [_finding(MIGRATION_PROOF_PATH, 1, "independent_migration_proof_invalid")]
+        entries[pack_id] = entry
+    return entries, []
+
+
+def _pack_release_proof_errors(
+    pack_id: str,
+    entry: Mapping[str, Any],
+    *,
+    profile_transaction_receipt: str | None = None,
+) -> list[str]:
+    """Return missing Pack-specific requirements for release verification."""
+
+    if entry.get("status") != "release-verified":
+        return []
+    errors = _pack_semantic_review_errors(pack_id, entry)
+    source = entry.get("source")
+    target = entry.get("target")
+    semantic = entry.get("semantic_comparison")
+    if not isinstance(source, Mapping) or source.get("status") != "available":
+        errors.append("pack_specific_legacy_source_missing")
+    elif source.get("pack_id") != pack_id or not isinstance(source.get("digest"), str):
+        errors.append("pack_specific_legacy_source_invalid")
+    if not isinstance(target, Mapping) or target.get("pack_id") != pack_id:
+        errors.append("pack_specific_v4_target_missing")
+    if not isinstance(semantic, Mapping):
+        errors.append("pack_specific_semantic_comparison_missing")
+        return errors
+    if (
+        semantic.get("status") != "verified"
+        or semantic.get("equivalent") is not True
+        or semantic.get("method") != "legacy-to-v4-semantic-comparator.v1"
+    ):
+        errors.append("pack_specific_semantic_comparison_unverified")
+    inventory = semantic.get("operation_inventory")
+    mappings = semantic.get("operation_mappings")
+    if (
+        not isinstance(inventory, Mapping)
+        or not isinstance(inventory.get("legacy_count"), int)
+        or isinstance(inventory.get("legacy_count"), bool)
+        or not isinstance(inventory.get("v4_count"), int)
+        or isinstance(inventory.get("v4_count"), bool)
+        or not isinstance(mappings, list)
+    ):
+        errors.append("pack_specific_operation_mapping_missing")
+    elif inventory["legacy_count"] or inventory["v4_count"]:
+        if not mappings:
+            errors.append("pack_specific_operation_mapping_missing")
+    elif (
+        not isinstance(semantic.get("no_operations_reason"), str)
+        or not semantic["no_operations_reason"].strip()
+    ):
+        errors.append("pack_specific_operation_mapping_missing")
+    if isinstance(mappings, list):
+        for mapping in mappings:
+            if not isinstance(mapping, Mapping) or any(
+                not isinstance(mapping.get(field), str) or not mapping[field].strip()
+                for field in (
+                    "legacy_operation_id",
+                    "v4_contract_id",
+                    "v4_operation_id",
+                )
+            ):
+                errors.append("pack_specific_operation_mapping_invalid")
+                break
+            parameters = mapping.get("parameter_mapping")
+            authority = mapping.get("authority_mapping")
+            if (
+                not isinstance(parameters, Mapping)
+                or parameters.get("status") != "verified"
+                or not isinstance(parameters.get("legacy_schema_digest"), str)
+                or not isinstance(parameters.get("v4_schema_digest"), str)
+                or not isinstance(parameters.get("rules"), list)
+            ):
+                errors.append("pack_specific_parameter_mapping_missing")
+                break
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("status") != "verified"
+                or not isinstance(authority.get("legacy"), Mapping)
+                or not isinstance(authority.get("v4"), Mapping)
+            ):
+                errors.append("pack_specific_authority_mapping_missing")
+                break
+    receipt = entry.get("migration_receipt_digest")
+    if not isinstance(receipt, str):
+        errors.append("pack_specific_migration_receipt_missing")
+    elif receipt == profile_transaction_receipt:
+        errors.append("profile_transaction_receipt_reused_for_pack")
+    elif isinstance(source, Mapping) and isinstance(target, Mapping):
+        expected_receipt = _proof_digest(
+            {
+                "pack_id": pack_id,
+                "source_digest": source.get("digest"),
+                "target_digest": target.get("digest"),
+                "semantic_comparison": semantic,
+            }
+        )
+        if receipt != expected_receipt:
+            errors.append("pack_specific_migration_receipt_invalid")
+    return errors
+
+
+def _pack_semantic_review_errors(
+    pack_id: str,
+    entry: Mapping[str, Any],
+) -> list[str]:
+    """Validate a claimed Pack-specific legacy-to-v4 semantic review."""
+
+    if entry.get("status") not in {
+        "semantically-reviewed",
+        "signed-installed",
+        "isolated-executed",
+        "release-verified",
+    }:
+        return []
+    errors: list[str] = []
+    source = entry.get("source")
+    target = entry.get("target")
+    semantic = entry.get("semantic_comparison")
+    if (
+        not isinstance(source, Mapping)
+        or source.get("status") != "available"
+        or source.get("pack_id") != pack_id
+        or not isinstance(source.get("digest"), str)
+    ):
+        errors.append("pack_specific_legacy_source_missing")
+    if (
+        not isinstance(target, Mapping)
+        or target.get("pack_id") != pack_id
+        or not isinstance(target.get("digest"), str)
+    ):
+        errors.append("pack_specific_v4_target_missing")
+    if not isinstance(semantic, Mapping):
+        errors.append("pack_specific_semantic_comparison_missing")
+        return errors
+    if (
+        semantic.get("status") != "verified"
+        or semantic.get("equivalent") is not True
+        or semantic.get("method") != "legacy-to-v4-semantic-comparator.v1"
+    ):
+        errors.append("pack_specific_semantic_comparison_unverified")
+    inventory = semantic.get("operation_inventory")
+    mappings = semantic.get("operation_mappings")
+    if (
+        not isinstance(inventory, Mapping)
+        or not isinstance(inventory.get("legacy_count"), int)
+        or not isinstance(inventory.get("v4_count"), int)
+        or not isinstance(mappings, list)
+        or inventory.get("legacy_count") != inventory.get("v4_count")
+        or len(mappings) != inventory.get("v4_count")
+        or not mappings
+    ):
+        errors.append("pack_specific_operation_mapping_missing")
+    if isinstance(mappings, list):
+        for mapping in mappings:
+            parameters = mapping.get("parameter_mapping") if isinstance(mapping, Mapping) else None
+            authority = mapping.get("authority_mapping") if isinstance(mapping, Mapping) else None
+            if (
+                not isinstance(mapping, Mapping)
+                or not isinstance(mapping.get("legacy_operation_id"), str)
+                or not isinstance(mapping.get("v4_contract_id"), str)
+                or not isinstance(mapping.get("v4_operation_id"), str)
+            ):
+                errors.append("pack_specific_operation_mapping_invalid")
+                break
+            if (
+                not isinstance(parameters, Mapping)
+                or parameters.get("status") != "verified"
+                or parameters.get("method") != "canonical-json-schema-equality"
+                or parameters.get("legacy_schema_digest") != parameters.get("v4_schema_digest")
+            ):
+                errors.append("pack_specific_parameter_mapping_missing")
+                break
+            if (
+                not isinstance(authority, Mapping)
+                or authority.get("status") != "verified"
+                or not isinstance(authority.get("legacy"), Mapping)
+                or not isinstance(authority.get("v4"), Mapping)
+            ):
+                errors.append("pack_specific_authority_mapping_missing")
+                break
+    receipt = entry.get("migration_receipt_digest")
+    if not isinstance(receipt, str):
+        errors.append("pack_specific_migration_receipt_missing")
+    elif isinstance(source, Mapping) and isinstance(target, Mapping):
+        expected = _proof_digest(
+            {
+                "pack_id": pack_id,
+                "source_digest": source.get("digest"),
+                "target_digest": target.get("digest"),
+                "semantic_comparison": semantic,
+            }
+        )
+        if receipt != expected:
+            errors.append("pack_specific_migration_receipt_invalid")
+    return errors
+
+
+def _migration_proof_generator_findings() -> list[dict[str, Any]]:
+    """Run the proof generator's own check so drift fails the complete gate."""
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(MIGRATION_PROOF_GENERATOR),
+                "--output",
+                str(MIGRATION_PROOF_PATH),
+                "--check",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        return [
+            _finding(
+                MIGRATION_PROOF_PATH,
+                1,
+                "migration_proof_generator_check_failed",
+                error=str(error)[:240],
+            )
+        ]
+    if result.returncode != 0:
+        diagnostic = (result.stderr or result.stdout).strip()[-500:]
+        return [
+            _finding(
+                MIGRATION_PROOF_PATH,
+                1,
+                "migration_proof_generator_drift",
+                diagnostic=diagnostic,
+            )
+        ]
+    return []
+
+
+def _generic_release_receipt_findings(
+    proof: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Reject one generic receipt copied across multiple Pack migrations."""
+
+    findings: list[dict[str, Any]] = []
+    release_receipts: dict[str, str] = {}
+    for pack_id, entry in proof.items():
+        receipt = entry.get("migration_receipt_digest")
+        if entry.get("status") != "release-verified" or not isinstance(receipt, str):
+            continue
+        previous = release_receipts.get(receipt)
+        if previous is not None and previous != pack_id:
+            findings.append(
+                _finding(
+                    MIGRATION_PROOF_PATH,
+                    1,
+                    "generic_pack_migration_receipt_reused",
+                    pack_ids=sorted((previous, pack_id)),
+                    receipt_digest=receipt,
+                )
+            )
+        else:
+            release_receipts[receipt] = pack_id
+    return findings
+
+
+def _migration_status(
+    pack_id: str,
+    pack_dir: Path,
+    proof: Mapping[str, Mapping[str, Any]],
+) -> str:
+    """Derive a staged status from disk plus independent proof only."""
+    if not all((pack_dir / name).is_file() for name in PACK_ARTIFACTS):
+        return "not-migrated"
+    entry = proof.get(pack_id)
+    if not isinstance(entry, Mapping):
+        return "generated-draft"
+    status = entry.get("status")
+    if status not in MIGRATION_STAGES:
+        return "generated-draft"
+    target = entry.get("target")
+    if not isinstance(target, Mapping):
+        return "generated-draft"
+    manifest = _load_json(pack_dir / "pack.v4.json")
+    artifact_digest = (
+        manifest.get("pack", {}).get("artifact_digest") if isinstance(manifest, Mapping) else None
+    )
+    if target.get("digest") != artifact_digest:
+        return "generated-draft"
+    if _pack_semantic_review_errors(pack_id, entry):
+        return "generated-draft"
+    if status == "release-verified" and _pack_release_proof_errors(pack_id, entry):
+        return "generated-draft"
+    return str(status)
+
+
 def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
-    """Return canonical authority classes, including derived v4-only Packs."""
-    catalog = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
-    classified = catalog.get("packs", {}) if isinstance(catalog, Mapping) else {}
+    """Return staged migration statuses, not self-declared authority labels."""
+    catalog = _load_json(RUNTIME / "schemas" / "pack_v4_catalog.v1.json")
+    records_by_id = (
+        {
+            str(record.get("pack_id")): record
+            for record in catalog.get("packs", ())
+            if isinstance(record, Mapping) and record.get("pack_id")
+        }
+        if isinstance(catalog, Mapping)
+        else {}
+    )
+    proof, _ = _load_independent_migration_proof()
     v4_only_ids = _authority_source_sets()["v4_only_ids"]
+    legacy_authority = _load_json(RUNTIME / "schemas" / "manifest_authority.v1.json")
+    legacy_classified = (
+        legacy_authority.get("packs", {}) if isinstance(legacy_authority, Mapping) else {}
+    )
     records = []
     for path in _production_pack_dirs():
         pack_id = path.name
-        authority = classified.get(pack_id)
+        record = records_by_id.get(pack_id, {})
         records.append(
             {
                 "pack_id": pack_id,
-                "classified_as": authority or ("v4-only" if pack_id in v4_only_ids else None),
-                "manifest_authority": authority,
+                "classified_as": _migration_status(pack_id, path, proof),
+                "declared_authority": record.get("authority"),
+                "legacy_manifest_authority": legacy_classified.get(pack_id),
                 "v4_only": pack_id in v4_only_ids,
                 "v4_artifacts": all((path / name).is_file() for name in PACK_ARTIFACTS),
             }
@@ -479,14 +1431,106 @@ def _manifest_authority_counts() -> tuple[Counter[str], list[dict[str, Any]]]:
     return Counter(str(record["classified_as"]) for record in records), records
 
 
+def _proof_digest(value: Any) -> str:
+    """Return the canonical content digest used by independent proof records."""
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _migration_evidence_findings() -> list[dict[str, Any]]:
+    """Fail until generator output is fresh and every Pack has semantic proof."""
+    proof, findings = _load_independent_migration_proof()
+    findings.extend(_migration_proof_generator_findings())
+    statuses = {
+        path.name: _migration_status(path.name, path, proof) for path in _production_pack_dirs()
+    }
+    status_counts = Counter(statuses.values())
+    pack_ids = set(statuses)
+    proof_ids = set(proof)
+    if proof_ids != pack_ids:
+        findings.append(
+            _finding(
+                MIGRATION_PROOF_PATH,
+                1,
+                "independent_migration_proof_scope_mismatch",
+                missing=sorted(pack_ids - proof_ids),
+                extra=sorted(proof_ids - pack_ids),
+            )
+        )
+    profile_receipt: str | None = None
+    try:
+        proof_document = _load_json(MIGRATION_PROOF_PATH)
+        proof_source = proof_document.get("source")
+        profile_proof = (
+            proof_source.get("profile_collection_proof")
+            if isinstance(proof_source, Mapping)
+            else None
+        )
+        transaction = (
+            profile_proof.get("transaction") if isinstance(profile_proof, Mapping) else None
+        )
+        profile_receipt = (
+            transaction.get("receipt_digest") if isinstance(transaction, Mapping) else None
+        )
+    except (OSError, ValueError, json.JSONDecodeError):
+        profile_receipt = None
+    for pack_id, entry in proof.items():
+        semantic_errors = _pack_semantic_review_errors(pack_id, entry)
+        if semantic_errors:
+            findings.append(
+                _finding(
+                    MIGRATION_PROOF_PATH,
+                    1,
+                    "pack_semantic_review_invalid",
+                    pack_id=pack_id,
+                    errors=semantic_errors,
+                )
+            )
+        release_errors = _pack_release_proof_errors(
+            pack_id,
+            entry,
+            profile_transaction_receipt=profile_receipt,
+        )
+        if release_errors:
+            findings.append(
+                _finding(
+                    MIGRATION_PROOF_PATH,
+                    1,
+                    "pack_release_proof_invalid",
+                    pack_id=pack_id,
+                    errors=release_errors,
+                )
+            )
+    findings.extend(_generic_release_receipt_findings(proof))
+    unverified = sorted(
+        pack_id for pack_id, status in statuses.items() if status != "release-verified"
+    )
+    if unverified:
+        findings.append(
+            _finding(
+                MIGRATION_PROOF_PATH,
+                1,
+                "migration_release_proof_missing",
+                status_counts=dict(sorted(status_counts.items())),
+                unverified_count=len(unverified),
+                sample_pack_ids=unverified[:20],
+            )
+        )
+    return findings
+
+
 def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     """Require exact Authority ownership and the narrow ResolvedPlan scope."""
     findings: list[dict[str, Any]] = []
     manifest_path = RUNTIME / "schemas" / "manifest_authority.v1.json"
     v4_catalog_path = RUNTIME / "schemas" / "pack_v4_catalog.v1.json"
-    manifest_catalog = _load_json(manifest_path)
     v4_catalog = _load_json(v4_catalog_path)
-    classified = manifest_catalog.get("packs", {}) if isinstance(manifest_catalog, Mapping) else {}
     v4_entries = v4_catalog.get("packs", ()) if isinstance(v4_catalog, Mapping) else ()
     raw_v4_pack_id_list = v4_catalog.get("pack_ids") if isinstance(v4_catalog, Mapping) else None
     v4_pack_id_list = raw_v4_pack_id_list if isinstance(raw_v4_pack_id_list, list) else []
@@ -502,39 +1546,20 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     def add_scope_finding(path: Path, rule: str, symbol: str, **details: Any) -> None:
         findings.append(_finding(path, 1, rule, symbol=symbol, **details))
 
-    if not isinstance(classified, Mapping) or any(
-        value not in VALID_MANIFEST_AUTHORITIES for value in classified.values()
-    ):
+    catalog_delta = _source_set_delta(v4_ids, direct_ids)
+    if catalog_delta is not None:
         add_scope_finding(
-            manifest_path,
-            "authority_catalog_value_invalid",
-            "manifest_authority",
-            classified=dict(sorted(classified.items()))
-            if isinstance(classified, Mapping)
-            else classified,
-        )
-    catalog_delta = _source_set_delta(direct_ids, manifest_ids)
-    expected_authority_counts = Counter({"v4-authoritative": EXPECTED_PRODUCTION_PACK_COUNT})
-    observed_authority_counts = (
-        Counter(str(classified.get(pack_id)) for pack_id in direct_ids)
-        if isinstance(classified, Mapping)
-        else Counter()
-    )
-    if catalog_delta is not None or observed_authority_counts != expected_authority_counts:
-        add_scope_finding(
-            manifest_path,
-            "authority_catalog_scope_mismatch",
-            "manifest_authority",
-            **(catalog_delta or {"missing": [], "extra": []}),
-            expected_authority_counts=dict(sorted(expected_authority_counts.items())),
-            observed_authority_counts=dict(sorted(observed_authority_counts.items())),
+            v4_catalog_path,
+            "v4_catalog_disk_scope_mismatch",
+            "pack_v4_catalog",
+            **catalog_delta,
         )
     manifest_delta = _source_set_delta(manifest_ids - v4_only_ids, manifest_source_ids)
     if manifest_delta is not None:
         add_scope_finding(
             manifest_path,
             "manifest_canonical_source_set_mismatch",
-            "manifest_authority",
+            "legacy_source_inventory",
             **manifest_delta,
             v4_only=sorted(v4_only_ids),
         )
@@ -557,14 +1582,6 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
                 }
             ),
         )
-    v4_direct_delta = _source_set_delta(v4_ids, direct_ids)
-    if v4_direct_delta is not None:
-        add_scope_finding(
-            v4_catalog_path,
-            "v4_catalog_direct_scope_mismatch",
-            "pack_v4_catalog",
-            **v4_direct_delta,
-        )
     canonical_ids = manifest_source_ids | v4_only_ids
     canonical_delta = _source_set_delta(canonical_ids, direct_ids)
     v4_only_delta = _source_set_delta(direct_ids - manifest_source_ids, v4_only_ids)
@@ -579,15 +1596,6 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             v4_only=sorted(v4_only_ids),
         )
 
-    for pack_id in sorted(direct_ids & manifest_ids):
-        pack_dir = ECOSYSTEM / pack_id
-        authority = classified.get(pack_id) if isinstance(classified, Mapping) else None
-        if authority != "v4-authoritative":
-            add_scope_finding(
-                pack_dir / "pack.v4.json",
-                "non_v4_production_authority",
-                pack_id,
-            )
     for pack_id in sorted(v4_only_ids & direct_ids):
         pack_dir = ECOSYSTEM / pack_id
         if (pack_dir / "ecosystem.json").exists() or (pack_dir / "rumi.pack.v3.json").exists():
@@ -599,7 +1607,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
     plan_schema = load_schema("resolved_plan")
     required_plan = frozenset(plan_schema.get("required", ()))
     properties_plan = frozenset(plan_schema.get("properties", ()))
-    expected_plan = frozenset(
+    expected_required_plan = frozenset(
         {
             "plan_api_version",
             "profile_id",
@@ -613,6 +1621,7 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "shell",
             "application",
             "effective_set",
+            "content_projections",
             "requested_edges_digest",
             "constraints_digest",
             "closure_digest",
@@ -621,10 +1630,11 @@ def _authority_resolved_plan_findings() -> list[dict[str, Any]]:
             "plan_digest",
         }
     )
-    if required_plan != expected_plan or properties_plan != expected_plan:
+    expected_properties_plan = expected_required_plan | {"launch_contribution"}
+    if required_plan != expected_required_plan or properties_plan != expected_properties_plan:
         findings.append(
             {
-                "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v1.schema.json",
+                "path": "tobkiri_runtime/tobkiri_protocol/schemas/resolved_plan_v2.schema.json",
                 "line": 1,
                 "rule": "resolved_plan_scope_mismatch",
                 "required": sorted(required_plan),
@@ -778,10 +1788,7 @@ def _legacy_aliases(tree: ast.AST) -> set[str]:
 def _is_legacy_entry_module(module: str) -> bool:
     """Match retired entry roots and every importable child module."""
 
-    return any(
-        module == root or module.startswith(root + ".")
-        for root in LEGACY_ENTRY_MODULES
-    )
+    return any(module == root or module.startswith(root + ".") for root in LEGACY_ENTRY_MODULES)
 
 
 def _ast_legacy_runtime_findings_for_tree(path: Path, tree: ast.AST) -> list[dict[str, Any]]:
@@ -1546,10 +2553,38 @@ def _source_identity(path: Path) -> str:
     return source_manifest_identity(value) if isinstance(value, Mapping) else ""
 
 
+def _frontend_command_protocol_findings() -> list[dict[str, Any]]:
+    """Keep Command Protocol absent from the production-selected signed map."""
+
+    try:
+        bindings = load_current_signed_application_bindings()
+    except (OSError, RuntimeError, ValueError) as error:
+        return [
+            _finding(
+                PACK_API_SOURCE,
+                1,
+                "signed_application_route_map_unavailable",
+                error=str(error),
+            )
+        ]
+    return [
+        _finding(
+            PACK_API_SOURCE,
+            1,
+            "uncaptured_command_protocol_route_published",
+            **finding,
+        )
+        for finding in command_protocol_binding_findings(bindings)
+    ]
+
+
 def _audit_snapshot() -> dict[str, Any]:
     """Collect deterministic current-tree evidence with no baseline or skip."""
     pack_dirs = _production_pack_dirs()
     artifact_findings = _v4_artifact_findings()
+    declaration_findings = _declaration_disk_runtime_findings()
+    executable_source_findings = _executable_source_findings()
+    migration_findings = _migration_evidence_findings()
     authority_findings = _authority_resolved_plan_findings()
     legacy_findings = _ast_legacy_runtime_findings()
     bypass_findings = _ast_authority_bypass_findings()
@@ -1559,10 +2594,14 @@ def _audit_snapshot() -> dict[str, Any]:
     double_authority = _double_authority_findings()
     launcher = _launcher_safety_findings()
     projection = _offline_projection_findings()
+    command_protocol = _frontend_command_protocol_findings()
     head_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     source_sets = _authority_source_sets()
     gates = {
         "artifact_contracts": artifact_findings,
+        "declaration_disk_runtime": declaration_findings,
+        "executable_source_registry": executable_source_findings,
+        "migration_evidence": migration_findings,
         "authority_resolved_plan_scope": authority_findings,
         "legacy_registry_and_installed_lookup": legacy_findings
         + bypass_findings
@@ -1572,6 +2611,7 @@ def _audit_snapshot() -> dict[str, Any]:
         "double_authority": double_authority,
         "launcher_safety": launcher,
         "offline_projection": projection,
+        "command_protocol_activation": command_protocol,
     }
     return {
         "schema": "io.tobkiri.quality.complete-v4-migration.v2",
@@ -1587,14 +2627,14 @@ def _audit_snapshot() -> dict[str, Any]:
         },
         "pack_inventory": {
             "production_pack_directories": len(pack_dirs),
-            "expected_production_pack_directories": EXPECTED_PRODUCTION_PACK_COUNT,
+            "catalog_pack_directories": len(source_sets["v4_ids"]),
             "v4_artifacts_per_pack": len(PACK_ARTIFACTS),
             "v4_artifact_files": len(pack_dirs) * len(PACK_ARTIFACTS),
             "v4_pack_artifacts": [_relative(path) for path in _v4_pack_artifacts()],
             "v4_profile_artifacts": [_relative(path) for path in _v4_profile_artifacts()],
-            "authority_counts": dict(sorted(_manifest_authority_counts()[0].items())),
-            "authority_records": _manifest_authority_counts()[1],
-            "authority_source_sets": {name: sorted(values) for name, values in source_sets.items()},
+            "migration_status_counts": dict(sorted(_manifest_authority_counts()[0].items())),
+            "migration_status_records": _manifest_authority_counts()[1],
+            "declared_source_sets": {name: sorted(values) for name, values in source_sets.items()},
             "canonical_source_ids": sorted(
                 source_sets["manifest_ids"] | source_sets["v4_only_ids"]
             ),
@@ -1609,11 +2649,170 @@ def _assert_zero(name: str, findings: list[dict[str, Any]]) -> None:
 
 
 def test_production_v4_pack_and_profile_artifacts_are_complete() -> None:
-    """The exact direct artifact set is 143 Packs x 4 compiler inputs."""
-    assert len(_production_pack_dirs()) == EXPECTED_PRODUCTION_PACK_COUNT
-    assert len(_v4_pack_artifacts()) == EXPECTED_PRODUCTION_PACK_COUNT
-    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == 572
+    """Every declared Pack has the complete direct compiler input set."""
+    pack_count = len(_production_pack_dirs())
+    _assert_zero("compatibility aliases", _compatibility_alias_findings())
+    assert pack_count == len(_authority_source_sets()["v4_ids"])
+    assert len(_v4_pack_artifacts()) == pack_count
+    assert len(_v4_pack_artifacts()) * len(PACK_ARTIFACTS) == pack_count * len(PACK_ARTIFACTS)
     _assert_zero("v4 artifact contracts", _v4_artifact_findings())
+    _assert_zero("declaration/disk/runtime alignment", _declaration_disk_runtime_findings())
+
+
+def test_signed_frontend_maps_do_not_activate_uncaptured_command_protocol() -> None:
+    """Only the exact capture-bound high-risk adapter may publish this namespace."""
+
+    aliases = (
+        "/api/command-protocol/v1",
+        "/API//COMMAND-PROTOCOL/V1/invoke",
+        "/api/%63ommand-protocol/v1/invoke",
+        "/api/command-protocol%2fv1/resume",
+        "/api/%2563ommand-protocol/v1/offline",
+    )
+    assert all(is_conservative_command_protocol_alias(path) for path in aliases)
+    assert route_pattern_exposes_command_protocol("/api/{path}")
+    assert route_pattern_exposes_command_protocol("/api/command-protocol/{version}")
+    assert route_pattern_exposes_command_protocol("/api/{protocol}/v1")
+    assert not is_conservative_command_protocol_alias("/api/files/%25252525252541")
+    _assert_zero(
+        "uncaptured Command Protocol frontend publication",
+        _frontend_command_protocol_findings(),
+    )
+
+
+def _application_capture_fixture(
+    root: Path,
+    *,
+    relative_map_path: PurePosixPath,
+    route: str,
+    schema: str = "io.tobkiri.frontend-contract-map.v4",
+    additional_route_map: PurePosixPath | None = None,
+) -> tuple[SimpleNamespace, SimpleNamespace]:
+    """Create a digest-bound Application/catalog capture for route-map policy."""
+
+    application_id = "application.gate-fixture"
+    document = {
+        "schema": schema,
+        "pack_id": application_id,
+        "routes": [
+            {
+                "method": "POST",
+                "path": route,
+                "presentation": "broker_result",
+                "targets": [
+                    {
+                        "contribution_id": "fixture.route",
+                        "contract_id": "fixture.contract.v1",
+                        "operation_id": "fixture.invoke",
+                        "provider_id": "fixture.provider",
+                        "function_id": "fixture.provider",
+                        "allowed_payload_keys": [],
+                    }
+                ],
+            }
+        ],
+    }
+    raw = json.dumps(document, separators=(",", ":"), sort_keys=True).encode()
+    map_path = root.joinpath(*relative_map_path.parts)
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    map_path.write_bytes(raw)
+    application_digest = "sha256:" + "a" * 64
+    executable_digest = "sha256:" + "b" * 64
+    manifest = {
+        "pack": {
+            "id": application_id,
+            "kind": "application",
+            "artifact_digest": application_digest,
+        },
+        "artifacts": [
+            {
+                "path": relative_map_path.as_posix(),
+                "kind": "asset",
+                "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            },
+            {
+                "path": "fixture-executable",
+                "kind": "executable",
+                "entrypoint_digest": executable_digest,
+            },
+        ],
+    }
+    if additional_route_map is not None:
+        unknown_document = {
+            **document,
+            "schema": "io.tobkiri.frontend-contract-map.v5",
+            "routes": [{**document["routes"][0], "path": "/api/command-protocol/v1/invoke"}],
+        }
+        unknown_raw = json.dumps(
+            unknown_document,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        unknown_path = root.joinpath(*additional_route_map.parts)
+        unknown_path.parent.mkdir(parents=True, exist_ok=True)
+        unknown_path.write_bytes(unknown_raw)
+        manifest["artifacts"].append(
+            {
+                "path": additional_route_map.as_posix(),
+                "kind": "asset",
+                "digest": "sha256:" + hashlib.sha256(unknown_raw).hexdigest(),
+            }
+        )
+    application_binding = {
+        "pack_id": application_id,
+        "artifact_digest": application_digest,
+        "executable_artifact_digest": executable_digest,
+        "definition_digest": canonical_digest(manifest),
+    }
+    active = SimpleNamespace(
+        resolved=SimpleNamespace(
+            plan={
+                "application": application_binding,
+                "effective_set": [
+                    {
+                        "identity": application_id,
+                        "role": "pack",
+                        "artifact_digest": application_digest,
+                    }
+                ],
+            },
+            lock={"application": application_binding},
+        )
+    )
+    return SimpleNamespace(packs={application_id: manifest}), active
+
+
+def test_application_route_map_policy_rejects_renamed_v5_signed_map(
+    tmp_path: Path,
+) -> None:
+    """Startup selection accepts its current type and rejects renamed successors."""
+
+    current_binding = load_current_signed_application_bindings()[0]
+    current_relative = PurePosixPath(str(current_binding.artifact_path))
+    good_catalog, good_active = _application_capture_fixture(
+        tmp_path / "good",
+        relative_map_path=current_relative,
+        route="/api/fixture/health",
+    )
+    assert load_captured_application_bindings(
+        good_catalog,
+        good_active,
+        tmp_path / "good",
+    )
+
+    renamed = current_relative.with_name("frontend_contract_routes.v5.json")
+    bad_catalog, bad_active = _application_capture_fixture(
+        tmp_path / "bad",
+        relative_map_path=current_relative,
+        route="/api/fixture/health",
+        additional_route_map=renamed,
+    )
+    with pytest.raises(RuntimeError, match="unknown signed Application route-map"):
+        load_captured_application_bindings(
+            bad_catalog,
+            bad_active,
+            tmp_path / "bad",
+        )
 
 
 def test_authority_and_resolved_plan_scope_is_exact() -> None:
@@ -1712,9 +2911,7 @@ def _child_failure_diagnostic(
     payload = {
         "command": command,
         "cwd": str(cwd),
-        "environment": {
-            key: environment.get(key) for key in _CHILD_DIAGNOSTIC_ENV_KEYS
-        },
+        "environment": {key: environment.get(key) for key in _CHILD_DIAGNOSTIC_ENV_KEYS},
         "returncode": returncode,
         "stdout": _child_output_for_diagnostic(stdout),
         "stderr": _child_output_for_diagnostic(stderr),
@@ -1870,6 +3067,11 @@ import traceback
 
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.panel_auth import PanelAuthManager
+from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+    install_defaultspack_profile_runtime,
+)
+
+install_defaultspack_profile_runtime()
 
 observed = []
 server = None
@@ -1993,9 +3195,7 @@ print(
         {
             "TOBKIRI_USER_DATA": str(fresh_user_data),
             "RUMI_USER_DATA": str(fresh_user_data),
-            "RUMI_SANDBOX_LIMA_STATE": str(
-                fresh_user_data / "sandbox" / "lima-runtime.json"
-            ),
+            "RUMI_SANDBOX_LIMA_STATE": str(fresh_user_data / "sandbox" / "lima-runtime.json"),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(tmp_path / "python-cache"),
         }
@@ -2072,9 +3272,9 @@ def test_retired_setup_functions_and_conformance_pack_are_not_production_packs()
     assert not (RUNTIME / "bootstrap.py").exists()
     assert not (RUNTIME / "rumi_setup").exists()
     assert not (RUNTIME / "tobkiri_host" / "conformance").exists()
-    lifecycle_source = (
-        RUNTIME / "core_runtime" / "app_lifecycle_manager.py"
-    ).read_text(encoding="utf-8")
+    lifecycle_source = (RUNTIME / "core_runtime" / "app_lifecycle_manager.py").read_text(
+        encoding="utf-8"
+    )
     assert "setup_pack_selection.json" not in lifecycle_source
     functions_root = ECOSYSTEM / "defaultspack" / "functions"
     for function_id in (
@@ -2087,11 +3287,7 @@ def test_retired_setup_functions_and_conformance_pack_are_not_production_packs()
         assert not (functions_root / function_id / "main.py").exists()
     assert not (ECOSYSTEM / "conformance_minimal_echo_pack").exists()
     assert (
-        RUNTIME
-        / "tests"
-        / "fixtures"
-        / "conformance_minimal_echo_pack"
-        / "pack.v4.json"
+        RUNTIME / "tests" / "fixtures" / "conformance_minimal_echo_pack" / "pack.v4.json"
     ).is_file()
 
 
@@ -2172,14 +3368,65 @@ def test_v4_runtime_and_protocol_composition_apis_are_live() -> None:
     assert callable(load_verified_catalog)
 
 
-def test_current_sha_green_evidence_reports_no_findings() -> None:
-    """Current SHA evidence is measured directly and is green after migration."""
+def test_executable_source_registry_covers_every_executable_operation() -> None:
+    """The source registry covers every executable Function and Operation."""
+    findings = _executable_source_findings()
+
+    assert not findings
+
+
+def test_migration_status_promotes_only_pack_specific_semantic_proof() -> None:
+    """Only exact legacy-to-v4 comparisons reach semantically-reviewed."""
+    proof, proof_findings = _load_independent_migration_proof()
+
+    assert not proof_findings
+    assert len(proof) == len(_production_pack_dirs())
+    statuses = Counter(
+        _migration_status(path.name, path, proof) for path in _production_pack_dirs()
+    )
+    assert statuses == {"semantically-reviewed": 41, "generated-draft": 99}
+
+
+def test_current_sha_evidence_is_red_while_pack_semantics_are_unproved() -> None:
+    """The complete release gate remains RED for unproved Pack migrations."""
     report = _audit_snapshot()
     expected_head = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
     ).strip()
     assert report["head_sha"] == expected_head
-    assert report["gate"]["status"] == "GREEN"
-    assert report["gate"]["clean"] is True
-    assert report["pack_inventory"]["production_pack_directories"] == 143
-    assert report["pack_inventory"]["v4_artifact_files"] == 572
+    assert report["gate"]["status"] == "RED"
+    assert report["gate"]["clean"] is False
+    pack_count = len(_production_pack_dirs())
+    assert report["pack_inventory"]["production_pack_directories"] == pack_count
+    assert report["pack_inventory"]["catalog_pack_directories"] == pack_count
+    assert report["pack_inventory"]["v4_artifact_files"] == pack_count * len(PACK_ARTIFACTS)
+    assert report["pack_inventory"]["migration_status_counts"] == {
+        "generated-draft": 99,
+        "semantically-reviewed": 41,
+    }
+    assert report["gates"]["artifact_contracts"]["status"] == "GREEN"
+    assert report["gates"]["declaration_disk_runtime"]["status"] == "GREEN"
+    assert report["gates"]["executable_source_registry"]["status"] == "GREEN"
+    assert report["gates"]["migration_evidence"]["status"] == "RED"
+    migration_rules = {item["rule"] for item in report["gates"]["migration_evidence"]["findings"]}
+    assert "migration_release_proof_missing" in migration_rules
+
+
+def test_independent_migration_proof_rejects_tampered_signature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proof content changes cannot pass by retaining the old content digest."""
+    payload = _load_json(MIGRATION_PROOF_PATH)
+    payload["source"]["profile_collection_proof"]["identity_proof"]["defaults_collapsed"] = True
+    tampered = tmp_path / "pack_migration_proof.v1.json"
+    tampered.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(
+        "tests.test_complete_v4_migration_gate.MIGRATION_PROOF_PATH",
+        tampered,
+    )
+
+    proof, findings = _load_independent_migration_proof()
+
+    assert not proof
+    assert findings[0]["rule"] == "independent_migration_proof_invalid"

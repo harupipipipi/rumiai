@@ -67,8 +67,14 @@ def test_profile_resolver_delegates_dependency_order_to_effective_set() -> None:
         "rumi_ai_tool_bridge_pack",
         "rumi_ai_usage_pack",
         "rumi_provider_registry_pack",
-        "rumi_workspace_mount_pack",
+        "rumi_shell_execute_pack",
+        "rumi_git_write_pack",
+        "rumi_git_publish_pack",
         "rumi_host_authority_bridge_pack",
+        "rumi_command_protocol_pack",
+        "rumi_workspace_mount_pack",
+        "rumi_shell_policy_pack",
+        "rumi_git_read_pack",
     ]
     assert effective_order == [
         resolved.profile["base"]["pack_id"],

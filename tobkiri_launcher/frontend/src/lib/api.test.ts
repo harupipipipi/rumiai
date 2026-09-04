@@ -7,6 +7,9 @@ import {
   bootstrapPanelSession,
   checkHealth,
   clearApiPrefetchCache,
+  createNamedProfile,
+  deleteNamedProfile,
+  duplicateNamedProfile,
   disablePack,
   enablePack,
   fetchDashboard,
@@ -14,6 +17,7 @@ import {
   fetchFrontendCatalog,
   fetchRuntimeOperationStatus,
   fetchPacks,
+  fetchNamedProfiles,
   fetchPresentationState,
   installPack,
   invokeFrontendCapability,
@@ -23,6 +27,7 @@ import {
   selectPresentation,
   parseHealthResponse,
   setRuntimeDispatchStatus,
+  updateNamedProfile,
 } from './api.ts';
 import {
   extractExactOperationDescriptors,
@@ -135,6 +140,11 @@ function installFetchMock(): void {
           runtime_ready: true,
           runtime_status: 'runtime_ready',
           runtime_error: null,
+          host_catalog_verified: true,
+          profile_ceremony_available: true,
+          active_profile_ready: true,
+          launch_ready: true,
+          defaults_bootstrap_required: false,
           status: 'ok',
         },
         success: true,
@@ -144,7 +154,15 @@ function installFetchMock(): void {
     const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
-        ? {packs: [], count: 0}
+        ? {
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+          packs: [],
+          count: 0,
+        }
         : {
           pack_id: 'pack-a',
           enabled: true,
@@ -193,7 +211,15 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     const data = route === 'POST /api/pack-control/approval-candidate'
       ? {candidate_id: 'candidate-one', pack_id: 'pack-a', snapshot_digest: `sha256:${'a'.repeat(64)}`}
       : route === 'GET /api/pack-control/catalog'
-        ? {packs: [], count: 0}
+        ? {
+          profile_id: 'profile-a',
+          workspace_id: 'workspace-a',
+          profile_revision: 'sha256:profile',
+          plan_digest: 'sha256:plan',
+          catalog_revision: 'catalog-a',
+          packs: [],
+          count: 0,
+        }
         : {
           pack_id: 'pack-a',
           enabled: true,
@@ -227,6 +253,111 @@ test('Home and Packs use only exact v4 frontend contract routes', async () => {
     'POST /api/pack-control/disable',
   ]);
   assert.equal(lastFetchInit?.method, 'POST');
+});
+
+test('Named Profile CRUD uses exact Host routes, payloads, and registry response validation', async () => {
+  const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+  const profile = (profileId: string, revision: string) => ({
+    profile_id: profileId,
+    profile_revision: revision,
+    profile: {profile_id: profileId, display_name: profileId},
+    order: 0,
+    parent_revision: null,
+    tombstone: false,
+    created_at: 1,
+    updated_at: 1,
+    legacy_ids: [],
+  });
+  const registry = {
+    profile_registry_api_version: 'io.tobkiri.profile-registry.v4',
+    generation: 3,
+    active_profile_id: 'defaults',
+    active_profile_revision: digest('a'),
+    profiles: [profile('defaults', digest('a'))],
+  };
+  const requests: Array<{url: string; method: string; body: unknown}> = [];
+  fetchHandler = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method ?? 'GET',
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({success: true, data: registry}), {
+      headers: {'Content-Type': 'application/json'},
+    });
+  };
+
+  await fetchNamedProfiles();
+  await createNamedProfile({
+    profile_id: 'work-a',
+    display_name: 'Work A',
+    source_profile_id: 'defaults',
+    expected_store_generation: 3,
+  });
+  await updateNamedProfile({
+    profile_id: 'work-a',
+    display_name: 'Work A updated',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+  await duplicateNamedProfile({
+    profile_id: 'work-a',
+    new_profile_id: 'work-b',
+    display_name: 'Work B',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+  await deleteNamedProfile({
+    profile_id: 'work-b',
+    expected_profile_revision: digest('a'),
+    expected_store_generation: 3,
+  });
+
+  assert.deepEqual(requests.map(({url, method}) => `${method} ${url}`), [
+    'GET /api/v4/profiles',
+    'POST /api/v4/profiles/create',
+    'POST /api/v4/profiles/update',
+    'POST /api/v4/profiles/duplicate',
+    'POST /api/v4/profiles/delete',
+  ]);
+  assert.deepEqual(requests.slice(1).map((request) => request.body), [
+    {
+      profile_id: 'work-a',
+      display_name: 'Work A',
+      source_profile_id: 'defaults',
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-a',
+      display_name: 'Work A updated',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-a',
+      new_profile_id: 'work-b',
+      display_name: 'Work B',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+    {
+      profile_id: 'work-b',
+      expected_profile_revision: digest('a'),
+      expected_store_generation: 3,
+    },
+  ]);
+
+  const requestCount = requests.length;
+  assert.throws(
+    () => createNamedProfile({
+      profile_id: 'Work A',
+      display_name: 'Rejected',
+      source_profile_id: 'defaults',
+      expected_store_generation: 3,
+    }),
+    /canonical Profile ID/,
+  );
+  assert.equal(requests.length, requestCount);
 });
 
 test('Pack approval rejects a candidate or approval response for a different state', async () => {
@@ -272,6 +403,7 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
           version: 'rumi.ui.contribution.v1',
           profile_id: 'profile-a',
           profile_revision: 'sha256:profile-a',
+          activation_id: 'activation:profile-a',
           plan_hash: 'sha256:plan-a',
           contributions: [{
             contribution_id: 'file-inspect',
@@ -292,6 +424,8 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
   assert.equal(lastFetchInit?.cache, 'no-store');
   const result = await invokeFrontendCapability({
     profileId: catalog.profile_id,
+    profileRevision: catalog.profile_revision,
+    activationId: catalog.activation_id,
     planHash: catalog.plan_hash,
     catalogHash: catalog.catalog_hash,
     contributionId: 'file-inspect',
@@ -310,6 +444,8 @@ test('dynamic catalog and capability invocation use the exact canonical v4 route
     request_id: invocationBody?.request_id,
     expires_at: invocationBody?.expires_at,
     profile_id: 'profile-a',
+    profile_revision: 'sha256:profile-a',
+    activation_id: 'activation:profile-a',
     plan_hash: 'sha256:plan-a',
     catalog_hash: 'sha256:catalog-a',
     contribution_id: 'file-inspect',
@@ -333,6 +469,8 @@ test('capability invocation keeps the supplied request identity in both body and
 
   await invokeFrontendCapability({
     profileId: 'profile-a',
+    profileRevision: 'sha256:profile-a',
+    activationId: 'activation:profile-a',
     planHash: 'sha256:plan-a',
     catalogHash: 'sha256:catalog-a',
     contributionId: 'contribution-a',
@@ -409,6 +547,7 @@ test('runtime operation invocation uses only its exact invocation contribution a
     invocation_reason: null,
     invokable: true,
     catalog_digest: digest('c'),
+    activation_id: 'activation:defaults-one',
     function_id: 'function.one',
     function_principal_id: 'principal.function.one',
     caller_function_id: 'caller.function.one',
@@ -472,6 +611,9 @@ test('runtime operation invocation uses only its exact invocation contribution a
   assert.equal(decodeURIComponent(lastFetchUrl.replace('/api/contracts/defaultspack/', '')), 'POST /api/ui/capability/invoke');
   assert.equal(body?.contribution_id, 'invocation-contribution');
   assert.equal(body?.catalog_hash, digest('c'));
+  assert.equal(body?.profile_id, 'defaults');
+  assert.equal(body?.profile_revision, digest('a'));
+  assert.equal(body?.activation_id, 'activation:defaults-one');
   assert.equal(body?.plan_hash, digest('b'));
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'catalog_revision'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(body ?? {}, 'operation_digest'), false);
@@ -618,6 +760,11 @@ test('health parsing recognizes reconfirmation and preserves the typed setup pat
     runtime_ready: false,
     runtime_status: 'profile_reconfirmation_required',
     runtime_error: 'internal denial detail is not surfaced by the UI',
+    host_catalog_verified: true,
+    profile_ceremony_available: true,
+    active_profile_ready: false,
+    launch_ready: false,
+    defaults_bootstrap_required: false,
   });
   assert.equal(health.runtime_status, 'profile_reconfirmation_required');
   assert.equal(health.runtime_ready, false);
@@ -693,6 +840,11 @@ test('health parsing accepts only coherent lifecycle relationships across all pe
                 runtime_ready: runtimeReady,
                 runtime_status: runtimeStatus,
                 runtime_error: runtimeError,
+                host_catalog_verified: true,
+                profile_ceremony_available: true,
+                active_profile_ready: runtimeReady,
+                launch_ready: runtimeReady,
+                defaults_bootstrap_required: false,
               };
               const coherent = runtimeStatus === 'starting'
                 ? status === 'ok' && !panelReady && !runtimeReady && runtimeError === null

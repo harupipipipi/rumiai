@@ -43,7 +43,7 @@ export const PACKVM_RECOVERY_CODES = [
 export type PackVMRecoveryCode = typeof PACKVM_RECOVERY_CODES[number];
 
 const PACKVM_RECOVERY_MESSAGES: Record<PackVMRecoveryCode, string> = {
-  PROFILE_NOT_ACTIVE: 'The active Defaults Profile is unavailable; PackVM remains blocked.',
+  PROFILE_NOT_ACTIVE: 'The active Profile is unavailable; PackVM remains blocked.',
   STALE_REVISION: 'The verified Profile revision is stale; refresh authoritative state before retrying.',
   DIGEST_MISMATCH: 'Integrity verification failed: the Profile, Pack v4 lock, and presentation catalog do not agree.',
   UNAPPROVED: 'Host approval is required; no PackVM operation was replayed.',

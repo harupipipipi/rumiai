@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 from tobkiri_host.admission import (
+    AdmissionError,
     AdmissionEstimate,
+    DurableResourceLedger,
     FairAdmissionQueue,
     QueueScope,
     ResourceAmount,
@@ -201,6 +203,76 @@ def test_admission_charge_uses_maximum_and_concurrency() -> None:
         concurrency=2,
     )
     assert estimate.charge().memory_bytes == 600
+
+
+def test_admission_charge_honors_declared_upper_bound() -> None:
+    estimate = AdmissionEstimate(
+        measured_p95_bytes=300,
+        declared_minimum_bytes=100,
+        runtime_floor_bytes=200,
+        profile_reservation_bytes=250,
+        backend_overhead_bytes=150,
+        declared_upper_bound_bytes=900,
+    )
+    assert estimate.charge().memory_bytes == 900
+    with pytest.raises(AdmissionError, match="cannot be negative"):
+        AdmissionEstimate(
+            measured_p95_bytes=1,
+            declared_minimum_bytes=1,
+            runtime_floor_bytes=1,
+            profile_reservation_bytes=1,
+            backend_overhead_bytes=1,
+            declared_upper_bound_bytes=-1,
+        ).charge()
+
+
+def test_durable_ledger_survives_restart_and_fences_successor(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "admission" / "reservations.json"
+    limits = {
+        "runtime_limit": ResourceAmount(1000, 100, 4, 4),
+        "host_free_guard": ResourceAmount(100, 0, 0, 0),
+        "profile_limits": {"p1": ResourceAmount(800, 100, 4, 4)},
+    }
+    identity = {
+        "profile_id": "p1",
+        "profile_revision": digest("revision-a"),
+        "activation_id": "activation-a",
+        "plan_digest": digest("plan-a"),
+    }
+    first = DurableResourceLedger(state_path=state_path, identity=identity, **limits)
+    reservation = first.reserve("p1", ResourceAmount(300, 2, 1, 1))
+    assert state_path.is_file()
+
+    restarted = DurableResourceLedger(
+        state_path=state_path,
+        identity=identity,
+        **limits,
+    )
+    assert restarted.runtime_used == reservation.amount
+    restarted.release(reservation.reservation_id)
+    assert restarted.runtime_used == ResourceAmount(0, 0, 0, 0)
+
+    successor = DurableResourceLedger(
+        state_path=state_path,
+        identity={**identity, "activation_id": "activation-b"},
+        **limits,
+    )
+    assert successor.runtime_used == ResourceAmount(0, 0, 0, 0)
+
+
+def test_durable_ledger_rejects_corrupt_state(tmp_path: Path) -> None:
+    state_path = tmp_path / "reservations.json"
+    state_path.write_text("not-json", encoding="utf-8")
+    with pytest.raises(AdmissionError, match="ledger is invalid"):
+        DurableResourceLedger(
+            runtime_limit=ResourceAmount(1000, 100, 4, 4),
+            host_free_guard=ResourceAmount(100, 0, 0, 0),
+            profile_limits={"p1": ResourceAmount(800, 100, 4, 4)},
+            state_path=state_path,
+            identity={"profile_id": "p1", "activation_id": "a"},
+        )
 
 
 def test_ledger_rejects_before_crossing_host_guard() -> None:

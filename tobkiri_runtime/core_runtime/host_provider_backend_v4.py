@@ -16,6 +16,11 @@ from tobkiri_host.models import (
     OpaqueAuthorityRef,
     RuntimeEvidence,
 )
+from tobkiri_host.ports import (
+    InteractiveApprovalPort,
+    InteractiveEffectPort,
+    WorkspaceMutationPort,
+)
 from tobkiri_protocol.canonical import canonical_digest
 
 
@@ -25,6 +30,14 @@ class HostProviderInvocationContextV4(Protocol):
     @property
     def envelope(self) -> RequestEnvelope:
         """Return the Broker-authenticated envelope for this invocation."""
+
+    @property
+    def presentation_owner_principal_id(self) -> str:
+        """Return the Host-preserved principal which originated this call chain."""
+
+    @property
+    def presentation_owner_session_id(self) -> str:
+        """Return the Host-preserved session which originated this call chain."""
 
     def contract_client(
         self,
@@ -70,6 +83,14 @@ class HostProviderCaptureContextV4:
     catalog_bindings: tuple[ResolvedOperationBinding, ...]
     domain_ids: Mapping[tuple[str, str, str], str]
     user_data_root: Path | None = None
+    # Built-in providers receive only narrow Host ports.  The authority
+    # kernel/store and workspace coordinator/handle table remain Host-owned.
+    interactive_approval_port: InteractiveApprovalPort | None = None
+    # This late-bound port is supplied only to the one verified coordinator
+    # Function which declares it.  It is unavailable until production capture
+    # has built the single Broker for the active Profile.
+    interactive_effect_port: InteractiveEffectPort | None = None
+    workspace_mutation_port: WorkspaceMutationPort | None = None
 
 
 @dataclass(frozen=True)

@@ -15,6 +15,7 @@ import {
 import type {
   ApiDynamicFrontendCatalog,
   ApiPackVMDoctor,
+  PackControlBinding,
   ApiSupervisorDashboard,
   HealthResponseData,
   RuntimeStatus,
@@ -55,6 +56,10 @@ import {
   readSafeStorageValue,
   writeSafeStorageValue,
 } from './lib/safeStorage';
+import {
+  DEVTOOLS_PREFERENCE_STORAGE_KEY,
+  normalizeDevtoolsEnabled,
+} from './lib/devtoolsPreference';
 
 export type {ColorMode, Theme} from './lib/appearance';
 export {AVATAR_OPTIONS} from './lib/avatar';
@@ -164,6 +169,8 @@ interface AppState {
   setSetupDone: (done: boolean) => void;
   isSidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  devtoolsEnabled: boolean;
+  setDevtoolsEnabled: (enabled: boolean) => void;
   toasts: Toast[];
   addToast: (message: string, type: 'success' | 'error') => void;
   removeToast: (id: string) => void;
@@ -176,10 +183,16 @@ interface AppState {
   runtimeStatus: RuntimeStatus;
   runtimeError: string | null;
   runtimeDisconnected: boolean;
+  hostCatalogVerified: boolean;
+  profileCeremonyAvailable: boolean;
+  defaultsBootstrapRequired: boolean;
+  activeProfileReady: boolean;
+  launchReady: boolean;
   lastRuntimeHealthyAt: number | null;
   setRuntimeHealth: (health: HealthResponseData) => void;
   refreshRuntimeHealth: () => Promise<void>;
   packs: Pack[];
+  packCatalogBinding: PackControlBinding | null;
   packsLoading: boolean;
   packsError: string | null;
   packInstallPending: Record<string, boolean>;
@@ -612,6 +625,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({isSidebarOpen: open});
   },
 
+  devtoolsEnabled: normalizeDevtoolsEnabled(
+    readLocalStorage(DEVTOOLS_PREFERENCE_STORAGE_KEY),
+  ),
+  setDevtoolsEnabled: (enabled) => {
+    writeLocalStorage(DEVTOOLS_PREFERENCE_STORAGE_KEY, String(enabled));
+    set({devtoolsEnabled: enabled});
+  },
+
   toasts: [],
   addToast: (message, type) => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -633,6 +654,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   runtimeStatus: 'starting',
   runtimeError: null,
   runtimeDisconnected: false,
+  hostCatalogVerified: false,
+  profileCeremonyAvailable: false,
+  defaultsBootstrapRequired: false,
+  activeProfileReady: false,
+  launchReady: false,
   lastRuntimeHealthyAt: null,
   setRuntimeHealth: (health) => {
     let parsedHealth: HealthResponseData;
@@ -659,6 +685,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       runtimeStatus: parsedHealth.runtime_status,
       runtimeError: parsedHealth.runtime_error,
       runtimeDisconnected: false,
+      hostCatalogVerified: parsedHealth.host_catalog_verified,
+      profileCeremonyAvailable: parsedHealth.profile_ceremony_available,
+      defaultsBootstrapRequired: parsedHealth.defaults_bootstrap_required,
+      activeProfileReady: parsedHealth.active_profile_ready,
+      launchReady: parsedHealth.launch_ready,
       lastRuntimeHealthyAt: parsedHealth.runtime_ready ? Date.now() : state.lastRuntimeHealthyAt,
     }));
   },
@@ -679,6 +710,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   packs: [],
+  packCatalogBinding: null,
   packsLoading: false,
   packsError: null,
   packInstallPending: {},
@@ -745,7 +777,18 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...get().packMutationUnknown,
         };
         const reconciledPackUnknown = reconcilePackMutationJournal(packs, durablePackUnknown);
-        set({packs, packsError: null, packMutationUnknown: reconciledPackUnknown});
+        set({
+          packs,
+          packCatalogBinding: {
+            profile_id: data.profile_id,
+            workspace_id: data.workspace_id,
+            profile_revision: data.profile_revision,
+            plan_digest: data.plan_digest,
+            catalog_revision: data.catalog_revision,
+          },
+          packsError: null,
+          packMutationUnknown: reconciledPackUnknown,
+        });
         if (!options.skipMutationReconciliation) {
           scheduleHydratedPackStatusReconciliation(get, set);
         }
@@ -793,6 +836,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (
           !catalog.profile_id
+          || !catalog.profile_revision
+          || !catalog.activation_id
           || !catalog.plan_hash
           || !catalog.catalog_hash
           || !Array.isArray(catalog.contributions)
@@ -928,6 +973,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (
       !operation.invokable
       || contribution.action_contract !== operation.contractId
+      || contribution.resolved_profile_id !== catalog.profile_id
+      || contribution.resolved_profile_revision !== catalog.profile_revision
+      || contribution.resolved_activation_id !== catalog.activation_id
+      || contribution.resolved_plan_hash !== catalog.plan_hash
     ) {
       throw new Error('Tobkiri has not verified this Pack operation for invocation.');
     }
@@ -947,6 +996,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const result = await invokeFrontendCapability({
         profileId: catalog.profile_id,
+        profileRevision: catalog.profile_revision,
+        activationId: catalog.activation_id,
         planHash: catalog.plan_hash,
         catalogHash: catalog.catalog_hash,
         contributionId: contribution.contribution_id,

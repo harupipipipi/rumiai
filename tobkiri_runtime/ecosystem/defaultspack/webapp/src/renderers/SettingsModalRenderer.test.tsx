@@ -12,7 +12,11 @@ import {
   serializeSlashCommandDrafts,
   slashCommandDraftRowsFromValue,
 } from "./settings/renderers/slashCommandsField";
+import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
+import { SettingsStatusBar } from "./settings/SettingsStatusBar";
+import { ProfileSettingsPanel } from "./settings/ProfileSettingsPanel";
+import { ModelSearchPicker } from "../features/models/ModelSearchPicker";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
 
@@ -25,6 +29,49 @@ function makeModelOption(index: number) {
     model_id: `model-${index}`,
   };
 }
+
+test("settings error surfaces keep severity glyphs separate from stable copy controls", () => {
+  const statusHtml = renderToStaticMarkup(createElement(SettingsStatusBar, {
+    backendNote: "Kernel is unreachable.",
+    backendState: "offline",
+    loadState: { status: "error", message: "Settings refresh failed." },
+    locale: "en",
+    saveState: {
+      dirtyKeys: ["profiles.active_profile"],
+      message: "Profile save failed.",
+      status: "error",
+    },
+  }));
+  const profileHtml = renderToStaticMarkup(createElement(ProfileSettingsPanel, {
+    loadState: { status: "error", message: "Profiles could not load." },
+    locale: "en",
+    onSettingChange: () => undefined,
+    workspace: {
+      activeProfileId: "",
+      defaultProfileId: "",
+      editableCollection: null,
+      modelRoutesText: "",
+      profiles: [],
+    },
+  }));
+  const modelHtml = renderToStaticMarkup(createElement(ModelSearchPicker, {
+    error: "Model search failed.",
+    onChange: () => undefined,
+    onOpenChange: () => undefined,
+    onQueryChange: () => undefined,
+    open: true,
+    query: "demo",
+    value: "",
+  }));
+
+  assert.equal((statusHtml.match(/data-copy-action=""/g) ?? []).length, 3);
+  assert.match(statusHtml, /data-error-icon="error"/);
+  assert.match(profileHtml, /aria-label="Copy profile load error"/);
+  assert.match(profileHtml, /data-copy-action=""/);
+  assert.match(modelHtml, /aria-label="モデル検索エラーをコピー"/);
+  assert.match(modelHtml, /data-error-icon="error"/);
+  assert.match(modelHtml, /data-copy-action=""/);
+});
 
 
 test("settings close guard allows in-flight autosaves and guards only failed dirty changes", () => {
@@ -208,6 +255,12 @@ test("api_key_setup renderer actions target the rendered template field", () => 
     label: "API Setup",
     type: "api_key_setup",
   } as TemplateSettingsField), "api_key_setup_template");
+});
+
+test("cleartext mobile QR flag only enables on explicit opt-in", () => {
+  assert.equal(allowCleartextMobileQr({}), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "0" }), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "1" }), true);
 });
 
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
@@ -837,6 +890,23 @@ test("Models places AI API registration before model API connections", () => {
     html.indexOf('data-settings-field="apis.api_keys"')
       < html.indexOf('data-settings-field="models.model_api_routes"'),
   );
+});
+
+test("CredentialTransferModal keeps transfer device-bound and credential-free", () => {
+  const html = renderToStaticMarkup(
+    createElement(CredentialTransferModal, {
+      providerId: "anthropic",
+      providerLabel: "Anthropic",
+      apiId: "main",
+      onClose: () => undefined,
+    }),
+  );
+
+  assert.match(html, /暗号化して端末へ転送/);
+  assert.match(html, /確認した1台だけ/);
+  assert.doesNotMatch(html, /Rumi Mobile QR/);
+  assert.doesNotMatch(html, /sk-ant-test/);
+  assert.match(html, /Anthropic/);
 });
 
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {

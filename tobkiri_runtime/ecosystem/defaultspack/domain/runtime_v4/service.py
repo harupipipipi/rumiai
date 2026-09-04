@@ -24,6 +24,7 @@ from packaging.version import InvalidVersion, Version
 
 from tobkiri_protocol.canonical import canonical_digest, canonical_json, strict_loads
 from tobkiri_protocol.errors import ProtocolError, SchemaValidationError
+from tobkiri_protocol.executable_catalog import materialization_catalog_digest
 from tobkiri_protocol.profile_scope import normalize_requested_scope_template
 from tobkiri_protocol.platform_artifact import verify_platform_artifact
 from tobkiri_protocol.secure_persistence import (
@@ -39,6 +40,7 @@ _ENVELOPE_SCHEMA = "io.tobkiri.defaultspack-activation-envelope.v1"
 _POINTER_SCHEMA = "io.tobkiri.defaultspack-active-pointer.v1"
 _PENDING_SCHEMA = "io.tobkiri.defaultspack-pending-activation.v1"
 _FOUNDATIONAL_CONTRACT = "conversation.turn.v1"
+_AUTHORITY_MODES = frozenset({"profile_grant", "interactive_only"})
 
 
 class DefaultProfileV4Error(RuntimeError):
@@ -239,20 +241,12 @@ class BundledCatalog:
                     f"executable catalog source identity is stale: {pack_id}"
                 )
             expected_catalog_digest = canonical_digest(
-                {
-                    key: value
-                    for key, value in executable.items()
-                    if key != "catalog_digest"
-                }
+                {key: value for key, value in executable.items() if key != "catalog_digest"}
             )
             if executable["catalog_digest"] != expected_catalog_digest:
-                raise BundleIntegrityError(
-                    f"executable catalog digest is stale: {pack_id}"
-                )
+                raise BundleIntegrityError(f"executable catalog digest is stale: {pack_id}")
             catalog_entries = [
-                item
-                for item in manifest["artifacts"]
-                if item["path"] == "executables.v4.json"
+                item for item in manifest["artifacts"] if item["path"] == "executables.v4.json"
             ]
             if len(catalog_entries) != 1:
                 raise BundleIntegrityError(
@@ -277,9 +271,11 @@ class BundledCatalog:
             artifact_root=(
                 artifact_root.resolve(strict=True)
                 if artifact_root
-                else (root.parent / "platform-artifacts").resolve(strict=True)
-                if (root.parent / "platform-artifacts").is_dir()
-                else None
+                else (
+                    (root.parent / "platform-artifacts").resolve(strict=True)
+                    if (root.parent / "platform-artifacts").is_dir()
+                    else None
+                )
             ),
             executable_catalogs=collections["executable_catalog"],
         )
@@ -302,6 +298,105 @@ class ActiveDefaultProfile:
     activation: Mapping[str, Any]
 
 
+def _application_launch_identity(
+    manifest: Mapping[str, Any],
+) -> tuple[str, str, str]:
+    """Return the one neutral Application contribution or fail closed."""
+
+    pack_id = str(manifest["pack"]["id"])
+    operations = [
+        item
+        for item in manifest["operation_catalog"]
+        if item["owner"] == pack_id and item["operation_id"] == "launch"
+    ]
+    if len(operations) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is ambiguous")
+    operation = operations[0]
+    providers = [
+        item
+        for item in manifest["provider_catalog"]
+        if item["owner"] == pack_id
+        and item["provider_id"] == operation["provider_id"]
+        and item["contract_reference"] == operation["contract_reference"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    functions = [
+        item
+        for item in manifest["functions"]
+        if item["id"] == operation["provider_id"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    if len(providers) != 1 or len(functions) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is ambiguous")
+    provider = providers[0]
+    function = functions[0]
+    contracts = [
+        item
+        for item in manifest["contracts"]
+        if item["contract_id"] == operation["contract_reference"]
+        and item["revision_digest"] == function["contract_revision_digest"]
+        and operation["operation_id"] in item["operations"]
+    ]
+    if len(contracts) != 1:
+        raise ProfileResolutionDenied("Application launch contribution is stale")
+    return (
+        str(provider["provider_id"]),
+        str(operation["contract_reference"]),
+        str(operation["operation_id"]),
+    )
+
+
+def project_runtime_launch_selector(active: ActiveDefaultProfile) -> dict[str, Any]:
+    """Project the exact active launch contribution without catalog fallback.
+
+    The contribution is already part of the canonical ResolvedPlan. This
+    projection adds only the Activation identity that selects that immutable
+    plan; it deliberately creates no second digest or authority record.
+    """
+
+    lock = active.resolved.lock
+    plan = active.resolved.plan
+    activation = active.activation
+    plan_digest = canonical_digest(
+        {key: value for key, value in plan.items() if key != "plan_digest"}
+    )
+    if (plan["profile_id"], plan["profile_revision"], plan_digest) != (
+        lock["profile_id"],
+        lock["profile_revision"],
+        lock["plan_digest"],
+    ) or plan_digest != plan["plan_digest"]:
+        raise ProfileResolutionDenied("runtime launch selector plan is stale")
+    if (
+        activation.get("state") != "active"
+        or activation.get("profile_id") != plan["profile_id"]
+        or activation.get("profile_revision") != plan["profile_revision"]
+        or activation.get("plan_digest") != plan["plan_digest"]
+        or activation.get("lock_digest") != lock["lock_digest"]
+    ):
+        raise ProfileResolutionDenied("runtime launch selector activation is stale")
+    contribution = plan.get("launch_contribution")
+    application = plan.get("application")
+    shell = lock.get("shell")
+    if (
+        not isinstance(contribution, Mapping)
+        or not isinstance(application, Mapping)
+        or not isinstance(shell, Mapping)
+        or application.get("executable_artifact_digest")
+        != plan["shell"].get("executable_artifact_digest")
+        or contribution.get("platform") != shell.get("platform")
+        or contribution.get("architecture") != shell.get("architecture")
+    ):
+        raise ProfileResolutionDenied("runtime launch contribution is unavailable")
+    return {
+        "selector_api_version": "io.tobkiri.runtime-launch-selector.v1",
+        "profile_id": plan["profile_id"],
+        "profile_revision": plan["profile_revision"],
+        "activation_id": activation["activation_id"],
+        "plan_digest": plan["plan_digest"],
+        "launch_contribution": dict(contribution),
+    }
+
+
 def _edge_key(edge: Mapping[str, Any]) -> str:
     return "|".join(
         str(edge.get(field) or "")
@@ -312,6 +407,15 @@ def _edge_key(edge: Mapping[str, Any]) -> str:
             "operation_id",
         )
     )
+
+
+def _authority_mode(edge: Mapping[str, Any]) -> str:
+    """Return the closed activation authority policy for one requested edge."""
+
+    value = edge.get("authority_mode", "profile_grant")
+    if value not in _AUTHORITY_MODES:
+        raise ProfileResolutionDenied("requested edge authority mode is invalid")
+    return str(value)
 
 
 def _provider_candidates(
@@ -408,6 +512,13 @@ def dynamic_profile_edges(
         if manifest is None:
             raise ProfileResolutionDenied(f"dynamic Pack is not in the exact inventory: {pack_id}")
         closure.add(pack_id)
+        if depth >= 1:
+            # Only a selected optional Pack and its direct signed dependency
+            # receive dynamic caller edges.  The resolver validates the full
+            # transitive implementation closure separately; inferring callers
+            # beyond this point would both broaden authority and walk valid
+            # Host-provider dependency cycles.
+            continue
         dependencies = tuple(
             str(dependency) for dependency in manifest["requirements"]["pack_dependencies"]
         )
@@ -471,6 +582,10 @@ def dynamic_profile_edges(
                     raise ProfileResolutionDenied(
                         f"dynamic Pack dependency caller is ambiguous: {pack_id}"
                     )
+                # Dynamic Pack edges are never user-selected interactive
+                # authority.  Their absent mode deliberately means the closed
+                # ``profile_grant`` default, preserving older resolved Profile
+                # bytes while preventing a dynamic source from opting in.
                 result.append(
                     {
                         "caller_function_id": operation_caller,
@@ -500,9 +615,7 @@ def _exact_executable_variant(
     pack_id = str(manifest["pack"]["id"])
     executable = catalog.executable_catalogs.get(pack_id)
     if executable is None:
-        raise ProfileResolutionDenied(
-            f"executable catalog is not bundled for Pack: {pack_id}"
-        )
+        raise ProfileResolutionDenied(f"executable catalog is not bundled for Pack: {pack_id}")
     if (
         executable["pack_id"] != pack_id
         or executable["source_identity"] != manifest["integrity"]["source_identity"]
@@ -513,11 +626,7 @@ def _exact_executable_variant(
     )
     if executable["catalog_digest"] != expected_catalog_digest:
         raise ProfileResolutionDenied("executable catalog digest is stale")
-    variants = [
-        item
-        for item in executable["variants"]
-        if item["function_id"] == function["id"]
-    ]
+    variants = [item for item in executable["variants"] if item["function_id"] == function["id"]]
     if len(variants) != 1:
         raise ProfileResolutionDenied(
             f"executable variant is not unique: {pack_id}/{function['id']}"
@@ -537,11 +646,13 @@ def _exact_executable_variant(
     expected_execution_kind = (
         "host_extension"
         if manifest["pack"]["kind"] == "host_extension"
-        else "wasm"
-        if function.get("isolation") == "wasm_component"
-        else "remote"
-        if function.get("isolation") == "remote"
-        else "pack_vm"
+        else (
+            "wasm"
+            if function.get("isolation") == "wasm_component"
+            else "remote"
+            if function.get("isolation") == "remote"
+            else "pack_vm"
+        )
     )
     if variant["execution_kind"] != expected_execution_kind:
         raise ProfileResolutionDenied("executable variant execution kind is stale")
@@ -685,7 +796,7 @@ def resolve_default_profile(
         "Profile Shell artifact pin",
     )
     _require_optional_pin(
-        shell_request["executable_artifact_digest"],
+        shell_request.get("executable_artifact_digest"),
         str(selected_variant["entrypoint_digest"]),
         "Profile Shell executable pin",
     )
@@ -855,6 +966,7 @@ def resolve_default_profile(
     references: list[str] = []
     for source_edge in all_source_edges:
         edge = dict(source_edge)
+        authority_mode = _authority_mode(edge)
         candidates = _provider_candidates(selected, edge["contract_id"], edge["operation_id"])
         candidates = [item for item in candidates if item[1]["id"] == edge["target_provider_id"]]
         if len(candidates) != 1:
@@ -898,12 +1010,17 @@ def resolve_default_profile(
             str(edge["operation_id"]),
         )
         domain_kind = function.get("isolation", "pack_vm")
+        try:
+            executable_catalog_digest = materialization_catalog_digest(
+                manifest,
+                catalog.executable_catalogs[manifest["pack"]["id"]],
+            )
+        except ValueError as exc:
+            raise ProfileResolutionDenied(str(exc)) from exc
         pin = {
             "pack_id": manifest["pack"]["id"],
             "artifact_digest": manifest["pack"]["artifact_digest"],
-            "executable_catalog_digest": catalog.executable_catalogs[
-                manifest["pack"]["id"]
-            ]["catalog_digest"],
+            "executable_catalog_digest": executable_catalog_digest,
             "variant_id": variant["variant_id"],
             "platform": variant["platform"],
             "architecture": variant["architecture"],
@@ -916,27 +1033,28 @@ def resolve_default_profile(
         previous_pin = variant_pins.setdefault(pin_key, pin)
         if previous_pin != pin:
             raise ProfileResolutionDenied("one executable variant has conflicting pins")
-        bindings.append(
-            {
-                "caller_function_id": edge["caller_function_id"],
-                "pack_id": manifest["pack"]["id"],
-                "artifact_digest": manifest["pack"]["artifact_digest"],
-                "function_principal": principal,
-                "contract_id": edge["contract_id"],
-                "operation_id": edge["operation_id"],
-                "domain_kind": domain_kind,
-                "executable_catalog_digest": pin["executable_catalog_digest"],
-                "variant_id": pin["variant_id"],
-                "platform": pin["platform"],
-                "architecture": pin["architecture"],
-                "runtime_abi": pin["runtime_abi"],
-                "backend": pin["backend"],
-                "execution_kind": pin["execution_kind"],
-                "authority_reference": reference,
-                "requested_scope_digest": canonical_digest(edge["requested_scope_template"]),
-                "adapter_digests": [],
-            }
-        )
+        binding = {
+            "caller_function_id": edge["caller_function_id"],
+            "pack_id": manifest["pack"]["id"],
+            "artifact_digest": manifest["pack"]["artifact_digest"],
+            "function_principal": principal,
+            "contract_id": edge["contract_id"],
+            "operation_id": edge["operation_id"],
+            "domain_kind": domain_kind,
+            "executable_catalog_digest": pin["executable_catalog_digest"],
+            "variant_id": pin["variant_id"],
+            "platform": pin["platform"],
+            "architecture": pin["architecture"],
+            "runtime_abi": pin["runtime_abi"],
+            "backend": pin["backend"],
+            "execution_kind": pin["execution_kind"],
+            "authority_reference": reference,
+            "requested_scope_digest": canonical_digest(edge["requested_scope_template"]),
+            "adapter_digests": [],
+        }
+        if authority_mode == "interactive_only":
+            binding["authority_mode"] = authority_mode
+        bindings.append(binding)
 
     profile = dict(source)
     profile["state"] = "resolved"
@@ -946,16 +1064,18 @@ def resolve_default_profile(
         "definition_revision": base_definition["definition_revision"],
         "resolution": "verified",
     }
-    profile["shell"] = {
+    resolved_shell = {
         "provider_id": provider_id,
         "pack_id": shell_pack_id,
         "artifact_digest": shell_manifest["pack"]["artifact_digest"],
-        "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_revision": shell_definition["definition_revision"],
         "contract_id": "app.shell.v1",
         "platform": shell_request["platform"],
         "architecture": shell_request["architecture"],
     }
+    if source.get("profile_api_version") == "io.tobkiri.profile.v5":
+        resolved_shell["executable_artifact_digest"] = selected_variant["entrypoint_digest"]
+    profile["shell"] = resolved_shell
     profile["packs"] = [
         {
             "pack_id": manifest["pack"]["id"],
@@ -966,6 +1086,16 @@ def resolve_default_profile(
         if manifest["pack"]["id"] not in {base_id, shell_pack_id}
     ]
     profile["requested_edges"] = resolved_edges
+    from core_runtime.profile_content_projection import (
+        resolve_profile_projection,
+        selected_projection_roots,
+    )
+
+    profile["content_projections"] = sorted(
+        [resolve_profile_projection(item) for item in source.get("content_projections") or []],
+        key=lambda item: item["projection_id"],
+    )
+    selected_projection_roots(profile["content_projections"])
     profile["authority_references"] = references
     profile["profile_authority_snapshot_digest"] = snapshot_digest
     catalog_revision = canonical_digest(
@@ -1015,13 +1145,31 @@ def resolve_default_profile(
             ],
         }
     )
-    closure_digest = canonical_digest(effective_set)
+    closure_digest = canonical_digest(
+        {
+            "effective_set": effective_set,
+            "content_projections": profile["content_projections"],
+        }
+    )
     provenance_digest = canonical_digest(profile["provenance"])
     application = {
         "pack_id": application_ids[0],
         "artifact_digest": application_manifest["pack"]["artifact_digest"],
         "executable_artifact_digest": selected_variant["entrypoint_digest"],
         "definition_digest": canonical_digest(application_manifest),
+    }
+    launch_provider_id, launch_contract_id, launch_operation_id = _application_launch_identity(
+        application_manifest
+    )
+    launch_contribution = {
+        "provider_id": launch_provider_id,
+        "contract_id": launch_contract_id,
+        "operation_id": launch_operation_id,
+        "platform": selected_variant["platform"],
+        "architecture": selected_variant["architecture"],
+        "artifact_digest": selected_variant["artifact_digest"],
+        "relative_path": selected_variant["relative_path"],
+        "entrypoint": selected_variant["entrypoint"],
     }
 
     plan: dict[str, Any] = {
@@ -1047,7 +1195,9 @@ def resolve_default_profile(
             "definition_digest": canonical_digest(shell_definition),
         },
         "application": application,
+        "launch_contribution": launch_contribution,
         "effective_set": effective_set,
+        "content_projections": profile["content_projections"],
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
         "closure_digest": closure_digest,
@@ -1073,11 +1223,16 @@ def resolve_default_profile(
             "artifact_digest": base_manifest["pack"]["artifact_digest"],
             "definition_revision": base_definition["definition_revision"],
         },
-        "shell": dict(profile["shell"]),
+        "shell": {
+            **dict(profile["shell"]),
+            "executable_artifact_digest": selected_variant["entrypoint_digest"],
+        },
         "application": application,
         "effective_set": effective_set,
+        "content_projections": profile["content_projections"],
         "variant_pins": sorted(
-            variant_pins.values(), key=lambda item: (item["pack_id"], item["variant_id"])
+            variant_pins.values(),
+            key=lambda item: (item["pack_id"], item["variant_id"]),
         ),
         "requested_edges_digest": requested_edges_digest,
         "constraints_digest": constraints_digest,
@@ -1565,7 +1720,12 @@ class ActivationStore:
                     acquired = True
                     break
                 except OSError as exc:
-                    if exc.errno not in {None, errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    if exc.errno not in {
+                        None,
+                        errno.EACCES,
+                        errno.EAGAIN,
+                        errno.EDEADLK,
+                    }:
                         raise ProfileResolutionDenied(
                             "activation process lock is unavailable"
                         ) from exc
@@ -1961,7 +2121,13 @@ class ActivationStore:
             raise
         if (
             legacy_effective != successor.plan["effective_set"]
-            or canonical_digest(legacy_effective) != successor.plan["closure_digest"]
+            or canonical_digest(
+                {
+                    "effective_set": legacy_effective,
+                    "content_projections": successor.plan["content_projections"],
+                }
+            )
+            != successor.plan["closure_digest"]
             or lock["base"] != successor.lock["base"]
             or {key: plan["base"][key] for key in ("pack_id", "artifact_digest")}
             != {key: successor.plan["base"][key] for key in ("pack_id", "artifact_digest")}
@@ -2222,6 +2388,7 @@ class ActivationStore:
             "bundle_digest",
             "application",
             "effective_set",
+            "content_projections",
             "requested_edges_digest",
             "constraints_digest",
             "closure_digest",
@@ -2240,8 +2407,16 @@ class ActivationStore:
             raise ProfileResolutionDenied("Profile requested edge set is stale")
         if plan["provenance_digest"] != canonical_digest(profile["provenance"]):
             raise ProfileResolutionDenied("Profile provenance binding is stale")
-        if plan["closure_digest"] != canonical_digest(plan["effective_set"]):
+        if plan["closure_digest"] != canonical_digest(
+            {
+                "effective_set": plan["effective_set"],
+                "content_projections": plan["content_projections"],
+            }
+        ):
             raise ProfileResolutionDenied("Profile closure digest is stale")
+        from core_runtime.profile_content_projection import selected_projection_roots
+
+        selected_projection_roots(plan["content_projections"])
         effective_ids = [item["identity"] for item in plan["effective_set"]]
         if len(effective_ids) != len(set(effective_ids)):
             raise ProfileResolutionDenied("Profile closure contains duplicate artifacts")
@@ -2278,6 +2453,7 @@ class ActivationStore:
             _edge_key(edge): (
                 edge["authority_reference"],
                 canonical_digest(edge["requested_scope_template"]),
+                _authority_mode(edge),
             )
             for edge in profile["requested_edges"]
         }
@@ -2306,6 +2482,7 @@ class ActivationStore:
                 or (
                     matches[0]["authority_reference"],
                     matches[0]["requested_scope_digest"],
+                    _authority_mode(matches[0]),
                 )
                 != edge_bindings[_edge_key(edge)]
             ):

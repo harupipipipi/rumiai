@@ -37,7 +37,7 @@ class ProductionRuntimeV4:
         pack_roots: Mapping[str, Path],
         supporting_artifacts: Sequence[PackArtifact],
         verified_effective_artifacts: Mapping[str, str],
-        authority_ceilings: Mapping[tuple[str, str], AuthorityCeilings],
+        authority_ceilings: Mapping[tuple[str, ...], AuthorityCeilings],
     ) -> "ProductionRuntimeV4":
         """Compile only exact plan Pack roots and capture the active graph."""
         binding_pack_ids = {item["pack_id"] for item in plan["bindings"]}
@@ -94,7 +94,7 @@ class ProductionRuntimeV4:
         *,
         broker: RequestBroker,
         context_for: Callable[..., RequestContext],
-        effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]],
+        effect_scope_for: Callable[..., Mapping[str, Any]],
         providers: Mapping[str, tuple[Mapping[str, Any], ...]],
         authority_control: AuthorityV4Adapter | None = None,
         current_capture_check: Callable[[], None] | None = None,
@@ -109,8 +109,10 @@ class ProductionRuntimeV4:
             effect_scope_for=effect_scope_for,
             providers=providers,
             profile_id=str(self.composition.profile["profile_id"]),
-            profile_revision=str(self.composition.plan["profile_revision"]),
             plan_digest=str(self.composition.plan["plan_digest"]),
+            profile_revision=str(self.composition.plan["profile_revision"]),
+            activation_id=str(self.composition.activation["activation_id"]),
+            security_epoch=int(self.composition.activation["security_epoch"]),
             authority_control=authority_control,
             current_capture_check=current_capture_check,
             owned_authority_store=owned_authority_store,
@@ -125,11 +127,13 @@ class V4DispatchSession:
 
     broker: RequestBroker
     context_for: Callable[..., RequestContext]
-    effect_scope_for: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]]
+    effect_scope_for: Callable[..., Mapping[str, Any]]
     providers: Mapping[str, tuple[Mapping[str, Any], ...]]
     profile_id: str
     plan_digest: str
-    profile_revision: str = ""
+    profile_revision: str
+    activation_id: str
+    security_epoch: int = 0
     authority_control: AuthorityV4Adapter | None = None
     current_capture_check: Callable[[], None] | None = None
     owned_authority_store: AuthorityStore | None = None
@@ -199,6 +203,8 @@ class V4DispatchSession:
             "backend_id": backend.status.backend_id,
             "backend_digest": backend.status.backend_digest,
             "profile_id": self.profile_id,
+            "profile_revision": self.profile_revision,
+            "activation_id": self.activation_id,
             "plan_digest": self.plan_digest,
         }
         if any(provider.get(key) != value for key, value in expected.items()):
@@ -227,6 +233,19 @@ class V4DispatchSession:
             context = self.context_for(contract_id, operation_id, session_id)
         else:
             context = self.context_for(contract_id, operation_id)
+        scope_parameter_count = len(inspect.signature(self.effect_scope_for).parameters)
+        if scope_parameter_count >= 4:
+            scope = self.effect_scope_for(
+                contract_id,
+                operation_id,
+                arguments,
+                context,
+            )
+        else:
+            # Compatibility for the small conformance adapters that still
+            # expose the original three-argument callback.  Production
+            # capture always supplies the context-aware form above.
+            scope = self.effect_scope_for(contract_id, operation_id, arguments)
         return self.broker.invoke(
             InvocationFrame(
                 contract_id=contract_id,
@@ -235,7 +254,7 @@ class V4DispatchSession:
                 payload=arguments,
             ),
             context,
-            effect_scope=self.effect_scope_for(contract_id, operation_id, arguments),
+            effect_scope=scope,
         )
 
 
@@ -259,7 +278,11 @@ class CapturedDispatchSession(Protocol):
 
     @property
     def profile_revision(self) -> str:
-        """Return the exact captured Profile document revision."""
+        """Return the exact captured Profile revision."""
+
+    @property
+    def activation_id(self) -> str:
+        """Return the exact captured activation identity."""
 
 
 def install_dispatch_session(
@@ -270,8 +293,10 @@ def install_dispatch_session(
         raise ValueError("v4 dispatch session profile_id must be non-empty")
     if not session.plan_digest.startswith("sha256:"):
         raise ValueError("v4 dispatch session plan_digest must be canonical")
-    if session.profile_revision and not session.profile_revision.startswith("sha256:"):
+    if not session.profile_revision.startswith("sha256:"):
         raise ValueError("v4 dispatch session profile_revision must be canonical")
+    if not session.activation_id.strip():
+        raise ValueError("v4 dispatch session activation_id must be non-empty")
     container.set_instance("v4_dispatch_session", session)
 
 

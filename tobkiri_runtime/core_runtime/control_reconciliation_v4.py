@@ -1880,7 +1880,6 @@ class ControlReconciliationStore:
     @staticmethod
     def _operation_projection(record: Mapping[str, Any]) -> Mapping[str, Any]:
         return {
-            "runtime_surface_api_version": "io.tobkiri.launcher.runtime-surface.v4",
             "operation_status_api_version": "io.tobkiri.control-operation-status.v1",
             "request_id": record["request_id"],
             "operation_id": record["operation_id"],

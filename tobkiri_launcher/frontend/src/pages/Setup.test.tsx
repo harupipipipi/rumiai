@@ -95,6 +95,9 @@ test('activation denial remains visible and disables confirmation controls', () 
   />);
 
   assert.match(html, /Profile revision is stale/);
+  assert.match(html, /data-error-icon="activation-denied"/);
+  assert.match(html, /lucide-shield-alert/);
+  assert.match(html, /lucide-copy/);
   assert.match(html, /disabled=""/);
 });
 
@@ -109,6 +112,6 @@ test('reconfirmation setup copy exposes only the Host-owned bootstrap ceremony',
 test('the current GUI has no dependency on retired setup-pack routing', () => {
   assert.doesNotMatch(setupSource, /setupPack|setup_pack|\/setup\?return_to/);
   assert.doesNotMatch(appSource, /hasSelectedSetupPack|setupPacks/);
-  assert.match(appSource, /fetchDefaultsSetupState/);
-  assert.match(appSource, /state\.state === 'active'/);
+  assert.doesNotMatch(appSource, /fetchDefaultsSetupState/);
+  assert.doesNotMatch(appSource, /profile_reconfirmation_required/);
 });

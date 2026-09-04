@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import hashlib
 import re
 import sys
@@ -21,6 +22,9 @@ from tobkiri_protocol.canonical import canonical_digest, strict_loads  # noqa: E
 from tobkiri_protocol.defaultspack_bundle_order import (  # noqa: E402
     canonical_defaultspack_bundle_entries,
 )
+from tobkiri_protocol.executable_catalog import (  # noqa: E402
+    materialization_catalog_digest,
+)
 from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 
@@ -32,6 +36,19 @@ V4_DOCUMENT_SCHEMAS = {
 }
 V4_BUNDLE_LOCK = "bundle.lock.json"
 V4_BUNDLE_DEFAULTSPACK = "packs/defaultspack.pack.v4.json"
+V4_DEFAULTSPACK_CANONICAL_SOURCE = (DEFAULTSPACK_ROOT / "pack.v4.json").relative_to(ROOT).as_posix()
+V4_DEFAULTSPACK_PROJECTION_GENERATOR = "tobkiri.scripts.generate_defaultspack_v4_bundle"
+V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH = (
+    "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py"
+)
+V4_DEFAULTSPACK_PROJECTION_GENERATOR_VERSION = "2.1.0"
+V4_SOURCE_ONLY_COMPANIONS = frozenset(
+    {
+        "defaults.profile.intent.v1.json",
+        "defaults.profile.lock.v5.json",
+        "defaults.release.provenance.json",
+    }
+)
 V4_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -178,6 +195,9 @@ def _check_artifact_index(
         runtime_paths.add(relative_path)
         artifact_kind = str(item.get("kind") or "")
         expected_role = {
+            "host_contract_contributions.v1.json": "host_contract_contribution",
+            "update_metadata.v1.json": "host_contract_update_metadata",
+        }.get(relative_path) or {
             "sidecar": "sidecar",
             "executable": "runtime",
         }.get(artifact_kind)
@@ -223,9 +243,7 @@ def _check_artifact_index(
     for relative_path in sorted(set(expected) - set(actual_entries)):
         errors.append(f"artifact index is missing an artifact: {relative_path}")
 
-    if index.get("artifact_set_digest") != pack.get("integrity", {}).get(
-        "artifact_set_digest"
-    ):
+    if index.get("artifact_set_digest") != pack.get("integrity", {}).get("artifact_set_digest"):
         errors.append("artifact index artifact_set_digest disagrees with the v4 Pack")
     if index.get("artifact_set_digest") != canonical_digest(pack.get("artifacts", [])):
         errors.append("artifact index artifact_set_digest is not canonical")
@@ -306,15 +324,126 @@ def _check_executable_catalog(
 
         compile_pack_root(root)
     except Exception as exc:
-        errors.append(
-            "v4 executable catalog compilation failed: "
-            f"{type(exc).__name__}: {exc}"
-        )
+        errors.append(f"v4 executable catalog compilation failed: {type(exc).__name__}: {exc}")
 
 
-def _check_bundle(
-    errors: list[str], root: Path, pack: dict[str, Any]
+def _projection_semantics(document: dict[str, Any]) -> dict[str, Any]:
+    """Return Pack semantics after removing generated projection-only fields."""
+
+    projection = copy.deepcopy(document)
+    projection.pop("provenance", None)
+    projection.pop("integrity", None)
+    artifacts = projection.get("artifacts")
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and artifact.get("path") == "executables.v4.json":
+                artifact.pop("digest", None)
+    return projection
+
+
+def _check_defaultspack_bundle_projection(
+    errors: list[str],
+    root: Path,
+    bundle_root: Path,
+    canonical_pack: dict[str, Any],
+    bundled_pack: dict[str, Any],
 ) -> None:
+    """Verify the bundle Pack is a source-bound derivative, never a byte mirror."""
+
+    canonical_path = root / "pack.v4.json"
+    projection_path = bundle_root / V4_BUNDLE_DEFAULTSPACK
+    try:
+        canonical_raw = canonical_path.read_bytes()
+        projection_raw = projection_path.read_bytes()
+    except OSError as exc:
+        errors.append(f"cannot read bundled defaultspack projection: {exc}")
+        return
+    if projection_raw == canonical_raw:
+        errors.append("bundled defaultspack Pack must be a generated projection")
+
+    provenance = bundled_pack.get("provenance")
+    if not isinstance(provenance, dict):
+        errors.append("bundled defaultspack projection provenance is missing")
+        return
+    source_digest = _sha256_file(canonical_path)
+    generator_path = _safe_file(
+        errors,
+        ROOT.parent,
+        V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+        "defaultspack projection generator",
+    )
+    generator_digest = _sha256_file(generator_path) if generator_path is not None else None
+    expected_inventory = canonical_digest(
+        [
+            {
+                "path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+                "digest": source_digest,
+            }
+        ]
+    )
+    expected_content_root = canonical_digest(
+        {
+            "source_path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+            "source_digest": source_digest,
+            "generator_path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+            "generator_digest": generator_digest,
+            "input_inventory_digest": expected_inventory,
+        }
+    )
+    expected_values: dict[str, object] = {
+        "schema": "io.tobkiri.provenance.v2",
+        "source_kind": "generated",
+        "source_path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+        "source_digest": source_digest,
+        "repository_commit": canonical_pack.get("provenance", {}).get("repository_commit"),
+        "repository_commit_trusted": False,
+        "generator": V4_DEFAULTSPACK_PROJECTION_GENERATOR,
+        "generator_version": V4_DEFAULTSPACK_PROJECTION_GENERATOR_VERSION,
+        "generator_path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+        "generator_digest": generator_digest,
+        "input_inventory_digest": expected_inventory,
+        "content_root_digest": expected_content_root,
+        "normative": True,
+    }
+    for field, expected in expected_values.items():
+        if provenance.get(field) != expected:
+            errors.append(f"bundled defaultspack projection provenance is stale: {field}")
+    expected_evidence = [
+        {
+            "path": V4_DEFAULTSPACK_PROJECTION_GENERATOR_PATH,
+            "rule_id": "normative-generator-bytes",
+            "digest": generator_digest,
+        },
+        {
+            "path": V4_DEFAULTSPACK_CANONICAL_SOURCE,
+            "rule_id": "normative-input-bytes",
+            "digest": source_digest,
+        },
+    ]
+    if provenance.get("evidence") != expected_evidence:
+        errors.append("bundled defaultspack projection provenance evidence is stale")
+
+    if _projection_semantics(bundled_pack) != _projection_semantics(canonical_pack):
+        errors.append("bundled defaultspack projection semantics differ from canonical Pack")
+
+    integrity = bundled_pack.get("integrity")
+    if not isinstance(integrity, dict):
+        errors.append("bundled defaultspack projection integrity is missing")
+        return
+    if integrity.get("source_identity") != source_digest:
+        errors.append("bundled defaultspack projection source identity is stale")
+    canonical_identity = canonical_pack.get("integrity", {}).get("source_identity")
+    if integrity.get("source_identity") == canonical_identity:
+        errors.append("bundled defaultspack projection reused canonical source identity")
+    if integrity.get("artifact_set_digest") != canonical_digest(bundled_pack.get("artifacts", [])):
+        errors.append("bundled defaultspack projection artifact set is stale")
+    if integrity.get("contract_catalog_digest") != canonical_digest(
+        bundled_pack.get("contracts", [])
+    ):
+        errors.append("bundled defaultspack projection contract catalog is stale")
+
+
+def _check_bundle(errors: list[str], root: Path, pack: dict[str, Any]) -> None:
     """Verify every byte named by the v4 bundle lock and reject extras."""
     bundle_root = root / "v4"
     if bundle_root.is_symlink() or not bundle_root.is_dir():
@@ -377,19 +506,24 @@ def _check_bundle(
             document = validate_document(candidate.read_bytes(), kind)
         except Exception as exc:
             errors.append(
-                f"invalid v4 bundle document {relative_path}: "
-                f"{type(exc).__name__}: {exc}"
+                f"invalid v4 bundle document {relative_path}: {type(exc).__name__}: {exc}"
             )
             continue
         identity_source = document.get("pack") if kind == "pack" else document
-        identity_field = "id" if kind == "pack" else (
-            "pack_id"
-            if kind in {"base", "executable_catalog"}
-            else "provider_id"
-            if kind == "shell"
-            else "profile_id"
+        identity_field = (
+            "id"
+            if kind == "pack"
+            else (
+                "pack_id"
+                if kind in {"base", "executable_catalog"}
+                else "provider_id"
+                if kind == "shell"
+                else "profile_id"
+            )
         )
-        identity = identity_source.get(identity_field) if isinstance(identity_source, dict) else None
+        identity = (
+            identity_source.get(identity_field) if isinstance(identity_source, dict) else None
+        )
         identity_key = (str(kind), str(identity))
         if identity_key in bundle_documents:
             errors.append(f"v4 bundle contains a duplicate identity: {kind}:{identity}")
@@ -402,13 +536,81 @@ def _check_bundle(
         if manifest is None:
             errors.append(f"executable catalog has no bundled Pack manifest: {identity}")
             continue
-        if catalog.get("source_identity") != manifest.get("integrity", {}).get(
-            "source_identity"
-        ):
+        if catalog.get("source_identity") != manifest.get("integrity", {}).get("source_identity"):
             errors.append(f"executable catalog source identity is stale: {identity}")
         unsigned = {key: value for key, value in catalog.items() if key != "catalog_digest"}
         if catalog.get("catalog_digest") != canonical_digest(unsigned):
             errors.append(f"executable catalog digest is stale: {identity}")
+        try:
+            materialization_digest = materialization_catalog_digest(manifest, catalog)
+        except ValueError as exc:
+            errors.append(f"executable materialization pin is invalid: {identity}: {exc}")
+            materialization_digest = None
+        provenance = manifest.get("provenance")
+        is_projection = (
+            isinstance(provenance, dict)
+            and provenance.get("schema") == "io.tobkiri.provenance.v2"
+            and provenance.get("source_kind") == "generated"
+            and provenance.get("source_digest")
+            == manifest.get("integrity", {}).get("source_identity")
+        )
+        if is_projection:
+            expected_source_path = f"ecosystem/{identity}/pack.v4.json"
+            if provenance.get("source_path") != expected_source_path:
+                errors.append(f"projection source path is not canonical: {identity}")
+            source_manifest_path = _safe_file(
+                errors,
+                ROOT,
+                expected_source_path,
+                "projection source manifest",
+            )
+            source_catalog_path = _safe_file(
+                errors,
+                ROOT,
+                f"ecosystem/{identity}/executables.v4.json",
+                "projection materialization catalog",
+            )
+            if source_manifest_path is not None and source_catalog_path is not None:
+                try:
+                    source_manifest = validate_document(
+                        source_manifest_path.read_bytes(),
+                        "pack",
+                    )
+                    source_catalog = validate_document(
+                        source_catalog_path.read_bytes(),
+                        "executable_catalog",
+                    )
+                except Exception as exc:
+                    errors.append(
+                        "projection materialization catalog is invalid: "
+                        f"{identity}: {type(exc).__name__}: {exc}"
+                    )
+                else:
+                    source_unsigned = {
+                        key: value
+                        for key, value in source_catalog.items()
+                        if key != "catalog_digest"
+                    }
+                    source_catalog_raw_digest = _sha256_file(source_catalog_path)
+                    source_catalog_entries = [
+                        item
+                        for item in source_manifest.get("artifacts", [])
+                        if isinstance(item, dict) and item.get("path") == "executables.v4.json"
+                    ]
+                    if provenance.get("source_digest") != _sha256_file(source_manifest_path):
+                        errors.append(f"projection source manifest digest is stale: {identity}")
+                    if (
+                        source_catalog.get("source_identity")
+                        != source_manifest.get("integrity", {}).get("source_identity")
+                        or source_catalog.get("catalog_digest") != canonical_digest(source_unsigned)
+                        or len(source_catalog_entries) != 1
+                        or source_catalog_entries[0].get("digest") != source_catalog_raw_digest
+                        or source_catalog.get("variants") != catalog.get("variants")
+                        or materialization_digest != source_catalog.get("catalog_digest")
+                    ):
+                        errors.append(
+                            f"projection materialization catalog binding is stale: {identity}"
+                        )
         catalog_entries = [
             item
             for item in manifest.get("artifacts", [])
@@ -423,9 +625,7 @@ def _check_bundle(
                 for entry in entries
                 if isinstance(entry, dict)
                 and entry.get("kind") == "executable_catalog"
-                and entry.get("path", "").endswith(
-                    f"/{identity}.executables.v4.json"
-                )
+                and entry.get("path", "").endswith(f"/{identity}.executables.v4.json")
             ),
             None,
         )
@@ -443,13 +643,17 @@ def _check_bundle(
             errors.append(f"v4 bundle artifact must not be a symlink: {relative}")
         elif path.is_file() and relative != V4_BUNDLE_LOCK:
             actual_paths.add(relative)
-    for relative in sorted(actual_paths - seen_paths):
+    for relative in sorted(actual_paths - seen_paths - V4_SOURCE_ONLY_COMPANIONS):
         errors.append(f"v4 bundle contains an extra artifact: {relative}")
     for relative in sorted(seen_paths - actual_paths):
         errors.append(f"v4 bundle is missing an artifact: {relative}")
 
     defaultspack_entry = next(
-        (entry for entry in entries if isinstance(entry, dict) and entry.get("path") == V4_BUNDLE_DEFAULTSPACK),
+        (
+            entry
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("path") == V4_BUNDLE_DEFAULTSPACK
+        ),
         None,
     )
     if defaultspack_entry is None:
@@ -457,11 +661,17 @@ def _check_bundle(
     else:
         candidate = bundle_root / V4_BUNDLE_DEFAULTSPACK
         if candidate.is_file() and not candidate.is_symlink():
-            try:
-                if candidate.read_bytes() != (root / "pack.v4.json").read_bytes():
-                    errors.append("bundled defaultspack Pack differs from pack.v4.json")
-            except OSError as exc:
-                errors.append(f"cannot compare bundled defaultspack Pack: {exc}")
+            bundled_pack = bundle_documents.get(("pack", "defaultspack"))
+            if bundled_pack is None:
+                errors.append("v4 bundle defaultspack Pack document is unavailable")
+            else:
+                _check_defaultspack_bundle_projection(
+                    errors,
+                    root,
+                    bundle_root,
+                    pack,
+                    bundled_pack,
+                )
 
 
 def check_v4_integrity(
@@ -554,9 +764,9 @@ def check_sensitive_guard(errors: list[str]) -> None:
         errors.append(
             "transport/http.py does not call require_local_guard for sensitive coding paths"
         )
-    approval_text = (
-        DEFAULTSPACK_ROOT / "blocks" / "coding" / "_approval.py"
-    ).read_text(encoding="utf-8")
+    approval_text = (DEFAULTSPACK_ROOT / "blocks" / "coding" / "_approval.py").read_text(
+        encoding="utf-8"
+    )
     for needle in (
         "hash_arguments",
         "verify_execution_token",

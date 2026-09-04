@@ -153,6 +153,8 @@ def test_v4_dispatch_session_never_derives_identity_from_payload() -> None:
         providers={"contract.v4": ({"principal": "host-bound"},)},
         profile_id="defaults",
         plan_digest="sha256:" + "1" * 64,
+        profile_revision="sha256:" + "2" * 64,
+        activation_id="activation:boundary-test",
     )
     assert session.invoke(
         "contract.v4",
@@ -182,6 +184,8 @@ def test_dispatch_session_installation_rejects_noncanonical_identity() -> None:
         providers={},
         profile_id="defaults",
         plan_digest="sha256:" + "2" * 64,
+        profile_revision="sha256:" + "3" * 64,
+        activation_id="activation:boundary-install-test",
     )
     install_dispatch_session(container, session)
     assert container.values["v4_dispatch_session"] is session

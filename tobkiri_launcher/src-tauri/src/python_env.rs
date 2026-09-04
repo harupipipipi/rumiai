@@ -240,31 +240,28 @@ pub fn ensure_python_env_with_progress<F>(config: &AppConfig, progress: F) -> Re
 where
     F: Fn(&str),
 {
+    #[cfg(not(windows))]
+    if config.is_dev_workspace() {
+        let venv_python = config.venv_python();
+        if !venv_python.is_file() {
+            return Err(typed_error(
+                PythonProvisioningCode::InvalidArtifact,
+                format!(
+                    "development venv is missing {}; create tobkiri_runtime/.venv before starting Tobkiri Launcher",
+                    venv_python.display()
+                ),
+            ));
+        }
+        progress("Using the repository development Python environment...");
+        return Ok(());
+    }
+
     if !config.is_dev_workspace() {
         // `spawn_packaged_role` is the single authority for the outer-runtime
         // and sealed-environment verification immediately before execution.
         // Do not add a packaged preflight here: it duplicates the full hash
         // and macOS snapshot construction without shrinking the launch race.
         progress("Packaged Python will be verified immediately before the runtime starts...");
-        return Ok(());
-    }
-
-    // A source checkout is an explicit developer-controlled execution domain.
-    // Use the environment prepared by the documented repository setup instead
-    // of routing development through packaged provisioning and signing policy.
-    // Production remains on the sealed, build-bound path above.
-    if config.is_dev_workspace() {
-        let venv_python = config.venv_python();
-        if !venv_python.is_file() {
-            bail!(
-                "developer venv Python not found at {} -- create the repository .venv and install the locked development dependencies first",
-                venv_python.display()
-            );
-        }
-        progress(&format!(
-            "Using developer Python environment at {}...",
-            config.venv_dir.display()
-        ));
         return Ok(());
     }
 
@@ -327,6 +324,13 @@ where
 
 pub use crate::sealed_python::{PythonChild, PythonRole, RoleArguments, RoleCommand};
 
+// `-I` deliberately removes the current directory from `sys.path`.  The
+// developer checkout is still an explicit, Launcher-selected root, so the
+// kernel bootstrap adds only that root before executing its fixed entrypoint.
+// Keep this separate from packaged startup: packaged roles remain bound to the
+// verified sealed interpreter and bootstrap in `sealed_python`.
+const DEVELOPMENT_KERNEL_RUNNER: &str = "import runpy,sys;root,script,*args=sys.argv[1:];sys.path.insert(0,root);sys.argv=[script,*args];runpy.run_path(script,run_name='__main__')";
+
 /// Spawn one fixed Python role. Packaged mode accepts only the build-bound
 /// sealed environment; development mode is explicitly segregated and may use
 /// the externally provisioned developer venv.
@@ -351,7 +355,11 @@ where
     }
     match role {
         PythonRole::Kernel => {
-            command.args(["-m", "app"]);
+            command
+                .arg("-c")
+                .arg(DEVELOPMENT_KERNEL_RUNNER)
+                .arg(&config.app_dir)
+                .arg(config.app_dir.join("app.py"));
         }
         PythonRole::Defaultspack => {
             command
@@ -3188,10 +3196,7 @@ mod tests {
         assert_eq!(config.venv_dir, root.join(".venv"));
         assert_eq!(
             progress.into_inner(),
-            vec![format!(
-                "Using developer Python environment at {}...",
-                root.join(".venv").display()
-            )]
+            vec!["Using the repository development Python environment...".to_owned()]
         );
         fs::remove_dir_all(root).ok();
     }
@@ -3216,7 +3221,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("developer venv Python not found"));
+            .contains("development venv is missing"));
         assert!(error.to_string().contains(".venv"));
         fs::remove_dir_all(root).ok();
     }

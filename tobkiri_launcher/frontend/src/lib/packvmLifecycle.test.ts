@@ -274,6 +274,7 @@ test('catalog stays blocked until healthy attestation and ignores a stale respon
     version: 'rumi.ui.contribution.v1',
     profile_id: 'profile-a',
     profile_revision: digest('1'),
+    activation_id: 'activation:profile-a',
     plan_hash: digest('2'),
     contributions: [],
     diagnostics: [],

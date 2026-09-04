@@ -569,6 +569,17 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _compose_defaultspack_profile_runtime() -> None:
+    """Install the concrete Profile port at the explicit test composition root."""
+
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        install_defaultspack_profile_runtime,
+    )
+
+    install_defaultspack_profile_runtime()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _verified_packaged_profile_bundle(tmp_path_factory):
     """Route bootstrap tests through the official packaged-bundle generator."""
 
@@ -1986,6 +1997,7 @@ def configured_cloud_provider(monkeypatch, tmp_path):
 
     from core_runtime.host_contract import bind_host_contract
     from domain.ai_client.api_key_store import set_provider_api_key
+    from tests.conformance_support.host_contract import host_contract
 
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_SECRETS_DIR",
@@ -1997,9 +2009,9 @@ def configured_cloud_provider(monkeypatch, tmp_path):
         assert result["success"] is True
 
     with bind_host_contract(
-        {
-            "profile_id": "default",
-            "values": {"cloud_providers_enabled": "true"},
-        }
+        host_contract(
+            profile_id="default",
+            values={"cloud_providers_enabled": "true"},
+        )
     ):
         yield configure

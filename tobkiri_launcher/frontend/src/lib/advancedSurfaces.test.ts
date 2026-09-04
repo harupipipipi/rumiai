@@ -32,6 +32,7 @@ function operation(id: string, overrides: Partial<RuntimeOperationDescriptor> = 
     invocation_reason: null,
     invokable: true,
     catalog_digest: digest('c'),
+    activation_id: 'activation:profile-a',
     function_id: `${id}.function`,
     function_principal_id: `${id}.principal`,
     caller_function_id: `${id}.caller`,

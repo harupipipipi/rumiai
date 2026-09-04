@@ -87,7 +87,7 @@ function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
             status: 'launched',
             provider_id: 'shell.tauri.default',
             artifact_id: 'shell-arm64',
-            message: 'Defaults Profile launched',
+            message: 'Research A launched',
           };
         },
       },
@@ -102,7 +102,13 @@ function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
 
 async function renderCard(root: Root): Promise<void> {
   await act(async () => {
-    root.render(<ShellLaunchCard runtimeReady />);
+    root.render(
+      <ShellLaunchCard
+        profileDisplayName="Research A"
+        profileId="work-a"
+        runtimeReady
+      />,
+    );
     await Promise.resolve();
   });
   await act(async () => {
@@ -110,7 +116,7 @@ async function renderCard(root: Root): Promise<void> {
   });
 }
 
-test('selected Shell exposes the Defaults Profile launch action', async () => {
+test('selected Shell exposes the Profile launch action', async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   const toasts: string[] = [];
@@ -123,7 +129,7 @@ test('selected Shell exposes the Defaults Profile launch action', async () => {
   try {
     await renderCard(root);
     const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (candidate) => candidate.textContent?.includes('Open Defaults Profile'),
+      (candidate) => candidate.textContent?.includes('Launch Research A'),
     );
     assert.ok(button);
     assert.equal(button.disabled, false);
@@ -133,8 +139,7 @@ test('selected Shell exposes the Defaults Profile launch action', async () => {
       (dom.window as unknown as {__invokeCalls?: string[]}).__invokeCalls,
       ['get_presentation_catalog', 'launch_selected_presentation'],
     );
-    assert.deepEqual(toasts, ['Defaults Profile launched']);
-    assert.match(container.textContent ?? '', /Conversation is one route inside that application/);
+    assert.deepEqual(toasts, ['Research A launched']);
   } finally {
     act(() => root.unmount());
     useAppStore.setState(previousState, true);
@@ -142,7 +147,7 @@ test('selected Shell exposes the Defaults Profile launch action', async () => {
   }
 });
 
-test('disabled selected Shell keeps Defaults Profile unavailable and does not launch', async () => {
+test('disabled selected Shell keeps Profile launch unavailable', async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   Object.defineProperty(dom.window, '__TAURI__', {
@@ -160,7 +165,7 @@ test('disabled selected Shell keeps Defaults Profile unavailable and does not la
   try {
     await renderCard(root);
     const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (candidate) => candidate.textContent?.includes('Open Defaults Profile'),
+      (candidate) => candidate.textContent?.includes('Launch Research A'),
     );
     assert.ok(button);
     assert.equal(button.disabled, true);
@@ -173,7 +178,7 @@ test('disabled selected Shell keeps Defaults Profile unavailable and does not la
   }
 });
 
-test('launching the Defaults Profile does not depend on a Conversation route catalog', async () => {
+test('Profile launch does not require an optional Conversation contribution', async () => {
   const previousState = useAppStore.getState();
   const {dom, container, root} = createSurface();
   const originalFetch = globalThis.fetch;
@@ -186,7 +191,7 @@ test('launching the Defaults Profile does not depend on a Conversation route cat
   try {
     await renderCard(root);
     const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (candidate) => candidate.textContent?.includes('Open Defaults Profile'),
+      (candidate) => candidate.textContent?.includes('Launch Research A'),
     );
     assert.ok(button);
     assert.equal(button.disabled, false);

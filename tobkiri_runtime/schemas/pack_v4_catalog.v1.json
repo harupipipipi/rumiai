@@ -1,13 +1,17 @@
 {
   "catalog_api_version": "io.tobkiri.pack-source-catalog.v1",
-  "excluded_packs": [],
+  "excluded_packs": [
+    "rumi_agent_services_pack",
+    "rumi_local_agent_pack",
+    "rumi_pack_suite_pack",
+    "rumi_reference_ui_pack"
+  ],
   "migration_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
   "pack_ids": [
     "defaults",
     "defaultspack",
     "rumi_agent_continuity_pack",
     "rumi_agent_runtime_service_pack",
-    "rumi_agent_services_pack",
     "rumi_agent_state_store_pack",
     "rumi_agent_workroom_pack",
     "rumi_agentic_qa_pack",
@@ -31,6 +35,7 @@
     "rumi_code_ide_pack",
     "rumi_code_migration_pack",
     "rumi_coding_sandbox_service_pack",
+    "rumi_command_protocol_pack",
     "rumi_company_agent_adapter_pack",
     "rumi_company_coordinator_pack",
     "rumi_company_state_store_pack",
@@ -79,7 +84,6 @@
     "rumi_knowledge_marketplace_pack",
     "rumi_knowledge_store_pack",
     "rumi_line_connector_pack",
-    "rumi_local_agent_pack",
     "rumi_localization_pack",
     "rumi_mcp_gateway_pack",
     "rumi_mcp_server_pack",
@@ -99,12 +103,10 @@
     "rumi_omnichannel_agent_inbox_pack",
     "rumi_operations_company_pack",
     "rumi_p2p_connector_pack",
-    "rumi_pack_suite_pack",
     "rumi_prompt_studio_pack",
     "rumi_provider_adapters_pack",
     "rumi_provider_registry_pack",
     "rumi_qr_pairing_connector_pack",
-    "rumi_reference_ui_pack",
     "rumi_repository_context_pack",
     "rumi_research_pack",
     "rumi_runtime_benchmark_pack",
@@ -311,12 +313,24 @@
           "digest": "sha256:4a404c7427393f7343d9bc74d19b9f0f5066f7090e93e728e65e6452441242a7",
           "kind": "executable",
           "path": "runtime/conversation.py"
+        },
+        {
+          "digest": "sha256:b51f935fa4438007fd0d19eeb7ff3b44b410751c94a987baac8e6306b07615d0",
+          "index_role": "host_contract_contribution",
+          "kind": "sidecar",
+          "path": "host_contract_contributions.v1.json"
+        },
+        {
+          "digest": "sha256:5623895308596889104518081c539647de80ee8d070228311ec263c6ef85bcdd",
+          "index_role": "host_contract_update_metadata",
+          "kind": "sidecar",
+          "path": "update_metadata.v1.json"
         }
       ],
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:2fbbb1401c55af066aa4cbff858b0c647ac5ac06afe0abc1cc242e464d1c0231",
+          "digest": "sha256:9fea15c85008d30047688edba660916ca375017a013ed5293375c829d2ff3f98",
           "path": "schemas/executable_sources.v1.json",
           "rule_id": "canonical-bundled-v4-source"
         }
@@ -616,90 +630,6 @@
         "mode": "offline-one-way-import",
         "owner": "rumi_agent_runtime_service_pack",
         "source_format": "rumi.pack.v3.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "rumi_agent_services_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_agent_services_pack",
-        "rumi_agent_services_pack"
-      ],
-      "legacy_operations": [
-        {
-          "component_id": "agent_services_capabilities",
-          "id": "rumi.agent_services.capability_catalog",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.routing",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.handoffs",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_coordination",
-          "id": "rumi.agent_services.workflow_templates",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_examples",
-          "id": "rumi.agent_services.examples",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_presets",
-          "id": "rumi.agent_services.presets",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_profiles",
-          "id": "rumi.agent_services.profiles",
-          "source": "legacy_component"
-        },
-        {
-          "component_id": "agent_service_prompts",
-          "id": "rumi.agent_services.prompts",
-          "source": "legacy_component"
-        }
-      ],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_agent_services_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:3fe30493af829e0891d2f0891476c7a002473c152290e6819b7680d4e001c581",
-          "path": "ecosystem/rumi_agent_services_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_agent_services_pack",
-        "source_format": "ecosystem.json"
       },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
@@ -2881,6 +2811,148 @@
         "mode": "offline-one-way-import",
         "owner": "rumi_coding_sandbox_service_pack",
         "source_format": "rumi.pack.v3.json"
+      },
+      "version": "1.0.0",
+      "workspace_boundary": "host_brokered"
+    },
+    {
+      "approval_policy": "capability_gated",
+      "authority": "v4-authoritative",
+      "capabilities": [
+        "host.authority.consume"
+      ],
+      "dependencies": {
+        "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0"
+      },
+      "description": "Host-owned adapter from command protocol invocations to approval-gated effects.",
+      "display_name": "Rumi Command Protocol",
+      "execution_boundary": "host_brokered",
+      "functions": [
+        {
+          "contract_id": "tobkiri.service.command.high-risk.v1",
+          "function_id": "rumi_command_protocol_pack.high-risk-command.service",
+          "implementation_digest": "sha256:b168952a90bd931d9562239ed57644d9bb355bb377ff31ec8cccbe4c55c30813",
+          "operation_ids": [
+            "high_risk_command.manage"
+          ]
+        }
+      ],
+      "kind": "host_extension",
+      "legacy_ids": [
+        "rumi:ecosystem/rumi_command_protocol_pack",
+        "rumi_command_protocol_pack"
+      ],
+      "legacy_operations": [],
+      "migration": {
+        "compatibility": "none",
+        "removal_wave": 0,
+        "sunset_at": "2027-12-31"
+      },
+      "network": {
+        "allowed_domains": [],
+        "allowed_ports": []
+      },
+      "pack_id": "rumi_command_protocol_pack",
+      "provided_contracts": [
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.command.high-risk.v1",
+          "failure": "fail_closed",
+          "isolation": "process",
+          "lifecycle": {
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "manage",
+              "id": "high_risk_command.manage",
+              "implementation_digest": "sha256:b168952a90bd931d9562239ed57644d9bb355bb377ff31ec8cccbe4c55c30813"
+            }
+          ],
+          "owner": "rumi_command_protocol_pack",
+          "provider_id": "rumi_command_protocol_pack.high-risk-command.service",
+          "required_capabilities": [
+            "host.authority.consume"
+          ],
+          "schemas": {
+            "error": {
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "type": "object"
+                },
+                "command_ref": {
+                  "enum": [
+                    "terminal",
+                    "commit",
+                    "push",
+                    "patch",
+                    "restore"
+                  ]
+                },
+                "invocation_id": {
+                  "maxLength": 160,
+                  "type": "string"
+                },
+                "phase": {
+                  "enum": [
+                    "prepare",
+                    "resume",
+                    "status",
+                    "cancel",
+                    "list_pending"
+                  ]
+                },
+                "presentation": {
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "restricted",
+          "version": "1.0.0"
+        }
+      ],
+      "required_contracts": [
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.interactive-effect.v1",
+          "optional": false,
+          "version_range": ">=1.0.0 <2.0.0"
+        }
+      ],
+      "runtime_artifacts": [
+        {
+          "digest": "sha256:b168952a90bd931d9562239ed57644d9bb355bb377ff31ec8cccbe4c55c30813",
+          "kind": "executable",
+          "path": "runtime/high_risk_adapter.py"
+        }
+      ],
+      "secrets": [],
+      "source_evidence": [
+        {
+          "digest": "sha256:521e986437ad9886c0085bfe13b37559ee0234d92298c60f51d17ddd04fc30e8",
+          "path": "schemas/executable_sources.v1.json",
+          "rule_id": "canonical-bundled-v4-source"
+        }
+      ],
+      "source_provenance": {
+        "historical_classification": "modern-only",
+        "mode": "canonical-v4",
+        "owner": "rumi_command_protocol_pack",
+        "source_format": "legacy-executable-source-input.v1"
       },
       "version": "1.0.0",
       "workspace_boundary": "host_brokered"
@@ -5189,12 +5261,12 @@
           "path": "runtime/process.py"
         },
         {
-          "digest": "sha256:f824221576a951bf3003b387f47b6e225d62311ac6a15011bf9ded0c369b03a9",
+          "digest": "sha256:16c0a3e4c3c48abba74fdab9cb3296495e543fcaf2954fc67556d2376f1068c9",
           "kind": "executable",
           "path": "runtime/service.py"
         },
         {
-          "digest": "sha256:2d68155b0997669bbf569715d31baa1bddb3caf15d305b1bc0bad1e3d2b238f9",
+          "digest": "sha256:200b6ba762871a2f1411d2582606292145380574b8d59501ef8f4f686bf01504",
           "kind": "executable",
           "path": "runtime/store.py"
         }
@@ -5493,7 +5565,14 @@
       "pack_id": "rumi_default_tools_pack",
       "provided_contracts": [],
       "required_contracts": [],
-      "runtime_artifacts": [],
+      "runtime_artifacts": [
+        {
+          "digest": "sha256:ef8ae5ffa668b40553758d1324b929f56f3a16977af87d17669fad25867ec1ab",
+          "index_role": "host_contract_contribution",
+          "kind": "sidecar",
+          "path": "host_contract_contributions.v1.json"
+        }
+      ],
       "secrets": [],
       "source_evidence": [
         {
@@ -6600,17 +6679,33 @@
       "capabilities": [
         "git.publish",
         "git.read",
-        "host.authority.consume",
         "workspace.metadata.read"
       ],
       "dependencies": {
         "rumi_git_read_pack": ">=1.0.0,<2.0.0",
-        "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0",
         "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Receipt-gated Git branch publication to an exact network remote.",
       "display_name": "Rumi Git Publish",
       "execution_boundary": "host_brokered",
+      "functions": [
+        {
+          "contract_id": "tobkiri.service.git.publish.v1",
+          "function_id": "rumi_git_publish_pack.git-push-prepare.service",
+          "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
+          "operation_ids": [
+            "rumi_git_publish_pack.git-push-prepare"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.publish.v1",
+          "function_id": "rumi_git_publish_pack.git-publish.service",
+          "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
+          "operation_ids": [
+            "rumi_git_publish_pack.git-push"
+          ]
+        }
+      ],
       "kind": "host_extension",
       "legacy_ids": [
         "rumi.service.git.publish.v1",
@@ -6639,18 +6734,60 @@
           },
           "operations": [
             {
-              "entrypoint_id": "git-publish",
-              "id": "rumi_git_publish_pack.git-publish",
-              "implementation_digest": "sha256:63795cba72da62efd567adbf39453de1e8069e59f6453cd5877da51a43048f1a"
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.read",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-push-prepare",
+              "id": "rumi_git_publish_pack.git-push-prepare",
+              "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.publish",
+                "capability:git.read",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-push",
+              "id": "rumi_git_publish_pack.git-push",
+              "implementation_digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147"
             }
           ],
           "owner": "rumi_git_publish_pack",
           "provider_id": "rumi_git_publish_pack.git-publish.service",
           "required_capabilities": [
-            "git.publish"
+            "git.publish",
+            "git.read",
+            "workspace.metadata.read"
           ],
           "schemas": {
+            "error": {
+              "type": "object"
+            },
             "input": {
+              "additionalProperties": false,
+              "properties": {
+                "branch": {
+                  "type": "string"
+                },
+                "force_with_lease": {
+                  "type": "boolean"
+                },
+                "plan": {
+                  "type": "object"
+                },
+                "plan_digest": {
+                  "type": "string"
+                },
+                "remote": {
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
               "type": "object"
             },
             "output": {
@@ -6673,17 +6810,11 @@
           "contract_id": "tobkiri.service.git.read.v1",
           "optional": false,
           "version_range": ">=1.0.0 <2.0.0"
-        },
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.service.host.authorize.v1",
-          "optional": false,
-          "version_range": ">=1.0.0 <2.0.0"
         }
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:63795cba72da62efd567adbf39453de1e8069e59f6453cd5877da51a43048f1a",
+          "digest": "sha256:6109e246015c628e1a42e33556517618c6e8e353158db0f3f24946147b10e147",
           "kind": "executable",
           "path": "runtime/publish.py"
         }
@@ -6696,7 +6827,7 @@
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:c71c0f5772a22b099678a4c8daeda80bc1cc7aa38e9d72862dc391bed0649542",
+          "digest": "sha256:c10eff1b12f744ef455f6f40c0661f826e3d8b30e3fbff59d8aa68961e37f3f0",
           "path": "ecosystem/rumi_git_publish_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -6753,7 +6884,7 @@
             {
               "entrypoint_id": "git-read",
               "id": "rumi_git_read_pack.git-read",
-              "implementation_digest": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932"
+              "implementation_digest": "sha256:3149aa0b49c6ba98e79167e16d5cbede62cf0d2ac1a62562572d2860a8ae72a6"
             }
           ],
           "owner": "rumi_git_read_pack",
@@ -6783,7 +6914,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:9f79fddc4bb747277a0623bb2ba6cab74944d20e4fdf35005f4d355c06d6f932",
+          "digest": "sha256:3149aa0b49c6ba98e79167e16d5cbede62cf0d2ac1a62562572d2860a8ae72a6",
           "kind": "executable",
           "path": "runtime/read.py"
         }
@@ -6816,17 +6947,65 @@
       "capabilities": [
         "git.read",
         "git.write",
-        "host.authority.consume",
         "workspace.metadata.read"
       ],
       "dependencies": {
         "rumi_git_read_pack": ">=1.0.0,<2.0.0",
-        "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0",
         "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Receipt-gated local Git mutation without publication.",
       "display_name": "Rumi Git Write",
       "execution_boundary": "host_brokered",
+      "functions": [
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-commit-prepare.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-commit-prepare"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-commit.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-commit"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-restore-prepare.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-restore-prepare"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-restore.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-restore"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-apply-patch-prepare.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-apply-patch-prepare"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.git.write.v1",
+          "function_id": "rumi_git_write_pack.git-apply-patch.service",
+          "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
+          "operation_ids": [
+            "rumi_git_write_pack.git-apply-patch"
+          ]
+        }
+      ],
       "kind": "host_extension",
       "legacy_ids": [
         "rumi.service.git.write.v1",
@@ -6855,18 +7034,108 @@
           },
           "operations": [
             {
-              "entrypoint_id": "git-write",
-              "id": "rumi_git_write_pack.git-write",
-              "implementation_digest": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e"
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.read",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-commit-prepare",
+              "id": "rumi_git_write_pack.git-commit-prepare",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.write",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-commit",
+              "id": "rumi_git_write_pack.git-commit",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.read",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-restore-prepare",
+              "id": "rumi_git_write_pack.git-restore-prepare",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.write",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-restore",
+              "id": "rumi_git_write_pack.git-restore",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.read",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-apply-patch-prepare",
+              "id": "rumi_git_write_pack.git-apply-patch-prepare",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:git.write",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "git-apply-patch",
+              "id": "rumi_git_write_pack.git-apply-patch",
+              "implementation_digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da"
             }
           ],
           "owner": "rumi_git_write_pack",
-          "provider_id": "rumi_git_write_pack.git-write.service",
+          "provider_id": "rumi_git_write_pack.git-commit.service",
           "required_capabilities": [
-            "git.write"
+            "git.read",
+            "git.write",
+            "workspace.metadata.read"
           ],
           "schemas": {
+            "error": {
+              "type": "object"
+            },
             "input": {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "paths": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "plan": {
+                  "type": "object"
+                },
+                "plan_digest": {
+                  "type": "string"
+                },
+                "profile_id": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
               "type": "object"
             },
             "output": {
@@ -6889,17 +7158,11 @@
           "contract_id": "tobkiri.service.git.read.v1",
           "optional": false,
           "version_range": ">=1.0.0 <2.0.0"
-        },
-        {
-          "cardinality": "one",
-          "contract_id": "tobkiri.service.host.authorize.v1",
-          "optional": false,
-          "version_range": ">=1.0.0 <2.0.0"
         }
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:bd659fafb83b1510377471701cc37e615677a840ce6af89e11c51cd6bc61108e",
+          "digest": "sha256:1e9cd471a016de23e98c3b89c5245900381b5d0162f01e0c0166d1df0115d2da",
           "kind": "executable",
           "path": "runtime/write.py"
         }
@@ -6932,10 +7195,43 @@
       "capabilities": [
         "host.authority.consume"
       ],
-      "dependencies": {},
+      "dependencies": {
+        "rumi_git_publish_pack": ">=1.0.0,<2.0.0",
+        "rumi_git_write_pack": ">=1.0.0,<2.0.0",
+        "rumi_shell_execute_pack": ">=1.0.0,<2.0.0"
+      },
       "description": "Core-authority one-shot token and service receipt binding.",
       "display_name": "Rumi Host Authority Bridge",
       "execution_boundary": "host_brokered",
+      "functions": [
+        {
+          "contract_id": "tobkiri.service.host.authorize.v1",
+          "function_id": "rumi_host_authority_bridge_pack.host-authority.authorize",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
+          "operation_ids": [
+            "rumi_host_authority_bridge_pack.host-authority"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.interactive-approval.v1",
+          "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
+          "operation_ids": [
+            "interactive_approval.get",
+            "interactive_approval.list",
+            "interactive_approval.approve",
+            "interactive_approval.deny"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.interactive-effect.v1",
+          "function_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
+          "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
+          "operation_ids": [
+            "interactive_effect.manage"
+          ]
+        }
+      ],
       "kind": "host_extension",
       "legacy_ids": [
         "rumi.service.host.authorize.v1",
@@ -6957,17 +7253,20 @@
           "cardinality": "one",
           "contract_id": "tobkiri.service.host.authorize.v1",
           "failure": "fail_closed",
-          "isolation": "in_process",
+          "isolation": "process",
           "lifecycle": {
-            "data_owner": "core-authority",
             "deprecated": false,
             "introduced": "1.0.0"
           },
           "operations": [
             {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
               "entrypoint_id": "host-authority",
               "id": "rumi_host_authority_bridge_pack.host-authority",
-              "implementation_digest": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955"
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
             }
           ],
           "owner": "rumi_host_authority_bridge_pack",
@@ -6976,7 +7275,174 @@
             "host.authority.consume"
           ],
           "schemas": {
+            "error": {
+              "type": "object"
+            },
             "input": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "type": "object"
+                },
+                "authority": {
+                  "type": "string"
+                },
+                "operation": {
+                  "type": "string"
+                },
+                "receipt": {
+                  "type": "string"
+                },
+                "service_pack_id": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "restricted",
+          "version": "1.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.interactive-approval.v1",
+          "failure": "fail_closed",
+          "isolation": "process",
+          "lifecycle": {
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "get",
+              "id": "interactive_approval.get",
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "list",
+              "id": "interactive_approval.list",
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "approve",
+              "id": "interactive_approval.approve",
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "deny",
+              "id": "interactive_approval.deny",
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
+            }
+          ],
+          "owner": "rumi_host_authority_bridge_pack",
+          "provider_id": "rumi_host_authority_bridge_pack.host-authority.interactive-approval",
+          "required_capabilities": [
+            "host.authority.consume"
+          ],
+          "schemas": {
+            "error": {
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "confirmation_text": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "request_id": {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                "ui_operator": {
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "output": {
+              "type": "object"
+            }
+          },
+          "security": "restricted",
+          "version": "1.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.interactive-effect.v1",
+          "failure": "fail_closed",
+          "isolation": "process",
+          "lifecycle": {
+            "deprecated": false,
+            "introduced": "1.0.0"
+          },
+          "operations": [
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:host.authority.consume"
+              ],
+              "entrypoint_id": "manage",
+              "id": "interactive_effect.manage",
+              "implementation_digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef"
+            }
+          ],
+          "owner": "rumi_host_authority_bridge_pack",
+          "provider_id": "rumi_host_authority_bridge_pack.host-authority.interactive-effect",
+          "required_capabilities": [
+            "host.authority.consume"
+          ],
+          "schemas": {
+            "error": {
+              "type": "object"
+            },
+            "input": {
+              "additionalProperties": false,
+              "properties": {
+                "effect_id": {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                "effect_kind": {
+                  "enum": [
+                    "shell_execute",
+                    "git_commit",
+                    "git_restore",
+                    "git_apply_patch",
+                    "git_push"
+                  ]
+                },
+                "phase": {
+                  "enum": [
+                    "prepare",
+                    "resume",
+                    "status",
+                    "cancel"
+                  ]
+                },
+                "request": {
+                  "type": "object"
+                }
+              },
               "type": "object"
             },
             "output": {
@@ -6987,10 +7453,29 @@
           "version": "1.0.0"
         }
       ],
-      "required_contracts": [],
+      "required_contracts": [
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.git.publish.v1",
+          "optional": false,
+          "version_range": ">=1.0.0 <2.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.git.write.v1",
+          "optional": false,
+          "version_range": ">=1.0.0 <2.0.0"
+        },
+        {
+          "cardinality": "one",
+          "contract_id": "tobkiri.service.shell.execute.v1",
+          "optional": false,
+          "version_range": ">=1.0.0 <2.0.0"
+        }
+      ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:d19bcba1e195378e41b21ee7543192a2922223afcbc73bce9999f52db86c4955",
+          "digest": "sha256:040b023ada0db0d7ddbb39e17e625f24831bb141a7001a6bc93b80c5bd3823ef",
           "kind": "executable",
           "path": "runtime/bridge.py"
         }
@@ -6998,12 +7483,12 @@
       "secrets": [],
       "source_evidence": [
         {
-          "digest": "sha256:b31155c757583e936015b18c2c3d85731abdefff87d303c1a084788368c320cc",
+          "digest": "sha256:748b4c2357e1e50d5451f3f0197d38b3d5039e4d2f753f08ebb8cf4be37c95ab",
           "path": "ecosystem/rumi_host_authority_bridge_pack/ecosystem.json",
           "rule_id": "pack-v4-one-way-migration-input"
         },
         {
-          "digest": "sha256:454a762698975471a39c6598f5eb7b8b0f1baccf85729bc5eee99d62fc0ff7a9",
+          "digest": "sha256:8c25d782df301fb9dfa04beaf0c00b2c4ca0db51a7c267b10fbde3dc6bf0e544",
           "path": "ecosystem/rumi_host_authority_bridge_pack/rumi.pack.v3.json",
           "rule_id": "pack-v4-one-way-migration-input"
         }
@@ -8248,49 +8733,6 @@
       "authority": "v4-authoritative",
       "capabilities": [],
       "dependencies": {},
-      "description": "",
-      "display_name": "rumi_local_agent_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_local_agent_pack",
-        "rumi_local_agent_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_local_agent_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:d3874489fb11b5bac98d90b0332890d6c45bb884260d0808a49345902b75bb74",
-          "path": "ecosystem/rumi_local_agent_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_local_agent_pack",
-        "source_format": "ecosystem.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
       "description": "Declarative terminology, protected-term, translation review, locale QA, and localization issue triage pack.",
       "display_name": "Rumi Localization Pack",
       "execution_boundary": "declarative_only",
@@ -9342,7 +9784,7 @@
       "description": "Immutable verified provider and model descriptors without execution code.",
       "display_name": "Rumi Model Catalog",
       "execution_boundary": "host_brokered",
-      "kind": "application",
+      "kind": "host_extension",
       "legacy_ids": [
         "rumi.resource.ai.model.catalog.v1",
         "rumi:ecosystem/rumi_model_catalog_pack",
@@ -10180,49 +10622,6 @@
       "workspace_boundary": "host_brokered"
     },
     {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "Rumi Pack Suite Pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_pack_suite_pack",
-        "rumi_pack_suite_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_pack_suite_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:7ede30e875c651e5ce8874526f1f74654a489fc0fcfccb28f51f37995c0e449e",
-          "path": "ecosystem/rumi_pack_suite_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_pack_suite_pack",
-        "source_format": "ecosystem.json"
-      },
-      "version": "0.1.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
       "approval_policy": "capability_gated",
       "authority": "v4-authoritative",
       "capabilities": [
@@ -11051,49 +11450,6 @@
         "mode": "offline-one-way-import",
         "owner": "rumi_qr_pairing_connector_pack",
         "source_format": "rumi.pack.v3.json"
-      },
-      "version": "1.0.0",
-      "workspace_boundary": "pack_local"
-    },
-    {
-      "approval_policy": "none",
-      "authority": "v4-authoritative",
-      "capabilities": [],
-      "dependencies": {},
-      "description": "",
-      "display_name": "rumi_reference_ui_pack",
-      "execution_boundary": "declarative_only",
-      "kind": "application",
-      "legacy_ids": [
-        "rumi:ecosystem/rumi_reference_ui_pack",
-        "rumi_reference_ui_pack"
-      ],
-      "legacy_operations": [],
-      "migration": {
-        "removal_wave": 10,
-        "sunset_at": "2099-01-01"
-      },
-      "network": {
-        "allowed_domains": [],
-        "allowed_ports": []
-      },
-      "pack_id": "rumi_reference_ui_pack",
-      "provided_contracts": [],
-      "required_contracts": [],
-      "runtime_artifacts": [],
-      "secrets": [],
-      "source_evidence": [
-        {
-          "digest": "sha256:cc1aeebfe588488e066150fc8a976372780ab986b8073f253137362cba8a3c02",
-          "path": "ecosystem/rumi_reference_ui_pack/ecosystem.json",
-          "rule_id": "pack-v4-one-way-migration-input"
-        }
-      ],
-      "source_provenance": {
-        "historical_classification": "legacy-authoritative",
-        "mode": "offline-one-way-import",
-        "owner": "rumi_reference_ui_pack",
-        "source_format": "ecosystem.json"
       },
       "version": "1.0.0",
       "workspace_boundary": "pack_local"
@@ -12101,19 +12457,35 @@
       "approval_policy": "capability_gated",
       "authority": "v4-authoritative",
       "capabilities": [
-        "host.authority.consume",
         "shell.execute",
         "shell.inspect",
         "workspace.metadata.read"
       ],
       "dependencies": {
-        "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0",
         "rumi_shell_policy_pack": ">=1.0.0,<2.0.0",
         "rumi_workspace_mount_pack": ">=1.0.0,<2.0.0"
       },
       "description": "Receipt-gated workspace-jailed bounded command execution.",
       "display_name": "Rumi Shell Execute",
       "execution_boundary": "host_brokered",
+      "functions": [
+        {
+          "contract_id": "tobkiri.service.shell.execute.v1",
+          "function_id": "rumi_shell_execute_pack.shell-prepare.service",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
+          "operation_ids": [
+            "rumi_shell_execute_pack.shell-prepare"
+          ]
+        },
+        {
+          "contract_id": "tobkiri.service.shell.execute.v1",
+          "function_id": "rumi_shell_execute_pack.shell-execute.service",
+          "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
+          "operation_ids": [
+            "rumi_shell_execute_pack.shell-execute"
+          ]
+        }
+      ],
       "kind": "host_extension",
       "legacy_ids": [
         "rumi.service.shell.execute.v1",
@@ -12142,18 +12514,72 @@
           },
           "operations": [
             {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:shell.inspect",
+                "capability:workspace.metadata.read"
+              ],
+              "entrypoint_id": "shell-prepare",
+              "id": "rumi_shell_execute_pack.shell-prepare",
+              "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145"
+            },
+            {
+              "effect_ceiling": [
+                "host:brokered-execution",
+                "capability:shell.execute",
+                "capability:workspace.metadata.read"
+              ],
               "entrypoint_id": "shell-execute",
               "id": "rumi_shell_execute_pack.shell-execute",
-              "implementation_digest": "sha256:b65219636656e0e3f5c820ed34aeeb97462bf83b1fb5e3017c3accda7a74887d"
+              "implementation_digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145"
             }
           ],
           "owner": "rumi_shell_execute_pack",
           "provider_id": "rumi_shell_execute_pack.shell-execute.service",
           "required_capabilities": [
-            "shell.execute"
+            "shell.execute",
+            "shell.inspect",
+            "workspace.metadata.read"
           ],
           "schemas": {
+            "error": {
+              "type": "object"
+            },
             "input": {
+              "additionalProperties": false,
+              "properties": {
+                "arguments": {
+                  "type": "object"
+                },
+                "command": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "cwd": {
+                  "type": "string"
+                },
+                "env": {
+                  "type": "object"
+                },
+                "plan_digest": {
+                  "type": "string"
+                },
+                "redacted_plan": {
+                  "type": "object"
+                },
+                "shell": {
+                  "type": "boolean"
+                },
+                "timeout": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "workspace_id": {
+                  "type": "string"
+                }
+              },
               "type": "object"
             },
             "output": {
@@ -12173,12 +12599,6 @@
         },
         {
           "cardinality": "one",
-          "contract_id": "tobkiri.service.host.authorize.v1",
-          "optional": false,
-          "version_range": ">=1.0.0 <2.0.0"
-        },
-        {
-          "cardinality": "one",
           "contract_id": "tobkiri.service.shell.inspect.v1",
           "optional": false,
           "version_range": ">=1.0.0 <2.0.0"
@@ -12186,7 +12606,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:b65219636656e0e3f5c820ed34aeeb97462bf83b1fb5e3017c3accda7a74887d",
+          "digest": "sha256:be5f4ef07602eff90de1cfde2e04db7fe98acb2827c17b7f3136292940582145",
           "kind": "executable",
           "path": "runtime/execute.py"
         }
@@ -12231,6 +12651,7 @@
       ],
       "legacy_operations": [],
       "migration": {
+        "compatibility": "none",
         "removal_wave": 10,
         "sunset_at": "2027-12-31"
       },
@@ -12254,7 +12675,7 @@
             {
               "entrypoint_id": "shell-inspect",
               "id": "rumi_shell_policy_pack.shell-inspect",
-              "implementation_digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e"
+              "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed"
             }
           ],
           "owner": "rumi_shell_policy_pack",
@@ -12277,7 +12698,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:b24ff2c5c66a51052742fa96322e2a515a3aa2187cda41a6f4f6d4daeeacab8e",
+          "digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
           "kind": "executable",
           "path": "runtime/policy.py"
         }
@@ -14969,7 +15390,7 @@
             {
               "entrypoint_id": "workspace-mount",
               "id": "rumi_workspace_mount_pack.workspace-mount",
-              "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b"
+              "implementation_digest": "sha256:925115f6cf67373e5c445929799fbe63cfb6ee67ae5784ee6c1f28190e77cad1"
             }
           ],
           "owner": "rumi_workspace_mount_pack",
@@ -15002,7 +15423,7 @@
             {
               "entrypoint_id": "workspace-resource",
               "id": "rumi_workspace_mount_pack.workspace-resource",
-              "implementation_digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b"
+              "implementation_digest": "sha256:925115f6cf67373e5c445929799fbe63cfb6ee67ae5784ee6c1f28190e77cad1"
             }
           ],
           "owner": "rumi_workspace_mount_pack",
@@ -15032,7 +15453,7 @@
       ],
       "runtime_artifacts": [
         {
-          "digest": "sha256:7c339e5cd1716f30f264e3b0239344ed4f7a13415a544ff88f627d7202bb545b",
+          "digest": "sha256:925115f6cf67373e5c445929799fbe63cfb6ee67ae5784ee6c1f28190e77cad1",
           "kind": "executable",
           "path": "runtime/mounts.py"
         }
@@ -15669,6 +16090,106 @@
                   "required": [
                     "runtime_surface_api_version",
                     "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "contract_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "operation_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "operation_status_api_version": {
+                      "const": "io.tobkiri.control-operation-status.v1"
+                    },
+                    "record_refs": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "digest": {
+                            "pattern": "^sha256:[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "request_digest": {
+                      "pattern": "^sha256:[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
+                    "result_digest": {
+                      "pattern": "^sha256:[0-9a-f]{64}$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "safe_error_code": {
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "pending",
+                        "succeeded",
+                        "failed",
+                        "indeterminate"
+                      ]
+                    },
+                    "updated_at": {
+                      "minimum": 0,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "operation_status_api_version",
+                    "request_id",
+                    "operation_id",
+                    "contract_id",
+                    "request_digest",
+                    "state",
+                    "result",
+                    "result_digest",
+                    "record_refs",
+                    "safe_error_code",
+                    "created_at",
+                    "updated_at"
                   ],
                   "type": "object"
                 }

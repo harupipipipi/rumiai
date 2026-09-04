@@ -41,6 +41,9 @@ const MACOS_ARTIFACT_POLICY_ENV: &str = "TOBKIRI_MACOS_ARTIFACT_POLICY";
 const MACOS_CI_CERT_SHA256_ENV: &str = "TOBKIRI_MACOS_CI_CERT_SHA256";
 const MACOS_CI_PUBLIC_KEY_ENV: &str = "TOBKIRI_MACOS_CI_PUBLIC_KEY";
 const APPLE_TEAM_ID_ENV: &str = "APPLE_TEAM_ID";
+const LOCAL_DEVELOPMENT_LAUNCHER_IDENTIFIER: &str = "dev.tobkiri.local-launcher";
+#[cfg(target_os = "macos")]
+const MACOS_XATTR_PATH: &str = "/usr/bin/xattr";
 const SEALED_PYTHON_SCHEMA: &str = "io.tobkiri.sealed-python-environment.v1";
 const SEALED_PYTHON_DIRECTORY_MODES_SCHEMA: &str = "io.tobkiri.sealed-python-directory-modes.v1";
 const CARGO_TARGET_DIR_ENV: &str = "CARGO_TARGET_DIR";
@@ -51,6 +54,11 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
     "ecosystem/defaultspack/ui",
     "bundled",
     "python-runtime",
+];
+const SOURCE_ONLY_PROFILE_ARTIFACTS: &[&str] = &[
+    "defaults.profile.intent.v1.json",
+    "defaults.profile.lock.v5.json",
+    "defaults.release.provenance.json",
 ];
 const CANONICAL_HOST_INVENTORY: &str = "canonical-files.v1.json";
 const CANONICAL_HOST_INVENTORY_SCHEMA: &str = "io.tobkiri.host-file-inventory.v1";
@@ -208,9 +216,20 @@ fn main() {
 
     bind_macos_artifact_policy().expect("failed to bind macOS artifact policy");
     warn_legacy_defaultspack_app_bundle();
-    stage_runtime_bundle().expect("failed to stage runtime bundle");
-    prepare_debug_tauri_resource_destination()
-        .expect("failed to prepare debug Tauri resource destination");
+    let unbundled_local_development = is_unbundled_local_development_build();
+    if unbundled_local_development {
+        println!("cargo:rustc-env=TOBKIRI_LOCAL_DEV_WORKSPACE=1");
+        println!(
+            "cargo:warning=using the local development workspace runtime; sealed runtime staging is release-only"
+        );
+    } else {
+        println!("cargo:rustc-env=TOBKIRI_LOCAL_DEV_WORKSPACE=0");
+        stage_runtime_bundle().expect("failed to stage runtime bundle");
+        reset_tauri_macos_resource_copy()
+            .expect("failed to reset the manifest-bound Tauri resource copy");
+        prepare_debug_tauri_resource_destination()
+            .expect("failed to prepare debug Tauri resource destination");
+    }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "get_setup_progress",
@@ -331,18 +350,12 @@ fn bind_macos_artifact_policy() -> io::Result<()> {
                     "production macOS builds may not carry a CI verification key",
                 ));
             }
-            let team = std::env::var(APPLE_TEAM_ID_ENV).unwrap_or_default();
-            if profile == "release"
-                && (team.len() != 10
-                    || !team
-                        .bytes()
-                        .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit()))
-            {
+            if std::env::var_os(APPLE_TEAM_ID_ENV).is_some() {
                 return Err(invalid_release(
-                    "release macOS production builds require an exact 10-character APPLE_TEAM_ID",
+                    "OSS macOS production builds may not claim an Apple Team ID",
                 ));
             }
-            team
+            String::new()
         }
         "ci-e2e-v1" => {
             if profile != "release" {
@@ -686,6 +699,8 @@ fn stage_runtime_bundle() -> io::Result<()> {
         .map_err(|error| stage_error("bind sealed Python environment", error))?;
     write_runtime_resource_manifest(&staged_root)
         .map_err(|error| stage_error("seal staged runtime", error))?;
+    prepare_staged_macos_xattr_transport(&staged_root)
+        .map_err(|error| stage_error("prepare staged macOS xattr transport", error))?;
 
     Ok(())
 }
@@ -741,6 +756,250 @@ fn stage_development_runtime_bundle(
         .map_err(|error| stage_error("bind development Python environment", error))?;
     write_runtime_resource_manifest(staged_root)
         .map_err(|error| stage_error("seal staged development runtime", error))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reset_tauri_macos_resource_copy() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_resource_copy_at(out_dir: &Path, profile_root: &Path) -> io::Result<PathBuf> {
+    reject_staged_path_components(out_dir)?;
+    reject_staged_path_components(profile_root)?;
+    let build_root = profile_root.join("build");
+    let relative = out_dir.strip_prefix(&build_root).map_err(|_| {
+        invalid_release("Cargo OUT_DIR escaped the expected target profile build root")
+    })?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.len() != 2
+        || !matches!(components[0], Component::Normal(_))
+        || components[1].as_os_str() != "out"
+    {
+        return Err(invalid_release(
+            "Cargo OUT_DIR has an unexpected target profile shape",
+        ));
+    }
+    let resource_root = profile_root.join("app");
+    reset_staged_runtime(&resource_root)?;
+    Ok(resource_root)
+}
+
+#[cfg(target_os = "macos")]
+fn tauri_resource_profile_root(
+    out_dir: &Path,
+    target_root: &Path,
+    target: &str,
+    profile: &str,
+) -> io::Result<PathBuf> {
+    validate_path_component(target, "Rust target")?;
+    validate_path_component(profile, "Cargo profile")?;
+    reject_staged_path_components(out_dir)?;
+    reject_staged_path_components(target_root)?;
+
+    let profile_roots = [
+        target_root.join(profile),
+        target_root.join(target).join(profile),
+    ];
+    for profile_root in profile_roots {
+        let build_root = profile_root.join("build");
+        let Ok(relative) = out_dir.strip_prefix(&build_root) else {
+            continue;
+        };
+        let components = relative.components().collect::<Vec<_>>();
+        if components.len() != 2
+            || !matches!(components[0], Component::Normal(_))
+            || components[1].as_os_str() != "out"
+        {
+            return Err(invalid_release(
+                "Cargo OUT_DIR has an unexpected target profile shape",
+            ));
+        }
+        return Ok(profile_root);
+    }
+
+    Err(invalid_release(
+        "Cargo OUT_DIR escaped the expected target profile build roots",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_resource_copy_for_cargo_at(
+    out_dir: &Path,
+    target_root: &Path,
+    target: &str,
+    profile: &str,
+) -> io::Result<PathBuf> {
+    let profile_root = tauri_resource_profile_root(out_dir, target_root, target, profile)?;
+    reset_tauri_resource_copy_at(out_dir, &profile_root)
+}
+
+#[cfg(target_os = "macos")]
+fn reset_tauri_macos_resource_copy() -> io::Result<()> {
+    let project_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_root = resolve_tauri_shell_target_dir(&project_dir)?;
+    let target = required_cargo_target()?;
+    let profile = std::env::var("PROFILE")
+        .map_err(|_| invalid_release("Cargo PROFILE is missing for resource reset"))?;
+    let out_dir = std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| invalid_release("Cargo OUT_DIR is missing for resource reset"))?;
+    reset_tauri_resource_copy_for_cargo_at(&out_dir, &target_root, &target, &profile)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn prepare_staged_macos_xattr_transport(_root: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct MacosStagedEntryIdentity {
+    path: PathBuf,
+    device: u64,
+    inode: u64,
+    mode: u32,
+    size: u64,
+    directory: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_staged_entry_identities(root: &Path) -> io::Result<Vec<MacosStagedEntryIdentity>> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    fn visit(path: &Path, entries: &mut Vec<MacosStagedEntryIdentity>) -> io::Result<()> {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink()
+            || (!metadata.is_dir() && !metadata.is_file())
+            || (metadata.is_file() && metadata.nlink() != 1)
+            || metadata.uid() != unsafe { libc::geteuid() }
+        {
+            return Err(invalid_release(format!(
+                "staged macOS xattr entry has unsafe identity: {}",
+                path.display()
+            )));
+        }
+        entries.push(MacosStagedEntryIdentity {
+            path: path.to_path_buf(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            mode: metadata.permissions().mode() & 0o777,
+            size: metadata.len(),
+            directory: metadata.is_dir(),
+        });
+        if metadata.is_dir() {
+            let mut children = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+            children.sort_by_key(fs::DirEntry::file_name);
+            for child in children {
+                visit(&child.path(), entries)?;
+            }
+        }
+        Ok(())
+    }
+
+    let metadata = fs::symlink_metadata(MACOS_XATTR_PATH)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != 0
+        || metadata.permissions().mode() & 0o022 != 0
+        || metadata.permissions().mode() & 0o111 == 0
+        || Path::new(MACOS_XATTR_PATH).canonicalize()? != Path::new(MACOS_XATTR_PATH)
+    {
+        return Err(invalid_release(
+            "canonical macOS xattr tool identity is unsafe",
+        ));
+    }
+
+    let mut entries = Vec::new();
+    visit(root, &mut entries)?;
+    Ok(entries)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_staged_transport(entries: &[MacosStagedEntryIdentity]) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    for entry in entries {
+        let metadata = fs::symlink_metadata(&entry.path)?;
+        if metadata.file_type().is_symlink()
+            || metadata.dev() != entry.device
+            || metadata.ino() != entry.inode
+            || metadata.permissions().mode() & 0o777
+                != if entry.directory {
+                    entry.mode | 0o700
+                } else {
+                    entry.mode | 0o200
+                }
+            || metadata.len() != entry.size
+            || metadata.is_dir() != entry.directory
+        {
+            return Err(invalid_release(format!(
+                "staged macOS entry changed during xattr transport preparation: {}",
+                entry.path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn restore_macos_staged_modes(entries: &[MacosStagedEntryIdentity]) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    for entry in entries.iter().rev() {
+        let metadata = fs::symlink_metadata(&entry.path)?;
+        if metadata.file_type().is_symlink()
+            || metadata.dev() != entry.device
+            || metadata.ino() != entry.inode
+            || metadata.len() != entry.size
+            || metadata.is_dir() != entry.directory
+        {
+            return Err(invalid_release(format!(
+                "staged macOS entry changed before mode rollback: {}",
+                entry.path.display()
+            )));
+        }
+        fs::set_permissions(&entry.path, fs::Permissions::from_mode(entry.mode))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn prepare_staged_macos_xattr_transport(root: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let entries = macos_staged_entry_identities(root)?;
+    for entry in &entries {
+        let writable_mode = if entry.directory {
+            entry.mode | 0o700
+        } else {
+            entry.mode | 0o200
+        };
+        if let Err(error) =
+            fs::set_permissions(&entry.path, fs::Permissions::from_mode(writable_mode))
+        {
+            restore_macos_staged_modes(&entries)?;
+            return Err(error);
+        }
+    }
+
+    let output = Command::new(MACOS_XATTR_PATH)
+        .env_clear()
+        .args(["-c", "-r"])
+        .arg(root)
+        .output()?;
+    verify_macos_staged_transport(&entries)?;
+    if !output.status.success() {
+        restore_macos_staged_modes(&entries)?;
+        return Err(invalid_release(format!(
+            "canonical macOS xattr transport probe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 fn collect_runtime_resource_files(root: &Path, current: &Path) -> io::Result<Vec<PathBuf>> {
@@ -1042,7 +1301,7 @@ fn bind_sealed_python_root(root: &Path, require_formal_binding: bool) -> io::Res
         || provenance
             .get("package_id")
             .and_then(serde_json::Value::as_str)
-            != Some("dev.tobkiri.launcher")
+            != Some("dev.rumiai.app")
         || !valid_sha256(provenance.get("release_digest"))
     {
         return Err(io::Error::new(
@@ -2375,6 +2634,36 @@ fn is_intermediate_shell_build() -> bool {
             == Some("tobkiri-shell")
 }
 
+/// Whether this is the explicit debug-only local Launcher configuration.
+///
+/// It deliberately removes `gen/app` from the Tauri resource map. The debug
+/// binary resolves its runtime from the local development workspace, so asking
+/// it to create the production sealed runtime would both require the formal
+/// packaging inputs and race the development resource preparation hook. The
+/// distinct CI/E2E configuration retains `gen/app`; every release-profile
+/// build always takes the sealed staging path.
+fn is_unbundled_local_development_build() -> bool {
+    if required_cargo_profile().ok().as_deref() != Some("debug") {
+        return false;
+    }
+    let Ok(raw_config) = std::env::var("TAURI_CONFIG") else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(&raw_config) else {
+        return false;
+    };
+    if config.get("identifier").and_then(serde_json::Value::as_str)
+        != Some(LOCAL_DEVELOPMENT_LAUNCHER_IDENTIFIER)
+    {
+        return false;
+    }
+    config
+        .get("bundle")
+        .and_then(|bundle| bundle.get("resources"))
+        .and_then(|resources| resources.get("./gen/app"))
+        .map_or(true, serde_json::Value::is_null)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoreBuildStage {
     IntermediateShell,
@@ -2538,7 +2827,21 @@ impl StagedRuntimeResetGuard {
         }
         let identity = (metadata.dev(), metadata.ino());
         let inventory = core_transaction_inventory(&root)?;
-        validate_staged_runtime_manifest(&root, &inventory)?;
+        if inventory.keys().any(|relative| !relative.is_empty()) {
+            match core_openat(
+                &root,
+                std::ffi::OsStr::new(RUNTIME_RESOURCE_MANIFEST),
+                false,
+            ) {
+                Ok(_) => validate_staged_runtime_manifest(&root, &inventory)?,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Err(invalid_release(
+                        "staged runtime seal manifest is missing; residue retained",
+                    ));
+                }
+                Err(error) => return Err(error),
+            }
+        }
         Ok(Self {
             parent,
             root,
@@ -2686,9 +2989,16 @@ fn create_staged_runtime_root(path: &Path) -> io::Result<()> {
     let encoded = CString::new(name.as_bytes())
         .map_err(|_| invalid_release("staged runtime root name contains NUL"))?;
     if unsafe { libc::mkdirat(parent.as_raw_fd(), encoded.as_ptr(), 0o755) } == -1 {
-        return Err(io::Error::last_os_error());
+        return Err(invalid_release(format!(
+            "failed to create new staged runtime root: {}",
+            io::Error::last_os_error()
+        )));
     }
-    let root = core_openat(&parent, name, true)?;
+    let root = core_openat(&parent, name, true).map_err(|error| {
+        invalid_release(format!(
+            "new staged runtime root disappeared before it could be opened: {error}"
+        ))
+    })?;
     let metadata = root.metadata()?;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
         return Err(invalid_release(
@@ -4083,10 +4393,12 @@ fn stage_core_verified_release(
             &staged_bundled.join(filename),
         )?;
     }
+    let staged_defaults_bundle = staged_root.join("ecosystem/defaultspack/v4");
     copy_dir_recursive(
         &release_root.join("ecosystem/defaultspack/v4"),
-        &staged_root.join("ecosystem/defaultspack/v4"),
+        &staged_defaults_bundle,
     )?;
+    remove_source_only_profile_artifacts(&staged_defaults_bundle)?;
     let platform_artifacts = release_root.join("ecosystem/defaultspack/platform-artifacts");
     if platform_artifacts.is_dir() {
         copy_dir_recursive(
@@ -4112,6 +4424,43 @@ fn stage_core_verified_release(
         verified.key_id
     );
     Ok(Some(staged_catalog))
+}
+
+fn remove_source_only_profile_artifacts(bundle_root: &Path) -> io::Result<()> {
+    require_directory(bundle_root, "staged packaged Defaults v4 bundle")?;
+    for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+        let candidate = bundle_root.join(filename);
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(invalid_release(format!(
+                "staged source-only Profile artifact may not be a symlink: {}",
+                candidate.display()
+            )));
+        }
+        if !metadata.is_file() {
+            return Err(invalid_release(format!(
+                "staged source-only Profile artifact must be absent or regular: {}",
+                candidate.display()
+            )));
+        }
+        reject_release_hardlink(&metadata, &candidate)?;
+        fs::remove_file(&candidate)?;
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(invalid_release(format!(
+                    "staged source-only Profile artifact remained after removal: {}",
+                    candidate.display()
+                )));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 fn current_source_revision(repository_root: &Path) -> io::Result<String> {
@@ -5896,7 +6245,7 @@ mod tests {
             "python_version": "3.13.13",
             "package_provenance": {
                 "kind": "pinned-python-build-standalone-v1",
-                "package_id": "dev.tobkiri.launcher",
+                "package_id": "dev.rumiai.app",
                 "release_digest": raw_byte_digest(b"release")
             },
             "sentinels": {
@@ -6123,7 +6472,7 @@ mod tests {
             let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
             let _certificate = EnvironmentGuard::clear(MACOS_CI_CERT_SHA256_ENV);
             let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
-            let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
+            let _team = EnvironmentGuard::clear(APPLE_TEAM_ID_ENV);
             bind_macos_artifact_policy().unwrap();
         }
     }
@@ -6140,8 +6489,7 @@ mod tests {
         }
         {
             let _policy = EnvironmentGuard::set_value(MACOS_ARTIFACT_POLICY_ENV, "production-v1");
-            let _certificate =
-                EnvironmentGuard::set_value(MACOS_CI_CERT_SHA256_ENV, &"b".repeat(64));
+            let _certificate = EnvironmentGuard::clear(MACOS_CI_CERT_SHA256_ENV);
             let _public_key = EnvironmentGuard::clear(MACOS_CI_PUBLIC_KEY_ENV);
             let _team = EnvironmentGuard::set_value(APPLE_TEAM_ID_ENV, "ABC1234567");
             assert!(bind_macos_artifact_policy().is_err());
@@ -6400,6 +6748,64 @@ mod tests {
             .unwrap()
             ..source.find("fn stage_core_verified_release(").unwrap()];
         assert!(verifier.contains("current_source_revision(&repository_root)"));
+    }
+
+    #[test]
+    fn dev_runtime_preparation_completes_before_cargo_staging() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("tauri.conf.json"))
+            .expect("Tauri configuration must remain valid JSON");
+        let before_dev = config
+            .get("build")
+            .and_then(|build| build.get("beforeDevCommand"))
+            .and_then(serde_json::Value::as_object)
+            .expect("beforeDevCommand must use the waiting command form");
+
+        assert_eq!(
+            before_dev
+                .get("script")
+                .and_then(serde_json::Value::as_str),
+            Some("cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev")
+        );
+        assert_eq!(
+            before_dev
+                .get("wait")
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "Cargo staging reads the generated control-panel/runtime resources, so Tauri must not run it concurrently with their preparation"
+        );
+    }
+
+    #[test]
+    fn only_debug_local_configuration_uses_the_unbundled_development_runtime() {
+        let _environment = environment_lock();
+        let _profile = EnvironmentGuard::set_value("PROFILE", "debug");
+        let _config = EnvironmentGuard::set_value(
+            "TAURI_CONFIG",
+            r#"{
+                "identifier":"dev.tobkiri.local-launcher",
+                "bundle":{"resources":{}}
+            }"#,
+        );
+        assert!(is_unbundled_local_development_build());
+
+        let _production_profile = EnvironmentGuard::set_value("PROFILE", "release");
+        assert!(
+            !is_unbundled_local_development_build(),
+            "release artifacts must retain sealed runtime staging"
+        );
+        drop(_production_profile);
+
+        let _sealed_resource_config = EnvironmentGuard::set_value(
+            "TAURI_CONFIG",
+            r#"{
+                "identifier":"dev.tobkiri.local-launcher",
+                "bundle":{"resources":{"./gen/app":"app"}}
+            }"#,
+        );
+        assert!(
+            !is_unbundled_local_development_build(),
+            "a configuration that packages the runtime must use sealed staging"
+        );
     }
 
     #[test]
@@ -7370,7 +7776,7 @@ mod tests {
     }
 
     #[test]
-    fn real_lock_twenty_preserves_catalog_eighteen_and_aliases() {
+    fn real_lock_preserves_catalog_entries_and_aliases() {
         let tree = TestTree::new("real-lock-catalog-binding");
         let bundle = tree.path().join("bundle");
         fs::create_dir_all(&bundle).expect("bundle fixture should exist");
@@ -7406,10 +7812,10 @@ mod tests {
         let selected = catalog["source_manifest_digests"]
             .as_object()
             .expect("canonical selection should exist");
-        assert_eq!(selected.len(), 18);
+        assert_eq!(selected.len(), 24);
         let updated = selected_source_manifest_digests_from_lock(&lock_path, selected)
             .expect("real lock aliases must bind by nested pack.id");
-        assert_eq!(updated.len(), 18);
+        assert_eq!(updated.len(), selected.len());
         for alias in [
             "rumi_file_inspect_pack",
             "rumi_host_authority_bridge_pack",
@@ -7480,6 +7886,192 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn staged_xattr_transport_reproduces_read_only_failure_and_binds_delta() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-xattr-cleanup");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        let resource = staged.join("sealed.txt");
+        fs::write(&resource, b"sealed resource bytes").expect("fixture should be writable");
+        let wrote = Command::new(MACOS_XATTR_PATH)
+            .args(["-w", "io.tobkiri.test", "present"])
+            .arg(&resource)
+            .status()
+            .expect("canonical xattr should run");
+        assert!(wrote.success());
+        fs::set_permissions(&resource, fs::Permissions::from_mode(0o444))
+            .expect("fixture should become read-only");
+
+        let reproduced = Command::new(MACOS_XATTR_PATH)
+            .args(["-c", "-r"])
+            .arg(&staged)
+            .status()
+            .expect("canonical xattr should run");
+        assert!(
+            !reproduced.success(),
+            "recursive xattr cleanup must reproduce the read-only failure"
+        );
+
+        prepare_staged_macos_xattr_transport(&staged)
+            .expect("Host-owned transport view should admit canonical xattr");
+        assert_eq!(fs::read(&resource).unwrap(), b"sealed resource bytes");
+        assert_eq!(
+            fs::metadata(&resource).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        let admitted = Command::new(MACOS_XATTR_PATH)
+            .args(["-c", "-r"])
+            .arg(&staged)
+            .status()
+            .expect("canonical xattr should run on the transport view");
+        assert!(admitted.success());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_accepts_target_qualified_profile() {
+        let tree = TestTree::new("tauri-resource-copy-target-qualified");
+        let target_root = tree.path().join("target");
+        let profile_root = target_root.join("aarch64-apple-darwin/release");
+        let out = profile_root.join("build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&out).expect("Cargo OUT_DIR fixture should be creatable");
+        let resource = profile_root.join("app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+        let host_sentinel = target_root.join("release/app/untouched");
+        fs::create_dir_all(host_sentinel.parent().unwrap()).unwrap();
+        fs::write(&host_sentinel, b"host profile").unwrap();
+
+        let reset = reset_tauri_resource_copy_for_cargo_at(
+            &out,
+            &target_root,
+            "aarch64-apple-darwin",
+            "release",
+        )
+        .expect("target-qualified Tauri resource cache should reset");
+
+        assert_eq!(reset, resource);
+        assert!(resource.is_dir());
+        assert!(!nested.exists());
+        assert!(fs::read_dir(&resource).unwrap().next().is_none());
+        assert_eq!(fs::read(&host_sentinel).unwrap(), b"host profile");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_accepts_implicit_host_profile() {
+        let tree = TestTree::new("tauri-resource-copy-implicit-host");
+        let target_root = tree.path().join("target");
+        let profile_root = target_root.join("debug");
+        let out = profile_root.join("build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&out).expect("Cargo OUT_DIR fixture should be creatable");
+        let resource = profile_root.join("app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+        let target_sentinel = target_root.join("aarch64-apple-darwin/debug/app/untouched");
+        fs::create_dir_all(target_sentinel.parent().unwrap()).unwrap();
+        fs::write(&target_sentinel, b"target profile").unwrap();
+
+        let reset = reset_tauri_resource_copy_for_cargo_at(
+            &out,
+            &target_root,
+            "aarch64-apple-darwin",
+            "debug",
+        )
+        .expect("implicit-host Tauri resource cache should reset");
+
+        assert_eq!(reset, resource);
+        assert!(resource.is_dir());
+        assert!(!nested.exists());
+        assert!(fs::read_dir(&resource).unwrap().next().is_none());
+        assert_eq!(fs::read(&target_sentinel).unwrap(), b"target profile");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tauri_resource_copy_reset_rejects_unbound_or_malformed_out_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("tauri-resource-copy-rejected-layouts");
+        let target_root = tree.path().join("target");
+        let resource = target_root.join("debug/app");
+        let nested = write_read_only_staged_runtime_fixture(&resource);
+        let rejected = [
+            tree.path()
+                .join("outside/debug/build/tobkiri-launcher-fixture/out"),
+            target_root.join("x86_64-apple-darwin/debug/build/tobkiri-launcher-fixture/out"),
+            target_root.join("debug/build/out"),
+            target_root.join("debug/build/tobkiri-launcher-fixture/not-out"),
+            target_root.join("debug/build/tobkiri-launcher-fixture/extra/out"),
+        ];
+
+        for out in rejected {
+            fs::create_dir_all(&out).expect("rejected OUT_DIR fixture should be creatable");
+            reset_tauri_resource_copy_for_cargo_at(
+                &out,
+                &target_root,
+                "aarch64-apple-darwin",
+                "debug",
+            )
+            .expect_err("unbound or malformed Cargo OUT_DIR must be rejected");
+            assert!(
+                nested.exists(),
+                "rejected OUT_DIR mutated the resource cache"
+            );
+        }
+
+        let valid_out = target_root.join("debug/build/tobkiri-launcher-fixture/out");
+        fs::create_dir_all(&valid_out).expect("valid OUT_DIR fixture should be creatable");
+        for invalid_profile in ["", ".", "..", "debug/escape", r"debug\escape"] {
+            reset_tauri_resource_copy_for_cargo_at(
+                &valid_out,
+                &target_root,
+                "aarch64-apple-darwin",
+                invalid_profile,
+            )
+            .expect_err("invalid Cargo PROFILE must be rejected");
+            assert!(
+                nested.exists(),
+                "invalid PROFILE mutated the resource cache"
+            );
+        }
+
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o755))
+            .expect("nested fixture should be restored for cleanup");
+        fs::set_permissions(&resource, fs::Permissions::from_mode(0o755))
+            .expect("resource fixture should be restored for cleanup");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_creates_a_missing_host_owned_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-new-root");
+        let staged = tree.path().join("gen/app");
+
+        reset_staged_runtime(&staged)
+            .expect("an absent generated runtime root should be created safely");
+
+        assert!(staged.is_dir());
+        assert_eq!(
+            fs::metadata(&staged)
+                .expect("new staged root should have metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        assert!(
+            fs::read_dir(&staged)
+                .expect("new staged root should be readable")
+                .next()
+                .is_none(),
+            "new staging must have no inherited content"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn staged_runtime_reset_unseals_only_the_host_sealed_tree() {
         use std::os::unix::fs::PermissionsExt;
 
@@ -7500,6 +8092,45 @@ mod tests {
                 & 0o777,
             0o755
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_reaps_an_empty_partial_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tree = TestTree::new("staged-runtime-empty-partial");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+
+        reset_staged_runtime(&staged).expect("empty partial staging should reset");
+
+        assert!(staged.is_dir());
+        assert!(!staged.join(RUNTIME_RESOURCE_MANIFEST).exists());
+        assert_eq!(
+            fs::metadata(&staged)
+                .expect("new staged root should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn staged_runtime_reset_retains_nonempty_unsealed_residue() {
+        let tree = TestTree::new("staged-runtime-unsealed-residue");
+        let staged = tree.path().join("gen/app");
+        fs::create_dir_all(&staged).expect("staged root should be creatable");
+        fs::write(staged.join("partial-entry"), b"partial build")
+            .expect("partial residue should be writable");
+
+        let error = reset_staged_runtime(&staged)
+            .expect_err("nonempty unsealed staging must remain fail-closed");
+
+        assert!(error.to_string().contains("seal manifest is missing"));
+        assert!(staged.join("partial-entry").is_file());
     }
 
     #[cfg(target_os = "macos")]
@@ -7594,6 +8225,69 @@ mod tests {
             fs::read(&staged_catalog).expect("staged catalog should remain readable"),
             fs::read(&catalog).expect("mutated source should be readable")
         );
+    }
+
+    #[test]
+    fn core_staging_replaces_source_only_profile_artifacts() {
+        let tree = TestTree::new("core-source-only-profile-artifacts");
+        let (release_root, staged_root, _) = release_fixture(&tree);
+        let staged_bundle = staged_root.join("ecosystem/defaultspack/v4");
+        fs::create_dir_all(&staged_bundle).expect("staged Defaults bundle should be creatable");
+        for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+            fs::write(
+                staged_bundle.join(filename),
+                b"tracked source-only artifact",
+            )
+            .expect("tracked source-only artifact should be creatable");
+        }
+        let retained = staged_bundle.join("unrelated-tracked-file");
+        fs::write(&retained, b"retained").expect("unrelated staged file should be creatable");
+
+        stage_core_verified_release(&staged_root, &release_root)
+            .expect("Core staging should replace the packaged Defaults closure");
+
+        for filename in SOURCE_ONLY_PROFILE_ARTIFACTS {
+            assert!(
+                fs::symlink_metadata(staged_bundle.join(filename))
+                    .expect_err("source-only Profile artifact must be absent")
+                    .kind()
+                    == io::ErrorKind::NotFound
+            );
+        }
+        assert_eq!(
+            fs::read(&retained).expect("unrelated staged file should remain"),
+            b"retained"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_only_profile_artifact_removal_rejects_symlink_and_directory() {
+        use std::os::unix::fs::symlink;
+
+        let tree = TestTree::new("source-only-profile-artifact-types");
+        let bundle = tree.path().join("staged/ecosystem/defaultspack/v4");
+        fs::create_dir_all(&bundle).expect("staged Defaults bundle should be creatable");
+        let outside = tree.path().join("outside-profile-artifact");
+        fs::write(&outside, b"outside").expect("outside fixture should be creatable");
+        symlink(&outside, bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[0]))
+            .expect("source-only fixture symlink should be creatable");
+
+        let error = remove_source_only_profile_artifacts(&bundle)
+            .expect_err("source-only Profile symlink must fail closed");
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(
+            fs::read(&outside).expect("outside target should remain"),
+            b"outside"
+        );
+
+        fs::remove_file(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[0]))
+            .expect("fixture symlink should be removable");
+        fs::create_dir(bundle.join(SOURCE_ONLY_PROFILE_ARTIFACTS[1]))
+            .expect("source-only directory fixture should be creatable");
+        let error = remove_source_only_profile_artifacts(&bundle)
+            .expect_err("source-only Profile directory must fail closed");
+        assert!(error.to_string().contains("absent or regular"));
     }
 
     #[test]

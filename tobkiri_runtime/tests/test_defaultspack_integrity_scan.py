@@ -26,6 +26,8 @@ def _copy_v4_pack(tmp_path: Path) -> Path:
         "contracts.v4.json",
         "artifact-index.v4.json",
         "executables.v4.json",
+        "host_contract_contributions.v1.json",
+        "update_metadata.v1.json",
     ):
         shutil.copy2(DEFAULTSPACK_ROOT / filename, pack_root / filename)
     shutil.copytree(DEFAULTSPACK_ROOT / "runtime", pack_root / "runtime")
@@ -37,6 +39,21 @@ def _v4_errors(pack_root: Path) -> list[str]:
     errors: list[str] = []
     check_v4_integrity(errors, pack_root, strict=True)
     return errors
+
+
+def _bundled_defaultspack_projection(pack_root: Path) -> Path:
+    """Return the generated Defaultspack Pack projection in a copied bundle."""
+
+    return pack_root / "v4" / "packs" / "defaultspack.pack.v4.json"
+
+
+def _write_projection(pack_root: Path, projection: dict[str, object]) -> None:
+    """Write a deliberate projection tamper without repairing its lock pin."""
+
+    _bundled_defaultspack_projection(pack_root).write_text(
+        json.dumps(projection, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_defaultspack_integrity_scan_strict_passes():
@@ -54,6 +71,49 @@ def test_defaultspack_integrity_scan_strict_passes():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "passed" in result.stdout
+
+
+def test_v4_integrity_rejects_byte_identical_defaultspack_projection(tmp_path):
+    pack_root = _copy_v4_pack(tmp_path)
+    _bundled_defaultspack_projection(pack_root).write_bytes(
+        (pack_root / "pack.v4.json").read_bytes()
+    )
+
+    errors = _v4_errors(pack_root)
+
+    assert "bundled defaultspack Pack must be a generated projection" in errors
+
+
+def test_v4_integrity_rejects_projection_provenance_input_tampering(tmp_path):
+    pack_root = _copy_v4_pack(tmp_path)
+    projection_path = _bundled_defaultspack_projection(pack_root)
+    projection = json.loads(projection_path.read_text(encoding="utf-8"))
+    projection["provenance"]["source_digest"] = "sha256:" + "0" * 64
+    projection["provenance"]["input_inventory_digest"] = "sha256:" + "1" * 64
+    _write_projection(pack_root, projection)
+
+    errors = _v4_errors(pack_root)
+
+    assert any(error.endswith("source_digest") for error in errors)
+    assert any(error.endswith("input_inventory_digest") for error in errors)
+
+
+def test_v4_integrity_rejects_projection_generator_or_identity_tampering(tmp_path):
+    pack_root = _copy_v4_pack(tmp_path)
+    projection_path = _bundled_defaultspack_projection(pack_root)
+    projection = json.loads(projection_path.read_text(encoding="utf-8"))
+    canonical = json.loads((pack_root / "pack.v4.json").read_text(encoding="utf-8"))
+    projection["provenance"]["generator_digest"] = "sha256:" + "0" * 64
+    projection["integrity"]["source_identity"] = canonical["integrity"][
+        "source_identity"
+    ]
+    _write_projection(pack_root, projection)
+
+    errors = _v4_errors(pack_root)
+
+    assert any(error.endswith("generator_digest") for error in errors)
+    assert "bundled defaultspack projection source identity is stale" in errors
+    assert "bundled defaultspack projection reused canonical source identity" in errors
 
 
 def test_v4_integrity_rejects_missing_document(tmp_path):
@@ -105,6 +165,17 @@ def test_v4_integrity_rejects_unlisted_bundle_artifact(tmp_path):
     errors = _v4_errors(pack_root)
 
     assert any("extra artifact" in error for error in errors)
+
+
+def test_v4_integrity_source_only_companion_allowlist_is_exact(tmp_path):
+    pack_root = _copy_v4_pack(tmp_path)
+    (pack_root / "v4" / "defaults.profile.intent.v2.json").write_text(
+        "{}\n", encoding="utf-8"
+    )
+
+    errors = _v4_errors(pack_root)
+
+    assert any("defaults.profile.intent.v2.json" in error for error in errors)
 
 
 def test_v4_integrity_rejects_path_traversal(tmp_path):

@@ -71,6 +71,7 @@
         "templates/artifact_card.template.md"
       ]
     },
+    "base_pack_promotion_eligible": false,
     "canonical_v4": {
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:91ed3ca4170dd6112d0b6e52c8e1db234e7c5e45ffd4249918d535ff4c6c9f1b",
@@ -79,7 +80,6 @@
     },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
-    "defaultspack_promotion_eligible": false,
     "executable_code": false,
     "format": "rumi.ecosystem.v1",
     "generated": true,

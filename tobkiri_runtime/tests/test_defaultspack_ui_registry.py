@@ -1936,21 +1936,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
     def test_ui_routes_use_v4_qualified_operations_from_captured_host(self):
         from urllib.parse import quote
 
-        from core_runtime.frontend_contract_routes import resolve_contract_route
+        from core_runtime.global_contracts.http_contract_dispatch import (
+            HTTPContractBinding,
+            HTTPContractTarget,
+            resolve_contract_route,
+        )
 
         _assert_v4_ui_boundary()
-
-        class CapturedHost:
-            _api_route_exact = {
-                ("GET", "/api/ui/catalog"): {},
-                ("GET", "/api/ui/settings"): {},
-                ("PUT", "/api/ui/settings"): {},
-                ("GET", "/api/ui/commands"): {},
-                ("POST", "/api/ui/commands/execute"): {},
-                ("POST", "/api/ui/client-events"): {},
-                ("GET", "/api/ui/conversations/{id}/preview"): {},
-            }
-            _api_route_patterns = ()
 
         route_operations = (
             ("GET", "/api/ui/catalog"),
@@ -1961,13 +1953,40 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             ("POST", "/api/ui/client-events"),
             ("GET", "/api/ui/conversations/{id}/preview"),
         )
+
+        def binding(method: str, path: str) -> HTTPContractBinding:
+            return HTTPContractBinding(
+                method=method,
+                path=path,
+                presentation="defaultspack_ui",
+                targets=(
+                    HTTPContractTarget(
+                        contribution_id="defaultspack.ui",
+                        contract_id="defaultspack.ui.v4",
+                        operation_id=path.removeprefix("/api/").replace("/", "."),
+                        provider_id="defaultspack.desktop",
+                        function_id="defaultspack.desktop",
+                    ),
+                ),
+                application_id="defaultspack",
+                route_namespace="defaultspack",
+            )
+
+        class CapturedHost:
+            _contract_routes = {
+                (method, path): binding(method, path)
+                for method, path in route_operations
+            }
         for method, route in route_operations:
             qualified_operation = (
                 "/api/contracts/defaultspack/"
                 + quote(f"{method} {route}", safe="")
             )
             resolved = resolve_contract_route(
-                CapturedHost(), method, qualified_operation
+                CapturedHost(),
+                method,
+                qualified_operation,
+                namespace="defaultspack",
             )
             self.assertEqual(resolved.method, method)
             self.assertEqual(resolved.path, route)

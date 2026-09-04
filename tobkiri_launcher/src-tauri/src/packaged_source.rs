@@ -26,6 +26,9 @@ const FILES: &[&str] = &[
     "ecosystem/defaultspack/contracts.v4.json",
     "ecosystem/defaultspack/artifact-index.v4.json",
     "ecosystem/defaultspack/executables.v4.json",
+    "ecosystem/defaultspack/host_contract_contributions.v1.json",
+    "ecosystem/defaultspack/domain/runtime_surface_v4.py",
+    "ecosystem/defaultspack/update_metadata.v1.json",
 ];
 const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SOURCE_BYTES: u64 = 256 * 1024 * 1024;
@@ -1975,6 +1978,10 @@ mod tests {
         assert!(snapshot
             .root()
             .join("scripts/generate_packaged_defaultspack_v4_bundle.py")
+            .is_file());
+        assert!(snapshot
+            .root()
+            .join("ecosystem/defaultspack/domain/runtime_surface_v4.py")
             .is_file());
         assert!(!snapshot.root().join("scripts/__pycache__").exists());
     }

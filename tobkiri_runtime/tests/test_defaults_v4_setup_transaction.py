@@ -13,6 +13,7 @@ from core_runtime.authority.v4 import AuthorityStore
 from core_runtime.bootstrap import profile_capture
 from ecosystem.defaultspack.domain.runtime_v4 import (
     BundleIntegrityError,
+    BundledCatalog,
     ProfileResolutionDenied,
 )
 from tobkiri_protocol.canonical import canonical_json
@@ -37,7 +38,7 @@ def test_review_and_cancel_are_read_only(tmp_path: Path, monkeypatch) -> None:
     assert confirmation["profile_id"] == "defaults"
     assert confirmation["base"]["pack_id"] == "defaults-basepack"
     assert confirmation["shell"]["provider_id"] == "shell.tauri.default"
-    catalog = profile_capture.BundledCatalog.load(profile_capture._bundle_root())
+    catalog = BundledCatalog.load(profile_capture._bundle_root())
     variant = catalog.shells["shell.tauri.default"]["launch"]["variants"][0]
     assert confirmation["shell"]["executable_artifact_digest"] == variant[
         "entrypoint_digest"

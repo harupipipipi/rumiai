@@ -137,7 +137,7 @@ def run(context):
         ("GET", "/host-permissions", _static_shell, {}),
     ]
     try:
-        from core_runtime.frontend_host import build_frontend_catalog
+        from ecosystem.defaultspack.domain.frontend.host import build_frontend_catalog
         from core_runtime.resolved_profile_scope import active_resolved_profile
 
         plan = active_resolved_profile()

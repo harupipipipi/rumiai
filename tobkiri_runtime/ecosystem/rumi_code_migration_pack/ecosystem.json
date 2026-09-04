@@ -91,6 +91,7 @@
         "templates/ui_contract.template.md"
       ]
     },
+    "base_pack_promotion_eligible": false,
     "canonical_v4": {
       "artifact": "pack.v4.json",
       "artifact_digest": "sha256:c7e6b46d394682812bdf87e4e566409a5e36ae2a3815e4f8af89f81ef9a300cf",
@@ -99,7 +100,6 @@
     },
     "consumes_existing_sources_only": true,
     "declarative_only": true,
-    "defaultspack_promotion_eligible": false,
     "executable_code": false,
     "format": "rumi.ecosystem.v1",
     "generated": true,

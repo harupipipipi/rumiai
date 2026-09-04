@@ -9,7 +9,7 @@
 use std::fs;
 #[cfg(unix)]
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -63,6 +63,57 @@ fn require_development_venv(config: &AppConfig) -> Result<()> {
     Ok(())
 }
 
+/// Resolve the durable active Application authority, if one has been
+/// completely committed.  A Host-contract file is never used as the source
+/// of this decision: it is only a projection of the independently verified
+/// Profile authority.
+fn verified_active_application_authority(
+    config: &AppConfig,
+) -> Result<Option<crate::defaultspack_authority::ApplicationAuthority>> {
+    if !crate::defaultspack_authority::has_verified_active_profile(config)
+        .context("failed to inspect durable active Profile authority")?
+    {
+        return Ok(None);
+    }
+    let authority = crate::defaultspack_authority::resolve(config)
+        .context("failed to resolve durable active Application authority")?;
+    Ok(Some(authority))
+}
+
+fn write_kernel_host_contract(config: &AppConfig, bootstrap_secret: &str) -> Result<PathBuf> {
+    match verified_active_application_authority(config)? {
+        Some(authority) => {
+            let identity = authority
+                .execution_identity()
+                .context("durable active Application execution identity is invalid")?;
+            let contributions =
+                crate::host_contract_contributions::collect_for_verified_application(&authority)
+                    .context("failed to collect verified active Host contract contributions")?;
+            crate::host_contract::write_contract(
+                config,
+                &identity,
+                [
+                    ("panel_bootstrap_secret", bootstrap_secret.to_owned()),
+                    (
+                        "system_pack_descriptors",
+                        contributions.system_pack_descriptors,
+                    ),
+                    (
+                        "update_target_descriptors",
+                        contributions.update_target_descriptors,
+                    ),
+                ],
+            )
+            .context("failed to publish the durable active Host contract")
+        }
+        None => crate::host_contract::write_bootstrap_contract(
+            config,
+            [("panel_bootstrap_secret", bootstrap_secret.to_owned())],
+        )
+        .context("failed to publish the bootstrap-only Host contract"),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PortListener {
     pub(crate) pid: u32,
@@ -105,6 +156,9 @@ pub struct KernelManager {
     last_exit_code: Option<i32>,
     /// Counter for consecutive non-42 restarts.
     restart_count: u32,
+    /// Monotonically increasing successful-start generation used to fence
+    /// background work from a Kernel process that has since restarted.
+    launch_generation: u64,
 }
 
 impl KernelManager {
@@ -115,6 +169,7 @@ impl KernelManager {
             panel_bootstrap_secret,
             last_exit_code: None,
             restart_count: 0,
+            launch_generation: 0,
         }
     }
 
@@ -167,14 +222,9 @@ impl KernelManager {
         );
 
         let dev_environment = cfg!(debug_assertions) || self.config.is_dev_workspace();
-        let host_contract_path = crate::host_contract::write_contract(
-            &self.config,
-            crate::host_contract::DEFAULT_PROFILE_ID,
-            [(
-                "panel_bootstrap_secret",
-                self.panel_bootstrap_secret.clone(),
-            )],
-        )?;
+        let host_contract_path =
+            write_kernel_host_contract(&self.config, &self.panel_bootstrap_secret)?;
+        let next_launch_generation = self.next_launch_generation()?;
 
         let child = crate::python_env::spawn_python_role(
             &self.config,
@@ -227,8 +277,27 @@ impl KernelManager {
 
         info!("Kernel started (pid {})", child.id());
         self.child = Some(child);
+        self.launch_generation = next_launch_generation;
         self.last_exit_code = None;
         Ok(())
+    }
+
+    fn next_launch_generation(&self) -> Result<u64> {
+        self.launch_generation
+            .checked_add(1)
+            .context("Kernel launch generation overflow")
+    }
+
+    /// Return the start generation captured by asynchronous Launcher work.
+    pub(crate) fn launch_generation(&self) -> u64 {
+        self.launch_generation
+    }
+
+    /// Return whether a captured generation still names this Kernel.  The
+    /// zero generation is reserved for an authenticated Kernel that predates
+    /// this Launcher process and therefore has no managed child handle.
+    pub(crate) fn is_current_launch_generation(&mut self, generation: u64) -> bool {
+        self.launch_generation == generation && (generation == 0 || self.is_running())
     }
 
     pub fn current_pid(&self) -> Option<u32> {
@@ -752,6 +821,25 @@ mod tests {
     }
 
     #[test]
+    fn successful_start_generation_rejects_stale_guardian_work() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+
+        assert_eq!(km.launch_generation(), 0);
+        assert!(km.is_current_launch_generation(0));
+
+        let first_generation = km.next_launch_generation().unwrap();
+        km.launch_generation = first_generation;
+        let restarted_generation = km.next_launch_generation().unwrap();
+        km.launch_generation = restarted_generation;
+
+        assert_eq!(first_generation, 1);
+        assert_eq!(restarted_generation, 2);
+        assert_ne!(first_generation, restarted_generation);
+        assert!(!km.is_current_launch_generation(first_generation));
+    }
+
+    #[test]
     fn clean_exit_does_not_request_restart_without_child() {
         let config = test_config();
         let mut km = KernelManager::new(&config, "test-bootstrap".into());
@@ -810,6 +898,50 @@ mod tests {
         // now the authoritative packaged role spawn, which still fails closed.
         assert!(error.contains("failed to verify and spawn Kernel process"));
         assert!(!error.contains("packaged runtime integrity verification failed"));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn no_active_profile_publishes_only_a_distinct_bootstrap_contract() {
+        let (root, config) = temporary_packaged_config("kernel-bootstrap-contract");
+
+        write_kernel_host_contract(&config, "bootstrap-secret").unwrap();
+
+        let contract: serde_json::Value = serde_json::from_slice(
+            &fs::read(crate::host_contract::contract_path(&config)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(contract["profile_id"], "defaults");
+        assert_ne!(
+            contract["profile_revision"],
+            serde_json::Value::String(format!("sha256:{}", "0".repeat(64))),
+            "bootstrap must not use the former all-zero digest"
+        );
+        assert_ne!(contract["profile_revision"], contract["plan_digest"]);
+        assert_eq!(
+            contract["values"]["panel_bootstrap_secret"],
+            "bootstrap-secret"
+        );
+        assert!(contract["values"].get("system_pack_descriptors").is_none());
+        assert!(crate::host_contract::read_identity(&config).is_none());
+        assert!(crate::host_contract::read_value(&config, "panel_bootstrap_secret").is_none());
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn malformed_active_pointer_fails_closed_instead_of_falling_back_to_bootstrap() {
+        let (root, config) = temporary_packaged_config("kernel-corrupt-active-contract");
+        let profiles = config.user_data_dir.join("profiles");
+        fs::create_dir_all(&profiles).unwrap();
+        fs::write(profiles.join("active.json"), br#"{"not":"an authority"}"#).unwrap();
+
+        let error = write_kernel_host_contract(&config, "bootstrap-secret").unwrap_err();
+
+        assert!(format!("{error:#}").contains("active Profile pointer"));
+        assert!(
+            !crate::host_contract::contract_path(&config).exists(),
+            "a corrupt active authority must not be replaced with a bootstrap contract"
+        );
         fs::remove_dir_all(root).ok();
     }
 

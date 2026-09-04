@@ -570,7 +570,12 @@ def test_provider_rejection_always_releases_submitted_future() -> None:
         def __init__(self) -> None:
             self.future = CancelTrackedFuture()
 
-        def submit(self, _callable, _request) -> CancelTrackedFuture:
+        def submit(
+            self,
+            _callable: object,
+            *_args: object,
+            **_kwargs: object,
+        ) -> CancelTrackedFuture:
             self.future.set_exception(RuntimeError("provider-private-detail"))
             return self.future
 

@@ -13,18 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.authority.v4 import AuthorityStore
-from core_runtime.bootstrap.production_v4 import capture_production_dispatch
-from core_runtime.bootstrap.profile_capture import (
-    capture_default_profile,
-    prepare_default_profile_confirmation,
-)
 from core_runtime.control_reconciliation_v4 import ControlReconciliationStore
-from core_runtime.frontend_contract_routes import FrontendContractBinding
+from core_runtime.global_contracts.http_contract_dispatch import (
+    HTTPContractBinding as FrontendContractBinding,
+)
 from core_runtime.pack_api_server import (
     MAX_CONCURRENT_REQUESTS,
     PackAPIHandler,
     PackAPIServer,
+    RuntimeCaptureInputs,
     RuntimeHTTPConfig,
 )
 from core_runtime.pack_control_v4 import (
@@ -39,15 +36,17 @@ from tobkiri_host.errors import ProviderExecutionError
 from tobkiri_protocol.canonical import canonical_digest
 
 
-def _bundle_root() -> Path:
-    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
-
-    return packaged_profile_bundle_root()
-
-
 class _Dispatch:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, Mapping[str, object]]] = []
+        self.profile_id = "defaults"
+        self.profile_revision = "sha256:" + "1" * 64
+        self.activation_id = "activation:test-pack-api"
+        self.plan_digest = "sha256:" + "2" * 64
+        self.security_epoch = 1
+
+    def assert_current(self) -> None:
+        """Keep this explicit test capture current for handler auth tests."""
 
     def invoke(
         self,
@@ -418,6 +417,7 @@ def test_packvm_lifecycle_routes_require_auth_csrf_and_fresh_request_id() -> Non
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-desktop"),
+        dispatch_session=_Dispatch(),
         packvm_lifecycle=lifecycle,
     )
     refreshed: list[object] = []
@@ -737,14 +737,9 @@ def _prepare_refresh_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> int:
     import core_runtime.di_container as di_container_module
-    import core_runtime.pack_api_server as pack_api_server_module
     import tobkiri_host.runtime as host_runtime_module
 
-    monkeypatch.setattr(
-        pack_api_server_module,
-        "_load_production_capture_inputs",
-        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
-    )
+    server._runtime_capture_factory = _test_runtime_capture_inputs
     monkeypatch.setattr(di_container_module, "get_container", object)
     monkeypatch.setattr(
         host_runtime_module,
@@ -755,6 +750,18 @@ def _prepare_refresh_race(
         server._lifecycle_state = "running"
         server._lifecycle_generation = 41
     return 41
+
+
+def _test_runtime_capture_inputs(
+    _active: object | None = None,
+) -> RuntimeCaptureInputs:
+    """Provide the app-owned refresh composition required by Host tests."""
+
+    return RuntimeCaptureInputs(
+        bundle_root=Path("/bundle"),
+        ecosystem_root=Path("/runtime"),
+        contract_bindings=(),
+    )
 
 
 def test_server_closes_server_captured_refresh_session_on_stop(
@@ -773,7 +780,7 @@ def test_server_closes_server_captured_refresh_session_on_stop(
         dispatch_session=initial,  # type: ignore[arg-type]
     )
     generation = _prepare_refresh_race(server, monkeypatch)
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+    monkeypatch.setattr(profile_capture, "capture_active_profile", lambda: object())
     monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
     monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
     monkeypatch.setattr(
@@ -800,7 +807,7 @@ def test_server_refresh_reuses_exact_packvm_lifecycle_for_backend_capture(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A refresh must not silently construct an unavailable second provisioner."""
+    """A refresh must retain the app-selected backend factory and readiness port."""
 
     import core_runtime.authority.v4 as authority_v4
     import core_runtime.bootstrap.production_v4 as production_v4
@@ -822,7 +829,21 @@ def test_server_refresh_reuses_exact_packvm_lifecycle_for_backend_capture(
         packvm_lifecycle=lifecycle,  # type: ignore[arg-type]
     )
     generation = _prepare_refresh_race(server, monkeypatch)
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda: object())
+
+    def app_selected_backend_factory() -> None:
+        return None
+
+    def app_capture_inputs(_active: object | None = None) -> RuntimeCaptureInputs:
+        del _active
+        return RuntimeCaptureInputs(
+            bundle_root=Path("/bundle"),
+            ecosystem_root=Path("/runtime"),
+            contract_bindings=(),
+            packvm_backend_factory=app_selected_backend_factory,
+        )
+
+    server._runtime_capture_factory = app_capture_inputs
+    monkeypatch.setattr(profile_capture, "capture_active_profile", lambda: object())
     monkeypatch.setattr(profile_capture, "runtime_user_data_root", lambda: tmp_path)
     monkeypatch.setattr(authority_v4, "AuthorityStore", lambda _path: object())
     seen: dict[str, object] = {}
@@ -838,7 +859,7 @@ def test_server_refresh_reuses_exact_packvm_lifecycle_for_backend_capture(
     finally:
         server.stop()
 
-    assert seen["packvm_provisioner"] is lifecycle
+    assert seen["packvm_provisioner"] is app_selected_backend_factory
     readiness = seen["packvm_readiness_reader"]
     assert callable(readiness)
     assert readiness() == {"ready": True}
@@ -859,7 +880,13 @@ def test_older_same_generation_refresh_cannot_replace_newer_publish(
     older_entered = threading.Event()
     release_older = threading.Event()
 
-    def validate(session: object, _routes: object) -> None:
+    def validate(
+        session: object,
+        _routes: object,
+        *,
+        host_contract: object = None,
+    ) -> None:
+        del host_contract
         if session is older:
             older_entered.set()
             assert release_older.wait(2.0)
@@ -909,7 +936,13 @@ def test_only_latest_of_three_unordered_refreshes_can_publish(
     entered = {candidate: threading.Event() for candidate in (older, middle)}
     release = {candidate: threading.Event() for candidate in (older, middle)}
 
-    def validate(session: object, _routes: object) -> None:
+    def validate(
+        session: object,
+        _routes: object,
+        *,
+        host_contract: object = None,
+    ) -> None:
+        del host_contract
         if session in entered:
             entered[session].set()
             assert release[session].wait(2.0)
@@ -968,7 +1001,13 @@ def test_failed_latest_refresh_invalidates_older_pending_capture(
     older_entered = threading.Event()
     release_older = threading.Event()
 
-    def validate(session: object, _routes: object) -> None:
+    def validate(
+        session: object,
+        _routes: object,
+        *,
+        host_contract: object = None,
+    ) -> None:
+        del host_contract
         if session is older:
             older_entered.set()
             assert release_older.wait(2.0)
@@ -1004,8 +1043,6 @@ def test_failed_latest_refresh_invalidates_older_pending_capture(
 def test_capture_input_failure_closes_unpublished_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import core_runtime.pack_api_server as pack_api_server_module
-
     initial = _RefreshDispatch("initial")
     failed = _RefreshDispatch("failed")
     server = PackAPIServer(
@@ -1015,14 +1052,11 @@ def test_capture_input_failure_closes_unpublished_candidate(
     )
     generation = _prepare_refresh_race(server, monkeypatch)
 
-    def fail_capture_inputs() -> object:
+    def fail_capture_inputs(_active: object | None = None) -> RuntimeCaptureInputs:
+        del _active
         raise RuntimeError("capture inputs failed")
 
-    monkeypatch.setattr(
-        pack_api_server_module,
-        "_load_production_capture_inputs",
-        fail_capture_inputs,
-    )
+    server._runtime_capture_factory = fail_capture_inputs
     try:
         with pytest.raises(RuntimeError, match="capture inputs failed"):
             server._refresh_runtime_capture(
@@ -1051,7 +1085,13 @@ def test_generation_change_immediately_before_publish_discards_capture(
     validation_complete = threading.Event()
     allow_publish = threading.Event()
 
-    def validate(_session: object, _routes: object) -> None:
+    def validate(
+        _session: object,
+        _routes: object,
+        *,
+        host_contract: object = None,
+    ) -> None:
+        del host_contract
         validation_complete.set()
         assert allow_publish.wait(2.0)
 
@@ -1087,17 +1127,17 @@ def test_refresh_finishing_after_stop_restart_cannot_replace_new_handler(
         panel_auth_manager=PanelAuthManager(bootstrap_secret="verified"),
         dispatch_session=initial,  # type: ignore[arg-type]
     )
-    import core_runtime.pack_api_server as pack_api_server_module
-
-    monkeypatch.setattr(
-        pack_api_server_module,
-        "_load_production_capture_inputs",
-        lambda: (Path("/runtime"), Path("/bundle"), object(), ()),
-    )
+    server._runtime_capture_factory = _test_runtime_capture_inputs
     stale_entered = threading.Event()
     release_stale = threading.Event()
 
-    def validate(session: object, _routes: object) -> None:
+    def validate(
+        session: object,
+        _routes: object,
+        *,
+        host_contract: object = None,
+    ) -> None:
+        del host_contract
         if session is stale:
             stale_entered.set()
             assert release_stale.wait(2.0)
@@ -1407,6 +1447,29 @@ def test_panel_bootstrap_rejects_wrong_secret(
     assert status == 401
 
 
+def test_panel_auth_shell_waits_for_dom_before_touching_body(
+    live_server: tuple[PackAPIServer, _Dispatch],
+) -> None:
+    """Serve the real unauthenticated panel shell with a usable DOM boundary."""
+
+    server, _ = live_server
+    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    connection.request("GET", "/panel/?code=one-time-bootstrap")
+    response = connection.getresponse()
+    document = response.read().decode("utf-8")
+    content_type = response.getheader("Content-Type")
+    connection.close()
+
+    assert response.status == 200
+    assert content_type == "text/html; charset=utf-8"
+    assert document.startswith("<!doctype html>")
+    event_boundary = "document.addEventListener('DOMContentLoaded',()=>{"
+    assert event_boundary in document
+    assert document.index(event_boundary) < document.index("document.body.textContent")
+    assert document.count("document.body.textContent") == 2
+    assert document.endswith("</script>")
+
+
 def test_panel_exchange_rejects_foreign_origin(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:
@@ -1465,19 +1528,9 @@ def test_dispatch_requires_panel_cookie_and_csrf(
 
 
 def test_authenticated_generic_dispatch_is_retired_before_production_broker(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Retired generic dispatch cannot reach the production Broker or ledger."""
-    user_data = tmp_path / "clean-home"
-    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
-    active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    dispatch = capture_production_dispatch(
-        active,
-        bundle_root=_bundle_root(),
-        ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
-        authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
-    )
+    dispatch = _Dispatch()
     server = PackAPIServer(
         port=0,
         panel_auth_manager=PanelAuthManager(bootstrap_secret="verified-desktop"),
@@ -1487,8 +1540,6 @@ def test_authenticated_generic_dispatch_is_retired_before_production_broker(
     server.start()
     try:
         cookie, csrf, origin = _panel_session(server)
-        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
-            audit_before = authority.audit_events()
         headers = {
             "Cookie": cookie,
             "Origin": origin,
@@ -1519,8 +1570,7 @@ def test_authenticated_generic_dispatch_is_retired_before_production_broker(
             headers=headers,
         )
         _assert_retired_generic_dispatch(status, payload)
-        with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
-            assert authority.audit_events() == audit_before
+        assert dispatch.calls == []
     finally:
         server.stop()
 

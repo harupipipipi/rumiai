@@ -1,7 +1,9 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router';
+import {AlertCircle} from 'lucide-react';
 import {useAppStore} from '@/src/store';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {PresentationSelector} from '@/src/components/presentation/PresentationSelector';
 import {TobkiriLoader, TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {panelRoutes} from '@/src/lib/routes';
@@ -262,8 +264,11 @@ export function Setup() {
     return <div className="min-h-screen bg-bg-main px-6 py-10"><div className="mx-auto max-w-4xl">
       <Header />
       {reconciliationError ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-500">
-        <p className="font-medium text-text-main">Activation is verified; runtime surfaces need reconciliation.</p>
-        <p className="mt-2">{reconciliationError}</p>
+        <p className="flex items-center gap-2 font-medium text-text-main"><AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0 text-destructive" />Activation is verified; runtime surfaces need reconciliation.</p>
+        <div className="mt-2 flex items-start gap-2">
+          <p className="min-w-0 flex-1 break-words">{reconciliationError}</p>
+          <CopyErrorButton label="Copy runtime reconciliation error" text={reconciliationError} />
+        </div>
         <div className="mt-4"><Button variant="outline" onClick={() => void recoverActivation()} loading={activating}>Retry runtime reconciliation</Button></div>
       </div> : presentationLoading ? <div role="status" aria-busy="true" className="flex items-center gap-2 rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
         <TobkiriLoadingMark />
@@ -280,9 +285,13 @@ export function Setup() {
         onSelectionChange={setSelection}
         onSave={savePresentation}
         onLaunch={launchPresentation}
-      /> : <div role="status" className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
-        <p>No presentation catalog is available.</p>
-        <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()}>Retry</Button></div>
+      /> : <div role={presentationError ? 'alert' : 'status'} className="rounded-xl border border-border bg-bg-card p-6 text-sm text-text-muted">
+        <div className="flex items-start gap-2">
+          {presentationError ? <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" /> : null}
+          <span className="min-w-0 flex-1 break-words">{presentationError ?? 'Loading selected presentation…'}</span>
+          {presentationError ? <CopyErrorButton label="Copy presentation error" text={presentationError} /> : null}
+        </div>
+        {presentationError && <div className="mt-4"><Button variant="outline" onClick={() => void loadPresentation()} loading={presentationLoading}>Retry</Button></div>}
       </div>}
     </div></div>;
   }

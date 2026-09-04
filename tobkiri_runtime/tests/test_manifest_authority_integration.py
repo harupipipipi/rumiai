@@ -36,7 +36,7 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         sorted(
             path.name
             for path in ECOSYSTEM.iterdir()
-            if path.is_dir() and path.name != "setup_pack" and not path.name.startswith(".")
+            if (path / "pack.v4.json").is_file()
         )
     )
 
@@ -44,7 +44,7 @@ def test_every_repository_pack_has_one_explicit_authority() -> None:
         direct_pack_ids,
         require_complete_catalog=True,
     )
-    assert len(catalog) == 143
+    assert len(catalog) == 140
     assert set(catalog.values()) == {"v4-authoritative"}
     assert catalog["defaults"] == "v4-authoritative"
     assert catalog["defaultspack"] == "v4-authoritative"
@@ -78,10 +78,9 @@ def test_all_authoritative_manifests_and_projections_are_valid() -> None:
         assert (pack_root / "contracts.v4.json").is_file()
         assert (pack_root / "executables.v4.json").is_file()
         assert (pack_root / "artifact-index.v4.json").is_file()
-        if pack_id in {"defaults", "defaultspack"}:
-            assert pack_id in {"defaults", "defaultspack"}
-            assert not ecosystem_path.exists()
-            assert not (pack_root / "rumi.pack.v3.json").exists()
+        v3_path = pack_root / "rumi.pack.v3.json"
+        if not ecosystem_path.exists():
+            assert not v3_path.exists()
             continue
         ecosystem = json.loads(ecosystem_path.read_text(encoding="utf-8"))
         assert validate_ecosystem(ecosystem, raise_on_error=False) == [], pack_id
@@ -95,7 +94,6 @@ def test_all_authoritative_manifests_and_projections_are_valid() -> None:
             ecosystem,
         )
         assert integrity_ok, (pack_id, integrity_diagnostics)
-        v3_path = pack_root / "rumi.pack.v3.json"
         if v3_path.is_file():
             loaded = load_manifest(v3_path)
             assert loaded.ok, (pack_id, loaded.diagnostics)

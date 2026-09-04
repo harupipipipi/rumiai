@@ -14,6 +14,7 @@ import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { ApprovalDecisionSurface } from "./components/ApprovalDecisionSurface";
+import { ErrorNotice } from "./components/ErrorNotice";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
@@ -99,6 +100,12 @@ import {
   withComposerMentionSelectionOwnership,
 } from "./lib/composerWidgets";
 import { hasUnescapedMentionSyntax } from "./lib/mentionContract";
+import {
+  beginHighRiskAttempt,
+  highRiskCommandRef,
+  highRiskPrepareArguments,
+  releaseHighRiskAttempt,
+} from "./lib/highRiskCommand";
 import { fileToAttachment } from "./lib/attachments";
 import { toolGroupFor } from "./lib/toolUi";
 import type { ComposerEntityReference } from "./lib/composerReferences";
@@ -130,7 +137,7 @@ import { promptResources } from "./features/prompts/resources/promptResources";
 import { manualRuntimeModeSelectionEnabled } from "./features/runtimeMode/runtimeMode";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ComposerSteerStatus, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
 import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
@@ -1263,14 +1270,19 @@ function CalendarComposerPanel({
               )}
             </div>
           )}
-          {(draftError || lastAgentResult || activeItem?.scheduleId) && (
-            <div className={cn(
-              "mt-3 rounded-lg border px-2.5 py-2 text-xs",
-              draftError ? "border-red-500/40 bg-red-500/10 text-red-100" : "border-blue-500/30 bg-blue-500/10 text-blue-100",
-            )}>
-              {draftError ?? lastAgentResult ?? `Agentスケジュール: ${activeItem?.scheduleStatus ?? "有効"}`}
+          {draftError ? (
+            <ErrorNotice
+              className="mt-3 rounded-lg px-2.5 py-2 text-xs"
+              copyLabel="Copy calendar action error"
+              copyText={draftError}
+              errorIcon="calendar-action"
+              message={draftError}
+            />
+          ) : lastAgentResult || activeItem?.scheduleId ? (
+            <div className="mt-3 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-2 text-xs text-blue-100">
+              {lastAgentResult ?? `Agentスケジュール: ${activeItem?.scheduleStatus ?? "有効"}`}
             </div>
-          )}
+          ) : null}
           {activeEditor.mode === "edit" && (
             <div className="mt-3 flex items-center justify-between gap-2">
               <button
@@ -1707,6 +1719,27 @@ type PendingCommandApproval = {
   authorityToken?: string;
   codingToken?: string;
 };
+
+/**
+ * Client-only correlation for one Host-owned interactive effect.
+ *
+ * No effect id, prepared plan, scope, grant, token, or command arguments are
+ * retained here. The Host adapter owns those values and only accepts this
+ * invocation id for status, cancel, and the single resume call.
+ */
+type PendingHighRiskCommand = {
+  requestId: string;
+  invocationId: string;
+  commandLabel: string;
+};
+
+const HIGH_RISK_TERMINAL_STATES = new Set([
+  "succeeded",
+  "failed",
+  "stale",
+  "ambiguous",
+  "cancelled",
+]);
 
 function commandApprovalViewModel(
   pending: PendingCommandApproval,
@@ -2554,7 +2587,7 @@ function ChatApp() {
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialActiveWorkspaceTabIdForPathname(window.location.pathname));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
-  const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
+  const [modelSteerStatus, setModelSteerStatus] = useState<ComposerSteerStatus | null>(null);
   const [modelSteerBusy, setModelSteerBusy] = useState(false);
   const [steerItems, setSteerItems] = useState<ConversationSteerItem[]>([]);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
@@ -2565,6 +2598,7 @@ function ChatApp() {
   const [settledRuntimeApprovalIds, setSettledRuntimeApprovalIds] = useState<string[]>([]);
   const [settledBrowserApprovalKeys, setSettledBrowserApprovalKeys] = useState<string[]>([]);
   const [pendingCommandApproval, setPendingCommandApproval] = useState<PendingCommandApproval | null>(null);
+  const [pendingHighRiskCommand, setPendingHighRiskCommand] = useState<PendingHighRiskCommand | null>(null);
   const [commandProgressEvents, setCommandProgressEvents] = useState<Array<Record<string, unknown>>>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>("online");
@@ -2603,6 +2637,10 @@ function ChatApp() {
   const streamingConversationIdRef = useRef<string | null>(null);
   const activeRuntimeApprovalActionRef = useRef<string | null>(null);
   const activeBrowserApprovalActionRef = useRef<string | null>(null);
+  const highRiskPrepareInFlightRef = useRef(false);
+  const highRiskResumeStartedRef = useRef(new Set<string>());
+  const highRiskCancelStartedRef = useRef(new Set<string>());
+  const highRiskApprovalWindowOpenedRequestRef = useRef<string | null>(null);
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
@@ -3065,6 +3103,161 @@ function ChatApp() {
       cancelled = true;
     };
   }, [effectiveCommandCatalog, mode, pendingCommandApproval, usesResolvedCommandProtocol]);
+
+  useEffect(() => {
+    if (!pendingHighRiskCommand) return;
+    let disposed = false;
+    let retryTimer: number | null = null;
+    const pending = pendingHighRiskCommand;
+
+    const clearPending = () => {
+      setPendingHighRiskCommand((current) => (
+        current?.invocationId === pending.invocationId ? null : current
+      ));
+    };
+    const schedulePoll = () => {
+      if (!disposed) retryTimer = window.setTimeout(() => void poll(), 750);
+    };
+    const poll = async () => {
+      try {
+        const approval = await api.getInteractiveApproval(pending.requestId);
+        if (disposed) return;
+        if (approval.request_id !== pending.requestId) {
+          throw new Error("高リスク操作の承認リクエストが一致しません。");
+        }
+        const invocation = await api.highRiskCommandStatus(pending.invocationId);
+        if (disposed) return;
+        if (
+          invocation.invocation_id !== pending.invocationId
+          || invocation.approval_request_id !== pending.requestId
+        ) {
+          throw new Error("高リスク操作の実行状態が一致しません。");
+        }
+        if (HIGH_RISK_TERMINAL_STATES.has(invocation.state)) {
+          clearPending();
+          if (invocation.state === "succeeded") {
+            transientAlertSequenceRef.current += 1;
+            setTransientAlert({
+              id: `high-risk-succeeded-${transientAlertSequenceRef.current}`,
+              message: `/${pending.commandLabel} を実行しました。`,
+              tone: "success",
+            });
+          } else {
+            setError(`/${pending.commandLabel} は ${invocation.state} のため実行されませんでした。`);
+          }
+          return;
+        }
+        if (["denied", "expired", "cancelled", "stale", "failed"].includes(approval.state)) {
+          if (!beginHighRiskAttempt(highRiskCancelStartedRef.current, pending.invocationId)) return;
+          let cancelled: Awaited<ReturnType<typeof api.cancelHighRiskCommand>>;
+          try {
+            cancelled = await api.cancelHighRiskCommand(pending.invocationId);
+          } catch (cancelError) {
+            releaseHighRiskAttempt(highRiskCancelStartedRef.current, pending.invocationId);
+            throw cancelError;
+          }
+          if (disposed) return;
+          if (cancelled.invocation_id !== pending.invocationId) {
+            releaseHighRiskAttempt(highRiskCancelStartedRef.current, pending.invocationId);
+            throw new Error("高リスク操作の取消状態が一致しません。");
+          }
+          clearPending();
+          if (approval.state !== "denied") {
+            setError(`/${pending.commandLabel} の承認は ${approval.state} のため取り消されました。`);
+          }
+          return;
+        }
+        if (approval.state === "approved" && invocation.state === "approved") {
+          if (!beginHighRiskAttempt(highRiskResumeStartedRef.current, pending.invocationId)) return;
+          let resumed: Awaited<ReturnType<typeof api.resumeHighRiskCommand>>;
+          try {
+            resumed = await api.resumeHighRiskCommand(pending.invocationId);
+          } catch (resumeError) {
+            // The HTTP response may have been lost before or after the Host
+            // claimed the effect. Its CAS path is idempotent, so a later
+            // authoritative poll may safely make the same resume request.
+            releaseHighRiskAttempt(highRiskResumeStartedRef.current, pending.invocationId);
+            throw resumeError;
+          }
+          if (disposed) return;
+          if (resumed.invocation_id !== pending.invocationId) {
+            releaseHighRiskAttempt(highRiskResumeStartedRef.current, pending.invocationId);
+            throw new Error("高リスク操作の再開状態が一致しません。");
+          }
+          clearPending();
+          if (resumed.state === "succeeded") {
+            transientAlertSequenceRef.current += 1;
+            setTransientAlert({
+              id: `high-risk-succeeded-${transientAlertSequenceRef.current}`,
+              message: `/${pending.commandLabel} を実行しました。`,
+              tone: "success",
+            });
+          } else {
+            setError(`/${pending.commandLabel} は ${resumed.state} のため完了しませんでした。`);
+          }
+          return;
+        }
+        schedulePoll();
+      } catch (pollError) {
+        if (disposed) return;
+        setError(
+          pollError instanceof Error
+            ? pollError.message
+            : "高リスク操作の承認状態を確認できませんでした。",
+        );
+        schedulePoll();
+      }
+    };
+
+    void poll();
+    return () => {
+      disposed = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [pendingHighRiskCommand]);
+
+  useEffect(() => {
+    if (!usesResolvedCommandProtocol || pendingHighRiskCommand) return;
+    let disposed = false;
+    void api.listHighRiskCommands()
+      .then(({ invocations }) => {
+        if (disposed || highRiskPrepareInFlightRef.current) return;
+        const pending = invocations.find((item) => (
+          Boolean(item.invocation_id)
+          && Boolean(item.approval_request_id)
+          && !HIGH_RISK_TERMINAL_STATES.has(item.state)
+        ));
+        const approvalRequestId = pending?.approval_request_id;
+        if (!pending || !approvalRequestId) return;
+        setPendingHighRiskCommand((current) => current ?? {
+          requestId: approvalRequestId,
+          invocationId: pending.invocation_id,
+          commandLabel: "高リスク操作",
+        });
+        if (highRiskApprovalWindowOpenedRequestRef.current === approvalRequestId) return;
+        // Claim before awaiting the native window open so React Strict Mode or
+        // a state refresh cannot create duplicate approval windows.
+        highRiskApprovalWindowOpenedRequestRef.current = approvalRequestId;
+        void openAuthorityApprovalWindow(approvalRequestId)
+          .then((opened) => {
+            if (!disposed && !opened) {
+              setError("専用の承認ウィンドウを開けませんでした。承認待ち表示から再試行してください。");
+            }
+          })
+          .catch((restoreOpenError) => {
+            if (!disposed) {
+              console.error("Failed to open restored high-risk approval", restoreOpenError);
+              setError("専用の承認ウィンドウを開けませんでした。承認待ち表示から再試行してください。");
+            }
+          });
+      })
+      .catch((restoreError) => {
+        if (!disposed) console.error("Failed to restore pending high-risk command", restoreError);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [pendingHighRiskCommand, usesResolvedCommandProtocol]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -4487,9 +4680,15 @@ function ChatApp() {
       const items = "items" in result && Array.isArray(result.items) ? result.items : [];
       setSteerItems(items);
       const queuedCount = items.filter((item) => item.status === "queued").length;
-      setModelSteerStatus(queuedCount ? `${queuedCount}件のステアが待機中` : null);
+      setModelSteerStatus(queuedCount ? {
+        kind: "success",
+        message: `${queuedCount}件のステアが待機中`,
+      } : null);
     } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer refresh failed");
+      setModelSteerStatus({
+        kind: "error",
+        message: steerError instanceof Error ? steerError.message : "Steer refresh failed",
+      });
     } finally {
       setModelSteerBusy(false);
     }
@@ -4514,10 +4713,16 @@ function ChatApp() {
         },
       });
       setInput("");
-      setModelSteerStatus(isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました");
+      setModelSteerStatus({
+        kind: "success",
+        message: isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました",
+      });
       await refreshSteerQueue();
     } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer queue failed");
+      setModelSteerStatus({
+        kind: "error",
+        message: steerError instanceof Error ? steerError.message : "Steer queue failed",
+      });
     } finally {
       setModelSteerBusy(false);
     }
@@ -4921,6 +5126,50 @@ function ChatApp() {
     }
     try {
       setError(null);
+      const highRiskRef = highRiskCommandRef(parsed.command);
+      if (highRiskRef) {
+        if (highRiskPrepareInFlightRef.current || pendingHighRiskCommand) {
+          setError("高リスク操作の承認がすでに保留中です。先にその操作を完了または拒否してください。");
+          return;
+        }
+        const invocationId = createCommandInvocationId(highRiskRef);
+        const commandArgs = { ...parsed.args };
+        highRiskPrepareInFlightRef.current = true;
+        try {
+          const prepared = await api.prepareHighRiskCommand({
+            invocation_id: invocationId,
+            command_ref: highRiskRef,
+            arguments: highRiskPrepareArguments(highRiskRef, commandArgs, {
+              workspaceId: effectiveWorkspaceId,
+              currentBranch: codingContext?.branch,
+            }),
+            presentation: {
+              title: parsed.command.label,
+              summary: parsed.command.description ?? `${parsed.command.label} を実行します。`,
+            },
+          });
+          if (
+            prepared.invocation_id !== invocationId
+            || !prepared.approval_request_id
+            || prepared.state !== "approval_pending"
+          ) {
+            throw new Error("高リスク操作の承認準備に失敗しました。");
+          }
+          setPendingHighRiskCommand({
+            requestId: prepared.approval_request_id,
+            invocationId,
+            commandLabel: parsed.command.label,
+          });
+          highRiskApprovalWindowOpenedRequestRef.current = prepared.approval_request_id;
+          const opened = await openAuthorityApprovalWindow(prepared.approval_request_id);
+          if (!opened) {
+            setError("専用の承認ウィンドウを開けませんでした。下の承認待ち表示から再試行してください。");
+          }
+          return true;
+        } finally {
+          highRiskPrepareInFlightRef.current = false;
+        }
+      }
       if (isRegisteredSlashCommand(parsed.command) && !parsed.command.canonical_id) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
@@ -5822,6 +6071,20 @@ function ChatApp() {
     }
   };
 
+  const openPendingHighRiskApproval = async () => {
+    if (!pendingHighRiskCommand) return;
+    setError(null);
+    try {
+      const opened = await openAuthorityApprovalWindow(pendingHighRiskCommand.requestId);
+      if (!opened) {
+        setError("専用の承認ウィンドウを開けませんでした。Tobkiri Launcher から再試行してください。");
+      }
+    } catch (openError) {
+      console.error(openError);
+      setError("専用の承認ウィンドウを開けませんでした。Tobkiri Launcher から再試行してください。");
+    }
+  };
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -6431,7 +6694,7 @@ function ChatApp() {
               for (const item of processed) byId.set(item.id, item);
               return Array.from(byId.values());
             });
-            setModelSteerStatus("ステアを反映しました");
+            setModelSteerStatus({ kind: "success", message: "ステアを反映しました" });
           }
         }
 
@@ -7142,26 +7405,15 @@ function ChatApp() {
             )}
 
             {backendConnectionState !== "online" && (
-              <div
-                role="status"
-                className={cn(
-                  "mx-3 mt-3 rounded-2xl border px-4 py-3",
-                  backendConnectionState === "offline"
-                    ? "border-red-500/20 bg-red-500/10 text-red-100"
-                    : "border-amber-500/20 bg-amber-500/10 text-amber-100",
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <div
-                    className={cn(
-                      "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
-                      backendConnectionState === "offline" ? "bg-red-400" : "bg-amber-300 animate-pulse",
-                    )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{backendConnectionBanner.title}</p>
-                    <p className="mt-1 text-xs leading-5 opacity-90">{backendConnectionBanner.detail}</p>
-                  </div>
+              <ErrorNotice
+                className="mx-3 mt-3 rounded-2xl px-4 py-3"
+                copyLabel="Copy backend connection error"
+                copyText={`${backendConnectionBanner.title}\n${backendConnectionBanner.detail}`}
+                errorIcon={`backend-connection-${backendConnectionState}`}
+                message={backendConnectionBanner.detail}
+                severity={backendConnectionState === "offline" ? "error" : "warning"}
+                title={backendConnectionBanner.title}
+                trailing={(
                   <button
                     type="button"
                     onClick={() => void refreshHealth("focus")}
@@ -7169,8 +7421,8 @@ function ChatApp() {
                   >
                     いま確認
                   </button>
-                </div>
-              </div>
+                )}
+              />
             )}
 
             {activeConversation?.metadata?.imported_from_share === true && provenanceDismissedFor !== activeConversation.id && (
@@ -7308,6 +7560,22 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
+                {!visibleBrowserApproval && !pendingCommandApproval && pendingHighRiskCommand && (
+                  <section className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-amber-500/30 bg-zinc-950 p-3 shadow-2xl">
+                    <p className="text-sm font-medium text-zinc-100">高リスク操作の承認待ち</p>
+                    <p className="mt-1 text-xs leading-5 text-zinc-400">
+                      「{pendingHighRiskCommand.commandLabel}」は専用の承認ウィンドウで確認します。
+                      この画面は承認トークンや実行対象を保持せず、承認後に Host が同じ操作を一度だけ再開します。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void openPendingHighRiskApproval()}
+                      className="mt-3 h-9 rounded-lg border border-amber-400/35 bg-amber-400/10 px-3 text-xs font-semibold text-amber-100 hover:bg-amber-400/20"
+                    >
+                      承認ウィンドウを開く
+                    </button>
+                  </section>
+                )}
                 {commandProgressEvents.length > 0 && (
                   <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3" aria-label="Command progress">
                     <h3 className="text-xs font-semibold text-zinc-300">Command progress</h3>
@@ -7333,14 +7601,14 @@ function ChatApp() {
                     </dl>
                   </details>
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && authorityApproval && (
+                {!visibleBrowserApproval && !pendingCommandApproval && !pendingHighRiskCommand && authorityApproval && (
                   <AuthorityApprovalNotice
                     approval={authorityApproval}
                     title={authorityApprovalTitle(authorityApproval)}
                     onOpen={() => void openAuthorityApprovalWindowAction()}
                   />
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && runtimeApproval && (
+                {!visibleBrowserApproval && !pendingCommandApproval && !pendingHighRiskCommand && !authorityApproval && runtimeApproval && (
                   <ApprovalDecisionSurface
                     approval={runtimeApprovalViewModel(runtimeApproval)}
                     onDeny={() => void denyCodingAction()}
@@ -7349,7 +7617,7 @@ function ChatApp() {
                     className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 max-h-[min(70vh,620px)] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 overflow-y-auto"
                   />
                 )}
-                {!visibleBrowserApproval && !pendingCommandApproval && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!visibleBrowserApproval && !pendingCommandApproval && !pendingHighRiskCommand && !authorityApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
@@ -7536,7 +7804,15 @@ function ChatApp() {
                 <button type="button" disabled={shareBusy} onClick={() => void createConversationShare("tunnel")} className="flex min-h-20 items-start gap-3 border border-zinc-700 p-3 text-left hover:bg-zinc-900 disabled:opacity-60"><Cloud size={18} className="mt-0.5 text-sky-300" /><span><strong className="block text-sm text-zinc-100">Cloudflare Tunnel link</strong><span className="mt-1 block text-xs leading-5 text-zinc-500">Public through the configured hostname.</span></span></button>
               </div>
               {shareBusy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-zinc-400"><Loader2 size={15} className="animate-spin" /> Creating redacted bundle...</p>}
-              {shareDialogError && <p role="alert" className="mt-4 text-sm text-red-300">{shareDialogError}</p>}
+              {shareDialogError ? (
+                <ErrorNotice
+                  className="mt-4 text-sm"
+                  copyLabel="Copy share dialog error"
+                  copyText={shareDialogError}
+                  errorIcon="share-dialog"
+                  message={shareDialogError}
+                />
+              ) : null}
               {shareCreatedUrl && <div className={`mt-4 border p-3 ${shareRevoked ? "border-red-500/25 bg-red-500/10" : "border-emerald-500/25 bg-emerald-500/10"}`}><p className={`break-all text-sm ${shareRevoked ? "text-red-100 line-through" : "text-emerald-100"}`}>{shareCreatedUrl}</p><div className="mt-3 flex flex-wrap gap-2">{!shareRevoked && <button type="button" onClick={() => void navigator.clipboard.writeText(new URL(shareCreatedUrl, window.location.origin).toString())} className="inline-flex h-9 items-center gap-2 border border-emerald-300/25 px-3 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"><Copy size={14} /> Copy link</button>}{shareCreatedToken && !shareRevoked && <button type="button" onClick={() => void api.revokeShare(shareCreatedToken).then(() => setShareRevoked(true)).catch((reason) => setShareDialogError(reason instanceof Error ? reason.message : "Could not revoke link."))} className="inline-flex h-9 items-center gap-2 border border-red-400/25 px-3 text-xs font-semibold text-red-200 hover:bg-red-500/10"><X size={14} /> Revoke link</button>}</div>{shareRevoked && <p role="status" className="mt-2 text-xs text-red-200">Revoked. This link can no longer be viewed or imported.</p>}</div>}
               <button type="button" onClick={() => { if (activeConversationId) void handlePanelAction({} as SidebarItem, { id: "conversation.export" } as SidebarAction); }} className="mt-5 inline-flex h-10 items-center gap-2 text-sm text-zinc-300 hover:text-white"><Download size={16} /> Export history.json</button>
             </section>

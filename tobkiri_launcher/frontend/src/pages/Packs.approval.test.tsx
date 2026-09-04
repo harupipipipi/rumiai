@@ -7,6 +7,7 @@ import {MemoryRouter, Route, Routes} from 'react-router';
 
 import {DialogContainer} from '@/src/components/ui/DialogContainer';
 import {ApiContractError} from '@/src/lib/api';
+import type {PackControlBinding} from '@/src/lib/apiTypes';
 import {type Pack, useAppStore} from '@/src/store';
 import {Packs} from './Packs';
 
@@ -42,6 +43,14 @@ const revokedPack: Pack = {
   approvalReason: 'approval_revoked',
   approved: false,
   approvalIssues: ['approval_revoked'],
+};
+
+const activePackBinding: PackControlBinding = {
+  profile_id: samplePack.profileId,
+  workspace_id: samplePack.workspaceId,
+  profile_revision: samplePack.profileRevision,
+  plan_digest: samplePack.planDigest,
+  catalog_revision: samplePack.catalogRevision,
 };
 
 function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
@@ -88,6 +97,7 @@ test('Pack approval revocation opens an accessible confirmation and can be cance
   let revokeCount = 0;
   useAppStore.setState({
     packs: [samplePack],
+    packCatalogBinding: activePackBinding,
     dialog: null,
     packApprovalPending: {},
     loadPacks: async () => {},
@@ -132,13 +142,14 @@ test('successful Pack approval revocation refreshes state and removes enablement
   let revokeCount = 0;
   useAppStore.setState({
     packs: [samplePack],
+    packCatalogBinding: activePackBinding,
     dialog: null,
     packApprovalPending: {},
     loadPacks: async () => {},
     revokePackApproval: async (id) => {
       revokeCount += 1;
       assert.equal(id, samplePack.id);
-      useAppStore.setState({packs: [revokedPack]});
+      useAppStore.setState({packs: [revokedPack], packCatalogBinding: activePackBinding});
     },
   });
   await renderSurface(root);
@@ -176,6 +187,7 @@ test('failed Pack approval revocation stays approved and surfaces the typed fail
   const errors: string[] = [];
   useAppStore.setState({
     packs: [samplePack],
+    packCatalogBinding: activePackBinding,
     dialog: null,
     packApprovalPending: {},
     loadPacks: async () => {},
@@ -231,6 +243,7 @@ test('approval confirmation prevents double submission while the revoke is pendi
   });
   useAppStore.setState({
     packs: [samplePack],
+    packCatalogBinding: activePackBinding,
     dialog: null,
     packApprovalPending: {},
     loadPacks: async () => {},

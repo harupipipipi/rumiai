@@ -25,6 +25,7 @@ function operation(invokable = true): RuntimeOperationDescriptor {
     invocation_reason: invokable ? null : 'Host readiness attestation is stale.',
     invokable,
     catalog_digest: digest('c'),
+    activation_id: 'activation:conversation-one',
     function_id: 'conversation.turn',
     function_principal_id: 'principal.conversation.turn',
     caller_function_id: 'caller.conversation.turn',

@@ -61,6 +61,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from tobkiri_protocol.canonical import canonical_digest, canonical_json
 
+from .artifact_materialization import MaterializedPackArtifact
 from .effects import ProviderOutcome
 from .errors import BackendUnavailableError
 from .models import require_digest
@@ -168,6 +169,10 @@ class MacOSVZHelperIdentity:
         ):
             if not isinstance(value, str) or len(value) > 512 or "\x00" in value:
                 raise BackendUnavailableError(f"{label} is invalid")
+        if bool(self.team_id) != bool(self.signing_identity):
+            raise BackendUnavailableError(
+                "macOS VZ helper signing identity is incomplete"
+            )
 
     @property
     def expected_code_digest(self) -> str:
@@ -244,7 +249,11 @@ class MacOSVZRuntime:
     """Host-selected resource limits for one direct VZ guest."""
 
     cpu_count: int = 1
-    memory_bytes: int = 512 * 1024 * 1024
+    # Debian cloud-init plus the root-owned Python agent cannot reliably
+    # materialize even a small verified seed at the protocol minimum. Keep
+    # 512 MiB valid for explicit constrained callers, but make one GiB the
+    # production default for a fresh direct VZ guest.
+    memory_bytes: int = 1024 * 1024 * 1024
     guest_vsock_port: int = 19001
 
     def __post_init__(self) -> None:
@@ -398,6 +407,7 @@ class MacOSVZDomainAllocator(Protocol):
         artifact_digest: str,
         executable_digest: str,
         materialization_digest: str,
+        artifact: MaterializedPackArtifact,
         channel_key: bytes,
     ) -> MacOSVZDomainAllocation:
         """Return a new allocation with a live FD-enrolled helper channel.
@@ -565,6 +575,7 @@ class MacOSVZSupervisorDriver:
                 artifact_digest=request.artifact_digest,
                 executable_digest=request.executable_digest,
                 materialization_digest=request.artifact.materialization_digest,
+                artifact=request.artifact,
                 channel_key=channel_key,
             )
         except Exception as exc:
@@ -644,8 +655,6 @@ class MacOSVZSupervisorDriver:
             raise BackendUnavailableError("macOS VZ guest artifact identity is invalid")
         try:
             require_digest(guest_artifact_identity, "macOS VZ guest artifact")
-            if guest_artifact_identity != canonical_digest(binding_digests):
-                raise ValueError("guest artifact identity differs from launch binding")
         except Exception as exc:
             self._compromise("macOS VZ guest artifact identity is invalid")
             self._release_unlaunched_allocation(allocation, transport)
@@ -1380,12 +1389,13 @@ def verify_macos_vz_helper_identity(
             fields.setdefault(key.strip(), []).append(value.strip())
     if fields.get("Identifier") != [expected.bundle_id]:
         return False, "macOS VZ native helper signing identity mismatch"
-    if expected.team_id and fields.get("TeamIdentifier") != [expected.team_id]:
-        return False, "macOS VZ native helper signing identity mismatch"
-    if expected.signing_identity and expected.signing_identity not in fields.get(
-        "Authority", []
-    ):
-        return False, "macOS VZ native helper signing identity mismatch"
+    if expected.team_id:
+        if fields.get("TeamIdentifier") != [expected.team_id]:
+            return False, "macOS VZ native helper signing identity mismatch"
+        if expected.signing_identity not in fields.get("Authority", []):
+            return False, "macOS VZ native helper signing identity mismatch"
+    elif fields.get("Signature") != ["adhoc"]:
+        return False, "macOS VZ native helper is not ad-hoc signed"
     entitlement_source = described.stdout + "\n" + described.stderr
     start = entitlement_source.find("<?xml")
     end = entitlement_source.find("</plist>", start)
@@ -1397,10 +1407,8 @@ def verify_macos_vz_helper_identity(
         )
     except (ValueError, TypeError):
         return False, "macOS VZ native helper virtualization entitlement is invalid"
-    if not isinstance(entitlements, Mapping) or entitlements.get(
-        "com.apple.security.virtualization"
-    ) is not True:
-        return False, "macOS VZ native helper virtualization entitlement is missing"
+    if entitlements != {"com.apple.security.virtualization": True}:
+        return False, "macOS VZ native helper entitlements are not exact"
     return True, None
 
 

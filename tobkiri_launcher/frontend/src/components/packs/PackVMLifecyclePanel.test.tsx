@@ -206,6 +206,14 @@ test('PackVM GUI completes prepare, consent, provision, doctor, and hides host p
   });
   assert.ok(surface);
   await renderPanel(surface.root);
+  assert.ok(
+    surface.container.querySelector('[data-packvm-error-icon="readiness-warning"]'),
+  );
+  assert.equal(
+    surface.container.querySelector('[data-packvm-error-icon="readiness-warning"]')
+      ?.classList.contains('lucide-triangle-alert'),
+    true,
+  );
 
   await act(async () => buttonWithText(surface.container, 'Prepare plan').click());
   await settle();
@@ -349,6 +357,12 @@ test('PackVM GUI clears a timeout and keeps the ceremony retryable', {concurrenc
 
 test('PackVM GUI displays typed failure diagnostics from authoritative progress', {concurrency: false}, async () => {
   configureStore();
+  let copied = '';
+  assert.ok(surface);
+  Object.defineProperty(surface.dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: {writeText: async (text: string) => { copied = text; }},
+  });
   writeSafeStorageValue(getBrowserStorage('local'), 'tobkiri-launcher-packvm-operation', operationId);
   installFetch(async (route) => {
     assert.equal(route, `/api/v4/packvm/progress?operation_id=${operationId}`);
@@ -363,7 +377,6 @@ test('PackVM GUI displays typed failure diagnostics from authoritative progress'
       },
     }));
   });
-  assert.ok(surface);
   await renderPanel(surface.root);
   await settle();
   assert.match(surface.container.textContent ?? '', /PackVMReconciliationRequired/);
@@ -371,6 +384,21 @@ test('PackVM GUI displays typed failure diagnostics from authoritative progress'
   assert.match(surface.container.textContent ?? '', /doctor/);
   assert.match(surface.container.textContent ?? '', /catalog\/profile digest mismatch/);
   assert.ok(surface.container.querySelector('[aria-label="Typed PackVM failure diagnostic"]'));
+  const copy = surface.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Copy typed PackVM failure diagnostic"]',
+  );
+  assert.ok(copy);
+  await act(async () => {
+    copy.click();
+    await Promise.resolve();
+  });
+  assert.equal(copied, [
+    'Failure type: PackVMReconciliationRequired',
+    'Diagnostic code: packvm_lima_process_failed',
+    'Stage: doctor',
+    'Process result: exit (23)',
+    'Host diagnostic: catalog/profile digest mismatch',
+  ].join('\n'));
 });
 
 test('PackVM GUI coalesces rapid doctor refresh clicks', {concurrency: false}, async () => {
@@ -491,6 +519,7 @@ test('PackVM GUI presents diagnostic severity, owner, and contribution evidence'
       version: 'rumi.ui.contribution.v1',
       profile_id: 'profile-a',
       profile_revision: digest('1'),
+      activation_id: 'activation:profile-a',
       plan_hash: digest('2'),
       contributions: [],
       diagnostics: [{

@@ -3,6 +3,7 @@ import {AlertTriangle, CheckCircle2, Clock3, RefreshCw, ShieldAlert} from 'lucid
 
 import {Badge} from '@/src/components/ui/Badge';
 import {Button} from '@/src/components/ui/Button';
+import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
 import {TobkiriLoadingMark} from '@/src/components/ui/TobkiriLoader';
 import {
   advancedActionMetadata,
@@ -103,7 +104,7 @@ function StatusNotice({
       )}
       role="alert"
     >
-      <div className="flex min-w-0 items-start gap-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
         {state.status === 'timeout' ? <Clock3 className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden="true" /> : isBlocked ? <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden="true" /> : <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden="true" />}
         <div className="min-w-0">
           <p className="text-sm font-semibold text-text-main">{title}</p>
@@ -111,6 +112,7 @@ function StatusNotice({
           {state.stale ? <p className="mt-1 text-xs text-text-muted">Showing the last accepted snapshot. Actions are disabled until the authoritative surface is fresh.</p> : null}
         </div>
       </div>
+      <CopyErrorButton label={`Copy ${descriptor.label} error`} text={`${title}\n${message}`} />
       <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={state.status === 'loading'}>
         <RefreshCw className="h-4 w-4" aria-hidden="true" />
         Retry

@@ -42,6 +42,13 @@ DEFAULT_CATALOG_RELATIVE = (
 )
 V4_ROOT_RELATIVE = "tobkiri_runtime/ecosystem/defaultspack/v4"
 BUNDLE_LOCK_NAME = "bundle.lock.json"
+NON_PRESENTATION_V4_FILES = frozenset(
+    {
+        "defaults.profile.intent.v1.json",
+        "defaults.profile.lock.v5.json",
+        "defaults.release.provenance.json",
+    }
+)
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -245,7 +252,7 @@ def load_v4_bundle(repository_root: Path) -> V4Bundle:
         _relative(bundle_root, path)
         for path in bundle_root.rglob("*")
         if path.is_file() and not path.is_symlink()
-    }
+    } - NON_PRESENTATION_V4_FILES
     symlinks = [path for path in bundle_root.rglob("*") if path.is_symlink()]
     if symlinks:
         raise PresentationCatalogError(

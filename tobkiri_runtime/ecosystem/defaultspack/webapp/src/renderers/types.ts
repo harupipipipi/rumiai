@@ -93,6 +93,14 @@ export type ComposerModelStatusIndicator = {
   action?: ComposerModelStatusIndicatorAction | null;
 };
 
+export type ComposerSteerStatus = {
+  kind: "success";
+  message: string;
+} | {
+  kind: "error";
+  message: string;
+};
+
 export type SettingChangeHandler = (sectionId: string, fieldId: string, value: unknown) => void;
 
 export type SettingsLoadState = {
@@ -212,7 +220,7 @@ export type ComposerRendererProps = {
   toolSelectionTargets?: ToolSelectionChip[];
   toolSelectionReview?: PendingToolReview | null;
   keyboardButtonNavigation?: boolean;
-  steerStatus?: string | null;
+  steerStatus?: ComposerSteerStatus | null;
   steerBusy?: boolean;
   steerQueuedCount?: number;
   steerPreviewItems?: ConversationSteerItem[];

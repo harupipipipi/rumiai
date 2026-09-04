@@ -25,6 +25,7 @@ from tobkiri_protocol.validation import validate_document  # noqa: E402
 
 ECOSYSTEM = ROOT / "ecosystem"
 CATALOG = ROOT / "schemas" / "manifest_authority.v1.json"
+PACK_V4_CATALOG = ROOT / "schemas" / "pack_v4_catalog.v1.json"
 V4_PROJECTION_GENERATOR = "tobkiri.scripts.migrate_manifest_authority/v2"
 
 
@@ -380,12 +381,14 @@ def _normalize_legacy(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def migrate(*, check: bool) -> None:
-    pack_roots = sorted(path for path in ECOSYSTEM.iterdir() if path.is_dir())
-    authorities = {
-        root.name: "v4-authoritative"
-        for root in pack_roots
-        if root.name != "setup_pack" and not root.name.startswith(".")
-    }
+    pack_catalog = json.loads(PACK_V4_CATALOG.read_text(encoding="utf-8"))
+    pack_ids = tuple(str(item) for item in pack_catalog.get("pack_ids") or ())
+    if len(pack_ids) != len(set(pack_ids)):
+        raise SystemExit("canonical Pack catalog contains duplicate IDs")
+    pack_roots = [ECOSYSTEM / pack_id for pack_id in sorted(pack_ids)]
+    if any(not root.is_dir() for root in pack_roots):
+        raise SystemExit("canonical Pack catalog references a missing Pack root")
+    authorities = {root.name: "v4-authoritative" for root in pack_roots}
     catalog_text = json.dumps(
         {"version": 1, "packs": authorities},
         ensure_ascii=False,

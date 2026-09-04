@@ -469,7 +469,9 @@ class DefaultsHttpServer:
         if not profile_id:
             return
         try:
-            from core_runtime.ai_input_trace_store import AiInputTraceStore
+            from ecosystem.defaultspack.domain.ai_input.ai_input_trace_store import (
+                AiInputTraceStore,
+            )
 
             AiInputTraceStore().append_blocked_event(
                 profile_id,
@@ -1857,9 +1859,25 @@ def _apply_mimo_company_profile_authority_context(context, payload):
     context["principal_id"] = principal_id
 
 
+def _allow_local_pairing_start_without_token(method, path, headers):
+    if str(method or "").upper() != "POST" or path != "/api/p2p/pairing/start":
+        return False
+    origin = _header_value(headers, "Origin")
+    if not origin or not _is_allowed_sensitive_origin(origin):
+        return False
+    csrf = _header_value(headers, "X-Rumi-CSRF")
+    return bool(csrf.strip())
+
+
 def _apply_authenticated_principal_context(context, payload):
     if not isinstance(context, dict) or not isinstance(payload, dict):
         return
+    device_id = str(payload.get("_authenticated_device_id") or "").strip()
+    scopes = payload.get("_authenticated_scopes")
+    if device_id:
+        context["_authenticated_device_id"] = device_id
+    if isinstance(scopes, list):
+        context["_authenticated_scopes"] = [str(scope) for scope in scopes if str(scope or "").strip()]
     principal = payload.get("_authenticated_principal")
     if not isinstance(principal, dict):
         return
@@ -1878,13 +1896,14 @@ def _apply_authenticated_principal_context(context, payload):
 
 
 def _function_principal_from_context(context, default="defaultspack"):
+    candidate = ""
     if isinstance(context, dict):
         principal = context.get("_authenticated_principal")
         if isinstance(principal, dict) and not bool(principal.get("core_role")):
             candidate = str(principal.get("principal_id") or "").strip()
             if candidate:
                 return candidate
-        candidate = str(context.get("principal_id") or "").strip()
+            candidate = str(context.get("principal_id") or "").strip()
         if candidate:
             return candidate
     return default
@@ -2283,6 +2302,17 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
             return None
         if not _configured_local_auth_tokens():
+            if str(method or "").upper() == "POST" and path == "/api/p2p/pairing/start":
+                if not _local_is_loopback_request(
+                    {str(key): str(value) for key, value in self.headers.items()},
+                    self.client_address,
+                ):
+                    return (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
+                if not self.headers.get("X-Rumi-CSRF", "").strip():
+                    return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
+                return None
+            if _allow_local_pairing_start_without_token(method, path, self.headers):
+                return None
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
         if not _local_auth_token_authorized(self.headers):
             return (401, "local auth token required", "AUTH_REQUIRED")

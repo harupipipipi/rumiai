@@ -12,9 +12,11 @@
     "canonical-files.v1.json",
     "composition.py",
     "contracts.py",
+    "credential_store.py",
     "effects.py",
     "errors.py",
     "extension_sdk.py",
+    "interactive_effects.py",
     "macos_vz_supervisor.py",
     "materialization.py",
     "models.py",
@@ -24,6 +26,7 @@
     "runtime.py",
     "shells.py",
     "tauri_roles.py",
-    "triggers.py"
+    "triggers.py",
+    "workspace_mutation.py"
   ]
 }

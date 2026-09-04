@@ -164,7 +164,7 @@ export interface RuntimeProfileCatalogProjection {
   catalog_digest: string;
   bundle_lock_digest: string;
   catalog_ref: string;
-  active_profile_id: string;
+  active_profile_id: string | null;
   count: number;
   profiles: RuntimeProfileCatalogEntry[];
 }
@@ -233,6 +233,7 @@ export interface RuntimeOperationDescriptor {
   invocation_reason: string | null;
   invokable: boolean;
   catalog_digest: string;
+  activation_id: string;
   function_id: string;
   function_principal_id: string;
   caller_function_id: string;
@@ -649,6 +650,35 @@ export function validateRuntimeSurfaceEnvelope<T>(
 ): RuntimeSurfaceEnvelope<T> {
   if (!isRecord(value)) {
     throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
+  }
+  if (
+    expectedSurface === 'profiles'
+    && exactObject(value, [
+      'runtime_surface_api_version',
+      'surface',
+      'state',
+      'host_catalog_digest',
+      'bundle_lock_digest',
+      'data',
+      'write_set',
+    ])
+    && value.runtime_surface_api_version === RUNTIME_SURFACE_API_VERSION
+    && value.surface === 'profiles'
+    && value.state === 'catalog_ready'
+    && isSha256Digest(value.host_catalog_digest)
+    && isSha256Digest(value.bundle_lock_digest)
+    && Array.isArray(value.write_set)
+  ) {
+    const catalog = extractExactProfileCatalog(value.data);
+    if (
+      !catalog
+      || catalog.active_profile_id !== null
+      || catalog.catalog_digest !== value.host_catalog_digest
+      || catalog.bundle_lock_digest !== value.bundle_lock_digest
+    ) {
+      throw new RuntimeSurfaceError('INVALID', runtimeSurfaceErrorMessage('INVALID'));
+    }
+    return value as unknown as RuntimeSurfaceEnvelope<T>;
   }
   if (value.runtime_surface_api_version === RUNTIME_SURFACE_API_VERSION && value.state === 'error') {
     const errorKeys = ['runtime_surface_api_version', 'state', 'code', 'message', 'retryable', 'write_set'];
@@ -1189,7 +1219,7 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     || !isSha256Digest(value.bundle_lock_digest)
     || !canonicalReference(value.catalog_ref)
     || value.catalog_ref !== `profile-catalog-v4://bundle/${value.catalog_digest}`
-    || !validString(value.active_profile_id)
+    || (value.active_profile_id !== null && !validString(value.active_profile_id))
     || typeof value.count !== 'number'
     || !Number.isSafeInteger(value.count)
     || value.count < 0
@@ -1208,18 +1238,19 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     if (entry.active) activeCount += 1;
     profiles.push(entry);
   }
-  if (profiles.length > 0 && (activeCount !== 1 || !profiles.some((item) => (
+  if (activeCount === 0 && value.active_profile_id !== null) return null;
+  if (activeCount === 1 && !profiles.some((item) => (
     item.active && item.profile_id === value.active_profile_id
-  )))) {
+  ))) {
     return null;
   }
-  if (profiles.length === 0 && activeCount !== 0) return null;
+  if (activeCount > 1) return null;
   return {
     catalog_api_version: value.catalog_api_version,
     catalog_digest: value.catalog_digest,
     bundle_lock_digest: value.bundle_lock_digest,
     catalog_ref: value.catalog_ref,
-    active_profile_id: value.active_profile_id,
+    active_profile_id: value.active_profile_id as string | null,
     count: value.count,
     profiles,
   };
@@ -1451,6 +1482,7 @@ export function extractExactOperationDescriptors(
     ) {
       return [];
     }
+    if (!validString(candidate.activation_id)) return [];
     const operationIdentity: Pick<
       RuntimeOperationDescriptor,
       'contract_id' | 'operation_id' | 'function_id' | 'owner_pack_id'
@@ -1480,6 +1512,7 @@ export function extractExactOperationDescriptors(
       invocation_reason: invocationReason,
       invokable: candidate.invokable,
       catalog_digest: candidate.catalog_digest,
+      activation_id: candidate.activation_id,
       function_id: candidate.function_id,
       function_principal_id: candidate.function_principal_id,
       caller_function_id: candidate.caller_function_id,
@@ -1700,6 +1733,7 @@ function runtimeOperationMatchesSnapshot(
     && candidate.invocation_reason === operation.invocation_reason
     && candidate.invokable === operation.invokable
     && candidate.catalog_digest === operation.catalog_digest
+    && candidate.activation_id === operation.activation_id
     && candidate.function_id === operation.function_id
     && candidate.function_principal_id === operation.function_principal_id
     && candidate.caller_function_id === operation.caller_function_id
@@ -1758,6 +1792,7 @@ export function invokeRuntimeOperation({
     || !validString(operation.function_principal_id)
     || !validString(operation.caller_function_id)
     || !validString(operation.authority_reference)
+    || !validString(operation.activation_id)
     || !isRecord(operation.schema)
     || !isSha256Digest(operation.catalog_digest)
     || (operation.invocation_contribution_id !== null
@@ -1789,6 +1824,9 @@ export function invokeRuntimeOperation({
     'authority',
     'authority_reference',
     'profile_id',
+    'profile_revision',
+    'activation_id',
+    'plan_digest',
     'plan_hash',
     'catalog_hash',
   ]);
@@ -1855,6 +1893,8 @@ export function invokeRuntimeOperation({
   }
   return invokeFrontendCapability({
     profileId: envelope.profile_id,
+    profileRevision: envelope.profile_revision,
+    activationId: operation.activation_id,
     planHash: envelope.plan_digest,
     catalogHash: operation.invocation_catalog_hash,
     contributionId: operation.invocation_contribution_id,

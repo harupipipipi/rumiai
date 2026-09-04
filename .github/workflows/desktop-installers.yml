@@ -331,6 +331,14 @@ jobs:
             pack-shell -> target
             tobkiri_launcher/src-tauri -> target
 
+      # This is the no-image direct-VZ seam: it exercises the native helper's
+      # authenticated protocol and launch-asset validation on macOS arm64.
+      # A real guest boot is a separate acceptance environment because it needs
+      # the pinned multi-GiB image and a dedicated, provisioned runner.
+      - name: Run native PackVM VZ helper protocol tests
+        working-directory: tobkiri_launcher
+        run: bash scripts/test_packvm_vz_helper.sh
+
       - name: Install Tauri CLI
         shell: bash
         run: |
@@ -431,7 +439,7 @@ jobs:
 
       - name: Build verified Tauri Shell artifact
         working-directory: tobkiri_launcher
-        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
+        run: python -B scripts/run_tauri_build.py build --target ${{ matrix.target }} --config src-tauri/tauri.shell.conf.json --bundles ${{ matrix.shell_bundles }} --ci
 
       - name: Ad-hoc sign macOS Tauri Shell artifact
         if: runner.os == 'macOS'
@@ -448,7 +456,7 @@ jobs:
         working-directory: tobkiri_launcher
         env:
           TOBKIRI_PANEL_BUILD_DIR: ${{ runner.temp }}/tobkiri-panel-build
-        run: cargo tauri build --target ${{ matrix.target }} --config src-tauri/tauri.macos.dev.conf.json --bundles app --ci ${{ matrix.signing_args }}
+        run: python -B scripts/run_tauri_build.py build --target ${{ matrix.target }} --config src-tauri/tauri.macos.ci-e2e.conf.json --bundles app --ci ${{ matrix.signing_args }}
 
       - name: Stage authenticated macOS PackVM VZ helper
         if: runner.os == 'macOS'

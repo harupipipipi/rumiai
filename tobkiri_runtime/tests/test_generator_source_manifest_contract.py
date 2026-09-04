@@ -143,9 +143,7 @@ def test_provenance_exact_keys_types_and_digests_are_strict(
 
 
 @pytest.mark.parametrize("relative", ["scripts/__pycache__/attack.pyc", "scripts/attack.pyo"])
-def test_source_manifest_rejects_generated_python_bytecode(
-    tmp_path: Path, relative: str
-) -> None:
+def test_source_manifest_rejects_generated_python_bytecode(tmp_path: Path, relative: str) -> None:
     """Ignored bytecode is a structural closure violation, never an input."""
     root = tmp_path / "runtime"
     for directory in generator_source_manifest.SOURCE_ROOTS:
@@ -164,6 +162,15 @@ def test_source_manifest_rejects_generated_python_bytecode(
 def test_source_manifest_declares_root_executable_catalog_sidecar() -> None:
     """The packaged source closure must copy the root v4 catalog into staging."""
     relative = "ecosystem/defaultspack/executables.v4.json"
+    assert relative in generator_source_manifest.SOURCE_FILES
+    manifest = generator_source_manifest.load_source_manifest()
+    assert any(entry["path"] == relative for entry in manifest["files"])
+
+
+def test_source_manifest_declares_moved_runtime_surface_module() -> None:
+    """The sparse Rust closure must receive the Pack-owned runtime surface."""
+
+    relative = "ecosystem/defaultspack/domain/runtime_surface_v4.py"
     assert relative in generator_source_manifest.SOURCE_FILES
     manifest = generator_source_manifest.load_source_manifest()
     assert any(entry["path"] == relative for entry in manifest["files"])

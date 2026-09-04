@@ -1,5 +1,6 @@
 import {FormEvent, useEffect, useState} from 'react';
 import {Check, UserRound} from 'lucide-react';
+import {useSearchParams} from 'react-router';
 
 import {AdvancedSurfaceFrame} from '@/src/components/advanced/AdvancedSurfaceFrame';
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
@@ -12,9 +13,11 @@ import {Input} from '@/src/components/ui/Input';
 import {useRuntimeSurface} from '@/src/hooks/useRuntimeSurface';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
 import type {RuntimeProfileCatalogProjection} from '@/src/lib/runtimeSurface';
+import {resolveSetupVerificationState} from '@/src/lib/setupVerification';
 import {AVATAR_OPTIONS, useAppStore} from '@/src/store';
 
 export function Profile() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const profile = useAppStore((state) => state.profile);
   const updateLocalProfile = useAppStore((state) => state.updateLocalProfile);
   const addToast = useAppStore((state) => state.addToast);
@@ -22,6 +25,24 @@ export function Profile() {
   const packsLoading = useAppStore((state) => state.packsLoading);
   const loadPacks = useAppStore((state) => state.loadPacks);
   const loadFrontendCatalog = useAppStore((state) => state.loadFrontendCatalog);
+  const packVmDoctorReady = useAppStore((state) => state.packVmDoctor?.ready === true);
+  const isSetupDone = useAppStore((state) => state.isSetupDone);
+  const runtimeReady = useAppStore((state) => state.runtimeReady);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const runtimeDisconnected = useAppStore((state) => state.runtimeDisconnected);
+  const hostCatalogVerified = useAppStore((state) => state.hostCatalogVerified);
+  const profileCeremonyAvailable = useAppStore((state) => state.profileCeremonyAvailable);
+  const defaultsBootstrapRequired = useAppStore((state) => state.defaultsBootstrapRequired);
+  const verificationState = resolveSetupVerificationState({
+    isSetupDone,
+    runtimeReady,
+    runtimeStatus,
+    runtimeDisconnected,
+    hostCatalogVerified,
+    profileCeremonyAvailable,
+    defaultsBootstrapRequired,
+  });
+  const profileCeremonyVerified = verificationState === 'verified';
   const surface = useRuntimeSurface<unknown>('profile');
   const catalogSurface = useRuntimeSurface<RuntimeProfileCatalogProjection>('profiles');
   const descriptor = LAUNCHER_ADVANCED_VIEWS.profile;
@@ -32,6 +53,10 @@ export function Profile() {
   useEffect(() => {
     void loadPacks();
   }, [loadPacks]);
+
+  useEffect(() => {
+    if (packVmDoctorReady) void loadFrontendCatalog();
+  }, [loadFrontendCatalog, packVmDoctorReady]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -56,19 +81,6 @@ export function Profile() {
       state={{status: surface.status, stale: surface.stale, error: surface.error}}
       onRetry={() => void refreshAdvanced()}
     >
-      <ProfileCatalogSelector
-        profileSurface={surface}
-        catalogSurface={catalogSurface}
-        packs={packs}
-        packsLoading={packsLoading}
-        loadPacks={loadPacks}
-        onActivated={async () => {
-          await Promise.all([
-            catalogSurface.refresh(true),
-            loadFrontendCatalog(),
-          ]);
-        }}
-      />
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
         <Card>
           <CardHeader>
@@ -139,6 +151,29 @@ export function Profile() {
           </CardContent>
         </Card>
       </div>
+      <ProfileCatalogSelector
+        profileSurface={surface}
+        catalogSurface={catalogSurface}
+        packs={packs}
+        packsLoading={packsLoading}
+        loadPacks={loadPacks}
+        initialSelectedProfileId={searchParams.get('profile_id') ?? searchParams.get('profile')}
+        onSelectedProfileId={(profileId) => {
+          setSearchParams((current) => {
+            const next = new URLSearchParams(current);
+            next.set('profile_id', profileId);
+            next.delete('profile');
+            return next;
+          }, {replace: true});
+        }}
+        runtimeVerified={profileCeremonyVerified}
+        onActivated={async () => {
+          await Promise.all([
+            catalogSurface.refresh(true),
+            loadFrontendCatalog(),
+          ]);
+        }}
+      />
     </AdvancedSurfaceFrame>
   );
 }

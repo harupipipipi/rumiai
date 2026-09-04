@@ -10,19 +10,26 @@ health:
 
 # Run root-level contract tests.
 root-test *args:
-    pytest tests/ {{args}}
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "root-test-{run}.log" -- pytest tests/ {{args}}
 
 # Run tobkiri_runtime tests. Pass pytest selectors after the recipe name.
 test *args:
-    cd tobkiri_runtime && python -m pytest {{args}}
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "runtime-test-{run}.log" --cwd tobkiri_runtime -- python -m pytest {{args}}
 
 # Run the focused defaultspack coding/tooling regression cluster.
 tooling-test:
-    cd tobkiri_runtime && python -m pytest \
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "tooling-test-{run}.log" --cwd tobkiri_runtime -- python -B -m pytest \
         tests/test_defaultspack_provider_tool_schema.py \
         tests/test_defaultspack_tool_protocol_v2.py \
         tests/test_defaultspack_terminal_policy.py \
         tests/test_defaultspack_coding_hardening.py -q
+
+# Test the compact runner directly; never wrap this recipe with the runner itself.
+compact-runner-test:
+    python -m pytest scripts/quality/test_compact_test_runner.py -q
 
 # Run Python static checks over the backend surfaces guarded in CI.
 lint:
@@ -31,7 +38,8 @@ lint:
 
 # Run defaultspack frontend checks.
 frontend-check:
-    cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm test
+    python -c "from pathlib import Path; Path('.test-logs').mkdir(exist_ok=True)"
+    python scripts/quality/compact_test_runner.py --log-dir .test-logs --log-file "frontend-test-{run}.log" --cwd tobkiri_runtime/ecosystem/defaultspack/webapp -- npm test
     cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run lint
     cd tobkiri_runtime/ecosystem/defaultspack/webapp && npm run build
 
@@ -39,13 +47,23 @@ frontend-check:
 integrity:
     cd tobkiri_runtime && python scripts/quality/scan_defaultspack_integrity.py --strict
 
-# Run the Wave 1 repository-wide pack architecture boundary gate.
+# Run the debt scan plus the no-baseline Python structural boundary gate.
 pack-architecture:
-    python scripts/quality/scan_pack_architecture.py
+    # Compare the working-tree candidate with the committed, reviewed baseline.
+    reference="$(mktemp)"; trap 'rm -f "$reference"' EXIT; git show HEAD:scripts/quality/pack_architecture_baseline.json > "$reference"; python scripts/quality/scan_pack_architecture.py --reference-baseline "$reference"
+    python scripts/quality/check_core_no_favoritism.py
 
 # Validate v4 schemas, provenance, migration guards, scanners, and inventory.
 pack-architecture-v4:
     python scripts/quality/validate_pack_architecture.py
+
+# Check Pack boundary debt against the reviewed shrink-only baseline.
+pack-boundary-lint:
+    python scripts/quality/scan_pack_boundaries.py
+
+# Explicitly refresh Pack boundary debt after review.
+pack-boundary-baseline:
+    python scripts/quality/scan_pack_boundaries.py --update-baseline
 
 # Exercise one Defaults-independent Profile through the canonical v4 Host path.
 pack-v4-minimal-profile:

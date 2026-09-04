@@ -11,7 +11,9 @@ import {
 } from "react";
 
 import type {
+  CapabilityInvocation,
   FrontendCapabilityClient,
+  FrontendCapabilityInvoker,
   FrontendCatalog,
   VerifiedFrontendContribution,
 } from "./frontendContracts";
@@ -20,6 +22,7 @@ import {
   frontendActionErrorMessage,
   isConversationV4Contribution,
 } from "./ConversationV4View";
+import { ErrorNotice } from "../components/ErrorNotice";
 
 export { frontendActionErrorMessage } from "./ConversationV4View";
 
@@ -34,6 +37,9 @@ export const ISOLATED_FRAME_RESPONSE_TARGET_ORIGIN = "*";
 export const frontendContributionRevisionKey = (
   item: VerifiedFrontendContribution,
 ) => JSON.stringify([
+  item.resolved_profile_id,
+  item.resolved_profile_revision,
+  item.resolved_activation_id,
   item.resolved_plan_hash,
   item.owner_pack_id,
   item.contribution_id,
@@ -69,10 +75,35 @@ export function contributionsForRoute(
   return catalog.contributions.filter((item) => (
     item.kind === "route"
     && item.route === route
+    && item.resolved_profile_id === catalog.profile_id
+    && item.resolved_profile_revision === catalog.profile_revision
+    && item.resolved_activation_id === catalog.activation_id
     && item.resolved_plan_hash === activePlanHash
     && !catalog.quarantined_pack_ids.includes(item.owner_pack_id)
     && !quarantined.has(quarantineKey(item))
   ));
+}
+
+export function bindFrontendCapabilityClient(
+  catalog: FrontendCatalog,
+  item: VerifiedFrontendContribution,
+  invoker: FrontendCapabilityInvoker,
+): FrontendCapabilityClient {
+  const capture = (request: CapabilityInvocation) => ({
+    contractId: request.contractId,
+    payload: request.payload,
+    profileId: catalog.profile_id,
+    profileRevision: catalog.profile_revision,
+    activationId: catalog.activation_id,
+    planHash: catalog.plan_hash,
+    catalogHash: catalog.catalog_hash,
+    contributionId: item.contribution_id,
+    ownerPackId: item.owner_pack_id,
+  });
+  return {
+    invokeAction: (request) => invoker.invokeAction(capture(request)),
+    readDataSource: (request) => invoker.readDataSource(capture(request)),
+  };
 }
 
 export function DynamicFrontendHost({
@@ -84,7 +115,7 @@ export function DynamicFrontendHost({
   catalog: FrontendCatalog;
   route: string;
   activePlanHash: string;
-  capabilities: FrontendCapabilityClient;
+  capabilities: FrontendCapabilityInvoker;
 }) {
   useEffect(() => {
     synchronizeFrontendHostQuarantine(catalog);
@@ -109,8 +140,7 @@ export function DynamicFrontendHost({
         >
           <ContributionView
             item={item}
-            profileId={catalog.profile_id}
-            catalogHash={catalog.catalog_hash}
+            catalog={catalog}
             capabilities={capabilities}
           />
         </ContributionBoundary>
@@ -121,21 +151,23 @@ export function DynamicFrontendHost({
 
 function ContributionView({
   item,
-  profileId,
-  catalogHash,
+  catalog,
   capabilities,
 }: {
   item: VerifiedFrontendContribution;
-  profileId: string;
-  catalogHash: string;
-  capabilities: FrontendCapabilityClient;
+  catalog: FrontendCatalog;
+  capabilities: FrontendCapabilityInvoker;
 }) {
+  const boundCapabilities = useMemo(
+    () => bindFrontendCapabilityClient(catalog, item, capabilities),
+    [capabilities, catalog, item],
+  );
   if (isConversationV4Contribution(item)) {
     return (
       <ConversationV4View
         item={item}
-        catalogHash={catalogHash}
-        capabilities={capabilities}
+        catalogHash={catalog.catalog_hash}
+        capabilities={boundCapabilities}
       />
     );
   }
@@ -143,8 +175,8 @@ function ContributionView({
     return (
       <DeclarativeView
         item={item}
-        catalogHash={catalogHash}
-        capabilities={capabilities}
+        catalogHash={catalog.catalog_hash}
+        capabilities={boundCapabilities}
       />
     );
   }
@@ -152,9 +184,9 @@ function ContributionView({
     return (
       <IsolatedView
         item={item}
-        profileId={profileId}
-        catalogHash={catalogHash}
-        capabilities={capabilities}
+        profileId={catalog.profile_id}
+        catalogHash={catalog.catalog_hash}
+        capabilities={boundCapabilities}
       />
     );
   }
@@ -211,7 +243,14 @@ function DeclarativeView({
           {busy ? "Working…" : String(view.action_label ?? "Continue")}
         </button>
       )}
-      {actionError && <p role="alert">{actionError}</p>}
+      {actionError ? (
+        <ErrorNotice
+          copyLabel="Copy dynamic frontend action error"
+          copyText={actionError}
+          errorIcon="dynamic-frontend-action"
+          message={actionError}
+        />
+      ) : null}
       {result !== null && <GenericValue value={result} />}
     </section>
   );
@@ -320,7 +359,14 @@ function IsolatedView({
       aria-label={item.accessibility.name}
       data-contribution-id={item.contribution_id}
     >
-      {frameError && <p role="alert">{frameError}</p>}
+      {frameError ? (
+        <ErrorNotice
+          copyLabel="Copy isolated frontend error"
+          copyText={frameError}
+          errorIcon="isolated-frontend"
+          message={frameError}
+        />
+      ) : null}
       <iframe
         ref={frameRef}
         title={item.accessibility.name}
@@ -426,7 +472,7 @@ function VerifiedBuiltinModule({
     }
   }), [item, module.export, module.path]);
   return (
-    <Suspense fallback={<HostFallback title={`Loading ${item.label}`} />}>
+    <Suspense fallback={<HostStatus title={`Loading ${item.label}`} />}>
       <Loaded />
     </Suspense>
   );
@@ -459,6 +505,17 @@ function GenericValue({ value }: { value: unknown }) {
 }
 
 function HostFallback({ title }: { title: string }) {
+  return (
+    <ErrorNotice
+      copyLabel="Copy frontend availability error"
+      copyText={title}
+      errorIcon="frontend-availability"
+      message={title}
+    />
+  );
+}
+
+function HostStatus({ title }: { title: string }) {
   return <section role="status" aria-live="polite">{title}</section>;
 }
 

@@ -51,6 +51,11 @@
         }
       }
     },
+    "content_projections": {
+      "type": "array",
+      "items": {"$ref": "https://schemas.tobkiri.local/io.tobkiri/profile-content-projection.v1.schema.json#/$defs/resolvedProjection"},
+      "uniqueItems": true
+    },
     "requested_edges": {
       "type": "array",
       "items": {
@@ -63,6 +68,7 @@
           "contract_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"},
           "operation_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
           "requested_scope_template": {"$ref": "#/$defs/requestedScopeTemplate"},
+          "authority_mode": {"enum": ["profile_grant", "interactive_only"]},
           "authority_reference": {"type": ["string", "null"], "pattern": "^authority-ref:[a-z0-9][a-z0-9._-]{7,127}$"}
         }
       }

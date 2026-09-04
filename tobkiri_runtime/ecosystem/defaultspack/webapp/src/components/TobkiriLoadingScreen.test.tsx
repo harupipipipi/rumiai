@@ -59,6 +59,10 @@ test("keeps failures inside the startup boundary and offers a retry", () => {
   assert.match(markup, /role="alert"/);
   assert.match(markup, new RegExp(TOBKIRI_STARTUP_ERROR_LABEL));
   assert.match(markup, /Launcherから起動し直すか/);
+  assert.match(markup, /data-error-icon="startup"/);
+  assert.match(markup, /aria-label="起動エラーをコピー"/);
+  assert.match(markup, /data-copy-icon=""/);
+  assert.match(markup, /role="status" aria-live="polite"/);
   assert.match(markup, />再試行</);
   assert.match(markup, /<summary[^>]*>技術詳細<\/summary>/);
   assert.match(markup, /ツール情報を取得できませんでした/);

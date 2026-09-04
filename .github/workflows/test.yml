@@ -34,15 +34,22 @@ jobs:
         run: |
           pip install pytest
 
+      - name: Test compact runner directly
+        run: python -m pytest scripts/quality/test_compact_test_runner.py -q
+
       - name: Run root pytest
         id: root_pytest
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+            python scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/ -v
           else
-            pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py tests/test_ci_python_dependency_contract.py -v 2>&1 | tee "$PYTEST_LOG"
+            python scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_entrypoint_contracts.py tests/test_windows_compat.py tests/test_ci_python_dependency_contract.py -v
           fi
 
       - name: Upload root pytest log
@@ -52,6 +59,7 @@ jobs:
           name: root-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/root-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   tobkiri-contract-checks:
     runs-on: ubuntu-latest
@@ -97,9 +105,10 @@ jobs:
         id: contract_pytest
         working-directory: tobkiri_runtime
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
-          pytest -m contract -v 2>&1 | tee "$PYTEST_LOG"
+          python ../scripts/quality/compact_test_runner.py \
+            --log-dir "$RUNNER_TEMP" \
+            --log-file "contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log" \
+            -- pytest -m contract -v
 
       - name: Upload contract pytest log
         if: failure() && steps.contract_pytest.outcome == 'failure'
@@ -108,6 +117,7 @@ jobs:
           name: contract-pytest-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/contract-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   task-d-cross-platform-smoke:
     strategy:
@@ -134,6 +144,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
+
+      - name: Test compact runner cross-platform
+        run: python -m pytest scripts/quality/test_compact_test_runner.py -q
 
       - name: Run Task D smoke tests
         working-directory: tobkiri_runtime
@@ -321,6 +334,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           reference="${RUNNER_TEMP}/pack-architecture-reference.json"
+          baseline="scripts/quality/pack_architecture_baseline.json"
+          bootstrap_commit='49df7570167176fba71420b2d9131d082eb696d3'
+          bootstrap_blob='72c0b006778b24a6459115bf569890fcf3636f35'
           if [ -z "${BASE_SHA}" ]; then
             echo "BASE_SHA is required for shrink-only baseline validation" >&2
             exit 1
@@ -329,13 +345,47 @@ jobs:
             echo "Base commit is unavailable: ${BASE_SHA}" >&2
             exit 1
           fi
-          if git cat-file -e "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" 2>/dev/null; then
-            git show "${BASE_SHA}:scripts/quality/pack_architecture_baseline.json" > "${reference}"
-            python scripts/quality/scan_pack_architecture.py --reference-baseline "${reference}"
+          if git cat-file -e "${BASE_SHA}:${baseline}" 2>/dev/null; then
+            git show "${BASE_SHA}:${baseline}" > "${reference}"
           else
-            echo "::warning::Bootstrap baseline: this reviewed candidate must exactly match its scan. Protected-base shrink-only enforcement starts after the baseline lands on the target branch."
-            python scripts/quality/scan_pack_architecture.py
+            echo "::warning::Using the content-addressed reviewed bootstrap baseline"
+            test "$(git rev-parse "${bootstrap_commit}:${baseline}")" = "${bootstrap_blob}"
+            git show "${bootstrap_commit}:${baseline}" > "${reference}"
+            python scripts/quality/verify_pack_architecture_bootstrap.py \
+              --candidate "${baseline}" --reference "${reference}"
           fi
+          python scripts/quality/scan_pack_architecture.py \
+            --reference-baseline "${reference}"
+          python scripts/quality/check_core_no_favoritism.py
+
+      - name: Enforce shrink-only Pack boundary lint baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python -m pytest scripts/quality/test_scan_pack_boundaries.py -q
+          reference="${RUNNER_TEMP}/pack-boundary-reference.json"
+          baseline="scripts/quality/pack_boundary_baseline.json"
+          bootstrap_commit='5fbca365753a8bdb0de871f4036fbee4a7a23ed4'
+          bootstrap_blob='b5c7a417a3a8cdf1312eb75169f3f924da0ff7ef'
+          if [ -z "${BASE_SHA}" ]; then
+            echo "BASE_SHA is required for Pack boundary baseline validation" >&2
+            exit 1
+          fi
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            echo "Base commit is unavailable: ${BASE_SHA}" >&2
+            exit 1
+          fi
+          if git cat-file -e "${BASE_SHA}:${baseline}" 2>/dev/null; then
+            git show "${BASE_SHA}:${baseline}" > "${reference}"
+          else
+            echo "::warning::Using the content-addressed reviewed Pack boundary bootstrap baseline"
+            test "$(git rev-parse "${bootstrap_commit}:${baseline}")" = "${bootstrap_blob}"
+            git show "${bootstrap_commit}:${baseline}" > "${reference}"
+            python scripts/quality/verify_pack_boundary_bootstrap.py \
+              --candidate "${baseline}" --reference "${reference}"
+          fi
+          python scripts/quality/scan_pack_boundaries.py \
+            --reference-baseline "${reference}"
 
       - name: Validate v4 schemas, provenance, and generated inventory
         run: python scripts/quality/validate_pack_architecture.py
@@ -346,6 +396,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
           python -B scripts/migrate_pack_artifacts_v4.py --check
+          python -B scripts/generate_executable_source_registry_v1.py --check
           python -B scripts/generate_executable_catalogs_v4.py --check
           python -B scripts/generate_defaultspack_v4_bundle.py --check
           python -B scripts/quality/scan_defaultspack_integrity.py --strict
@@ -353,7 +404,7 @@ jobs:
       - name: Verify generated Tobkiri Launcher presentation catalog
         run: python scripts/quality/generate_presentation_catalog.py --check
 
-      - name: Verify complete v4 migration evidence is fresh
+      - name: Enforce Pack v4 migration evidence freshness (Phase 0)
         run: >-
           python tobkiri_runtime/scripts/quality/scan_complete_v4_migration.py
           --output "${RUNNER_TEMP}/complete-v4-migration.json"
@@ -361,6 +412,16 @@ jobs:
           tobkiri_runtime/scripts/quality/evidence/complete_v4_migration_red_64b2240e.json
           --event-name "${{ github.event_name }}"
           --pr-head-sha "${{ github.event.pull_request.head.sha || '' }}"
+          --freshness-only
+          --summary-file "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Pack v4 migration status evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-v4-migration-status
+          path: ${{ runner.temp }}/complete-v4-migration.json
+          if-no-files-found: ignore
 
       - name: Set up Node for Launcher panel gate
         uses: actions/setup-node@v4
@@ -513,11 +574,23 @@ jobs:
           pip install -e .
 
       - name: Run Ruff/mypy non-regression guard
+        env:
+          PUSH_BASE_REF: ${{ github.event.before }}
         run: |
-          BASE_REF="${GITHUB_BASE_REF:-master}"
-          git fetch origin "$BASE_REF" --depth=1
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            git fetch origin "$GITHUB_BASE_REF" --depth=1
+            BASE_REF="origin/${GITHUB_BASE_REF}"
+          elif [ -n "${PUSH_BASE_REF:-}" ] && [ "$PUSH_BASE_REF" != "$ZERO_SHA" ]; then
+            BASE_REF="$PUSH_BASE_REF"
+            git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null || \
+              git fetch origin "$BASE_REF" --depth=1
+          else
+            git fetch origin master --depth=1
+            BASE_REF="origin/master"
+          fi
           python .github/scripts/quality_gate_nonregression.py \
-            --base-ref "origin/${BASE_REF}" \
+            --base-ref "$BASE_REF" \
             --package-dir tobkiri_runtime \
             --ruff-target core_runtime \
             --ruff-target backend_core \
@@ -561,12 +634,16 @@ jobs:
         id: package_pytest
         working-directory: tobkiri_runtime
         run: |
-          set -o pipefail
-          PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_contract_facade.py -v 2>&1 | tee "$PYTEST_LOG"
+            python ../scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_contract_facade.py -v
           else
-            pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v 2>&1 | tee "$PYTEST_LOG"
+            python ../scripts/quality/compact_test_runner.py \
+              --log-dir "$RUNNER_TEMP" \
+              --log-file "package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log" \
+              -- pytest tests/test_complete_v4_migration_gate.py tests/test_pack_control_v4.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_provider_program.py tests/test_defaultspack_opencode_zen_provider.py tests/test_defaultspack_agent_run_store.py -v
           fi
 
       - name: Upload package pytest log
@@ -576,6 +653,7 @@ jobs:
           name: package-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/package-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
           if-no-files-found: ignore
+          retention-days: 7
 
   desktop-contract-smoke:
     name: Desktop contracts (baseline)

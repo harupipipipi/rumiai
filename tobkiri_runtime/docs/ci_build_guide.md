@@ -99,7 +99,7 @@ for j in jobs:
   3. Build panel frontend and defaultspack frontend
   4. Build `pack-shell` for the target platform
   5. Prepare `tobkiri_launcher/src-tauri/gen/app` from `tobkiri_runtime`
-  6. Build (`cargo tauri build --target $target`)
+  6. Build (`python -B scripts/run_tauri_build.py build --target $target`)
   7. Upload release artifacts (`softprops/action-gh-release`)
 
 `tobkiri_launcher/src-tauri/gen/app` は Git 管理しない。CI では

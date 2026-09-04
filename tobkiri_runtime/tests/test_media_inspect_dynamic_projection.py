@@ -22,7 +22,18 @@ from core_runtime.bootstrap.profile_capture import (
     capture_default_profile,
     prepare_default_profile_confirmation,
 )
-from core_runtime.frontend_contract_routes import load_frontend_contract_bindings
+from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+    load_frontend_contract_bindings,
+)
+from ecosystem.defaultspack.defaultspack.http_contract_composition import (
+    defaultspack_capability_snapshot,
+)
+from ecosystem.defaultspack.defaultspack.http_surface_presentation import (
+    DefaultspackHTTPPresentation,
+)
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    defaultspack_activation_snapshot_loader,
+)
 from core_runtime.pack_api_server import PackAPIServer
 from core_runtime.pack_control_v4 import (
     PACK_CONTROL_CONTRACT,
@@ -45,6 +56,7 @@ from ecosystem.rumi_workspace_mount_pack.runtime.mounts import (
 )
 from tobkiri_host.backends import (
     REQUIRED_PRODUCTION_GATES,
+    BackendRegistry,
     BackendStatus,
 )
 from tobkiri_host.effects import ProviderOutcome
@@ -56,6 +68,7 @@ from tobkiri_host.models import (
     RuntimeEvidence,
 )
 from tobkiri_protocol.canonical import canonical_digest
+from tests.conformance_support.host_contract import host_contract_for_session
 
 
 def _bundle_root() -> Path:
@@ -74,6 +87,36 @@ MEDIA_OPERATION = "rumi_media_inspect_service_pack.media-inspect"
 FILE_CONTRACT = "tobkiri.service.file.inspect.v1"
 FILE_OPERATION = "rumi_file_inspect_pack.file-inspect.for-media"
 GENERAL_FILE_OPERATION = "rumi_file_inspect_pack.file-inspect"
+
+
+def _capture_control_session(**kwargs):
+    """Compose the Defaultspack runtime surface explicitly for direct tests."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_pack_control_session(
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
+def _capture_defaultspack_dispatch(active: object, **kwargs: object):
+    """Compose production dispatch with Defaultspack-owned dependencies."""
+
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+        create_runtime_surface_services,
+    )
+
+    return capture_production_dispatch(
+        active,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        **kwargs,
+    )
+
+
 CONVERSATION_CALLER = "defaultspack.conversation"
 MEDIA_CALLER = "rumi_media_inspect_service_pack.media-inspect.service"
 WORKSPACE_CONTRACT = "tobkiri.resource.workspace.v1"
@@ -181,7 +224,19 @@ class _MediaBackend:
         self.binding = dict(binding)
         self.session: Any = None
         self.target_domains: dict[str, str] = {}
+        self.artifact_resolver: Any = None
+        self.target_domain_resolver: Any = None
         self.calls: list[tuple[str, str]] = []
+
+    def bind_artifact_resolver(self, resolver: Any) -> None:
+        """Accept the activation-bound artifact resolver used by Production."""
+
+        self.artifact_resolver = resolver
+
+    def bind_target_domain_resolver(self, resolver: Any) -> None:
+        """Accept the Authority-owned target-domain resolver."""
+
+        self.target_domain_resolver = resolver
 
     def materialize(self, binding: Any, reservation_id: str) -> RuntimeEvidence:
         del reservation_id
@@ -226,6 +281,49 @@ class _MediaBackend:
         del domain_id
 
 
+class _PackRouteValidationBackend:
+    """Test-only backend for one Pack's captured route availability."""
+
+    def __init__(self, pack_id: str, *, ready: bool) -> None:
+        self._pack_id = pack_id
+        self.status = BackendStatus(
+            backend_id="tobkiri.python-pack-v4",
+            execution_kind=ExecutionKind.PACK_VM,
+            platform="any",
+            backend_digest=canonical_digest(
+                {"backend": "route-validation-v4", "pack_id": pack_id, "ready": ready}
+            ),
+            production_enabled=ready,
+            conformance_only=not ready,
+            satisfied_gates=REQUIRED_PRODUCTION_GATES if ready else frozenset(),
+            unavailable_reason=(
+                None
+                if ready
+                else "authenticated PackVM supervisor is not registered for the selected backend"
+            ),
+        )
+
+    def supports(self, binding: Any) -> bool:
+        return binding.artifact.pack_id == self._pack_id
+
+    def bind_artifact_resolver(self, resolver: Any) -> None:
+        del resolver
+
+    def materialize(self, binding: Any, reservation_id: str) -> RuntimeEvidence:
+        del binding, reservation_id
+        raise AssertionError("route validation backend must not materialize")
+
+    def invoke(self, request: Any) -> ProviderOutcome:
+        del request
+        raise AssertionError("route validation backend must not invoke")
+
+    def cancel(self, request_id: str) -> None:
+        del request_id
+
+    def terminate(self, domain_id: str) -> None:
+        del domain_id
+
+
 @pytest.fixture
 def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user_data = tmp_path / "user-data"
@@ -244,7 +342,7 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     mounted = store.mount("defaults", str(workspace), expected_revision=0)
     store.select("defaults", expected_revision=int(mounted["revision"]))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    control = capture_pack_control_session()
+    control = _capture_control_session()
     control.invoke(
         PACK_CONTROL_CONTRACT,
         "pack.install",
@@ -271,12 +369,47 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     active = capture_default_profile()
 
-    authority = AuthorityStore(user_data / "authority" / "v4.sqlite3")
-    session = capture_production_dispatch(
+    authority_path = user_data / "authority" / "v4.sqlite3"
+    authority_setup = AuthorityStore(authority_path)
+    binding = _workspace_binding(store)
+    backend = _MediaBackend(store, binding)
+    authority_session = _capture_defaultspack_dispatch(
+        active,
+        bundle_root=_bundle_root(),
+        ecosystem_root=RUNTIME_ROOT / "ecosystem",
+        authority_store=authority_setup,
+        backends=BackendRegistry((backend,)),
+    )
+    for contract_id, operation_id in (
+        (MEDIA_CONTRACT, MEDIA_OPERATION),
+        (FILE_CONTRACT, FILE_OPERATION),
+    ):
+        context = authority_session.context_for(
+            contract_id,
+            operation_id,
+            "preflight",
+        )
+        resolved = authority_session.broker._catalog.resolve(
+            contract_id,
+            operation_id,
+            ">=1,<2",
+        )
+        backend.target_domains[resolved.principal_ref.value] = context.target_domain_id
+    backend.session = authority_session
+    authority_session.close()
+
+    authority = AuthorityStore(authority_path)
+    session = _capture_defaultspack_dispatch(
         active,
         bundle_root=_bundle_root(),
         ecosystem_root=RUNTIME_ROOT / "ecosystem",
         authority_store=authority,
+        backends=BackendRegistry(
+            (
+                _PackRouteValidationBackend("defaultspack", ready=True),
+                _PackRouteValidationBackend(MEDIA_PACK, ready=False),
+            )
+        ),
     )
 
     catalog = BundledCatalog.load(_bundle_root())
@@ -289,6 +422,9 @@ def media_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         panel_auth_manager=PanelAuthManager(bootstrap_secret="media-test-secret"),
         dispatch_session=session,
         contract_bindings=bindings,
+        capability_snapshot_factory=defaultspack_capability_snapshot,
+        application_presentation=DefaultspackHTTPPresentation(),
+        host_contract=host_contract_for_session(session),
         workspace_binding_resolver=lambda profile_id: capture_selected_workspace_binding(
             profile_id,
             user_data_root=user_data,
@@ -365,6 +501,8 @@ def _dynamic_request(
         "request_id": str(uuid.uuid4()),
         "expires_at": time.time() + 30,
         "profile_id": host["profile_id"],
+        "profile_revision": host["profile_revision"],
+        "activation_id": host["activation_id"],
         "plan_hash": host["plan_hash"],
         "catalog_hash": host["catalog_hash"],
         "contribution_id": target["contribution_id"],
@@ -545,8 +683,8 @@ def test_file_operations_have_exact_distinct_callers(media_server) -> None:
         )
 
 
-def test_pack_root_identity_rejects_symlink_and_detects_swap(tmp_path: Path) -> None:
-    """Captured Pack roots reject nested symlinks and same-path replacement."""
+def test_pack_root_identity_rejects_root_symlink_and_detects_swap(tmp_path: Path) -> None:
+    """Root binding ignores unrelated content but rejects root replacement links."""
 
     pack_root = tmp_path / "pack"
     pack_root.mkdir()
@@ -559,10 +697,46 @@ def test_pack_root_identity_rejects_symlink_and_detects_swap(tmp_path: Path) -> 
     (pack_root / "runtime.py").write_text("pass\n", encoding="utf-8")
     assert _pack_root_identities({MEDIA_PACK: pack_root}) != captured
 
-    (pack_root / "runtime.py").unlink()
-    (pack_root / "runtime.py").symlink_to(moved_root / "runtime.py")
-    with pytest.raises(AuthorityDenied, match="contains a symlink"):
-        _pack_root_identities({MEDIA_PACK: pack_root})
+    bin_directory = pack_root / "webapp" / "node_modules" / ".bin"
+    bin_directory.mkdir(parents=True)
+    (bin_directory / "tool").symlink_to(moved_root / "runtime.py")
+    replacement_identity = _pack_root_identities({MEDIA_PACK: pack_root})
+
+    linked_root = tmp_path / "pack-link"
+    linked_root.symlink_to(pack_root, target_is_directory=True)
+    with pytest.raises(AuthorityDenied, match="root is unavailable"):
+        _pack_root_identities({MEDIA_PACK: linked_root})
+    assert replacement_identity == _pack_root_identities({MEDIA_PACK: pack_root})
+
+
+def test_media_dynamic_projection_stops_at_direct_signed_dependency() -> None:
+    """Transitive implementation closure must not acquire inferred callers."""
+
+    catalog = BundledCatalog.load(_bundle_root())
+    edges = dynamic_profile_edges(catalog, "defaults", (MEDIA_PACK,))
+
+    assert {
+        (
+            str(edge["caller_function_id"]),
+            str(edge["target_provider_id"]),
+            str(edge["contract_id"]),
+            str(edge["operation_id"]),
+        )
+        for edge in edges
+    } == {
+        (
+            "shell.tauri.default",
+            "rumi_media_inspect_service_pack.media-inspect.service",
+            MEDIA_CONTRACT,
+            MEDIA_OPERATION,
+        ),
+        (
+            "rumi_media_inspect_service_pack.media-inspect.service",
+            "rumi_file_inspect_pack.file-inspect.service",
+            FILE_CONTRACT,
+            FILE_OPERATION,
+        ),
+    }
 
 
 @pytest.mark.parametrize(

@@ -65,6 +65,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             capture_default_profile,
             prepare_default_profile_confirmation,
         )
+        from tests.conformance_support.host_contract import host_contract
 
         with patch.dict(
             os.environ,
@@ -74,22 +75,24 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             },
             clear=False,
         ):
-            capture_default_profile(
+            active = capture_default_profile(
                 confirmation=prepare_default_profile_confirmation()
             )
         user_data.chmod(0o700)
         contract_path = user_data / "host_contract.json"
         contract_path.write_text(
             json.dumps(
-                {
-                    "schema_version": "tobkiri.host-contract.v1",
-                    "profile_id": "defaults",
-                    "values": {
+                host_contract(
+                    profile_id=str(active.resolved.profile["profile_id"]),
+                    profile_revision=str(active.resolved.plan["profile_revision"]),
+                    activation_id=str(active.activation["activation_id"]),
+                    plan_digest=str(active.resolved.plan["plan_digest"]),
+                    values={
                         "panel_bootstrap_secret": (
                             TestDefaultspackDesktopSurface._PANEL_BOOTSTRAP_SECRET
                         )
                     },
-                }
+                )
             ),
             encoding="utf-8",
         )
@@ -299,6 +302,9 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
             def stop(self):
                 self.stopped = True
 
+            def issue_panel_login_code(self):
+                return {"code": "test-panel-login-code"}
+
         fake_server = FakeServer()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -327,7 +333,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertTrue(fake_server.started)
         self.assertTrue(fake_server.stopped)
 
-    def test_valid_stale_profile_starts_ui_ready_reconfirmation_surface(self):
+    def test_valid_stale_profile_does_not_open_authenticated_surface(self):
         from core_runtime.app_lifecycle_manager import (
             get_runtime_readiness,
             reset_runtime_readiness,
@@ -339,6 +345,7 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
 
         captured: dict[str, object] = {}
         events: list[tuple[str, dict[str, object]]] = []
+        server_state = {"stopped": False, "handoff_attempts": 0}
 
         class FakeServer:
             def __init__(self, *_args, **kwargs):
@@ -348,7 +355,13 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                 return None
 
             def stop(self):
-                return None
+                server_state["stopped"] = True
+
+            def issue_panel_login_code(self):
+                server_state["handoff_attempts"] += 1
+                raise RuntimeError(
+                    "current panel authentication capture is unavailable"
+                )
 
         with tempfile.TemporaryDirectory() as tmp:
             user_data = Path(tmp) / "user_data"
@@ -395,12 +408,18 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
                                     with patch(
                                         "defaultspack.native_webview.open_desktop_surface",
                                         return_value="webview",
-                                    ):
-                                        result = desktop_app.main()
+                                    ) as open_surface:
+                                        with self.assertRaisesRegex(
+                                            RuntimeError,
+                                            "authentication capture is unavailable",
+                                        ):
+                                            desktop_app.main()
 
-        self.assertEqual(result, 0)
         self.assertIsNone(captured["dispatch_session"])
         self.assertEqual(captured["contract_bindings"], ())
+        self.assertEqual(server_state["handoff_attempts"], 1)
+        self.assertTrue(server_state["stopped"])
+        open_surface.assert_not_called()
         readiness = get_runtime_readiness()
         self.assertTrue(readiness["panel_ready"])
         self.assertFalse(readiness["runtime_ready"])

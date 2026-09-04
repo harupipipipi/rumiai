@@ -3,8 +3,10 @@ import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import test, {afterEach, beforeEach} from 'node:test';
+import {MemoryRouter} from 'react-router';
 
 import {ProfileCatalogSelector} from '@/src/components/advanced/ProfileCatalogSelector';
+import type {ApiDynamicFrontendCatalog} from '@/src/lib/apiTypes';
 import type {
   ProfileActivateResult,
   ProfileApproveResult,
@@ -20,9 +22,42 @@ import {
   type RuntimeSurfaceEnvelope,
 } from '@/src/lib/runtimeSurface';
 import type {RuntimeSurfaceState} from '@/src/hooks/useRuntimeSurface';
-import type {Pack} from '@/src/store';
+import {useAppStore, type Pack} from '@/src/store';
 
 const digest = (character: string): string => `sha256:${character.repeat(64)}`;
+
+function optionalConversationCatalog(profileId = 'defaults', include = true): ApiDynamicFrontendCatalog {
+  return {
+    version: 'rumi.ui.contribution.v1',
+    profile_id: profileId,
+    profile_revision: digest('a'),
+    activation_id: `activation:${profileId}`,
+    plan_hash: digest('b'),
+    contributions: include ? [{
+      contribution_id: `${profileId}.conversation.complete`,
+      owner_pack_id: `${profileId}-ui-pack`,
+      label: `${profileId} conversation`,
+      action_contract: 'conversation.turn.v1',
+      operation_id: 'complete',
+      provider_id: `${profileId}-conversation-provider`,
+      function_id: `${profileId}-conversation-function`,
+      kind: 'route',
+      mode: 'declarative',
+      route: `/${profileId}/conversation`,
+      owner_pack_hash: digest('c'),
+      build_identity: `${profileId}-conversation-build`,
+      resolved_profile_id: profileId,
+      resolved_profile_revision: digest('a'),
+      resolved_activation_id: `activation:${profileId}`,
+      resolved_plan_hash: digest('b'),
+      descriptor_hash: digest('d'),
+      view: {type: 'conversation_v4'},
+    }] : [],
+    diagnostics: [],
+    quarantined_pack_ids: [],
+    catalog_hash: digest('e'),
+  };
+}
 
 function profileSnapshot(): RuntimeSurfaceEnvelope<unknown> {
   return {
@@ -376,7 +411,7 @@ test('stale catalogs lock selection and ceremony actions while retaining visible
   }
 });
 
-test('selector keeps one ceremony owner and preserves the separate Defaults editor across catalog states', async () => {
+test('selector gives every named Profile the same ceremony and never falls back to Defaults', async () => {
   const previousWindow = globalThis.window;
   const previousDocument = globalThis.document;
   const {dom, container, root} = createDom();
@@ -394,16 +429,12 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
     });
     await act(async () => undefined);
     assert.equal(ceremonyOwnerCount(container), 1);
-
-    const defaultsMode = buttonContaining(container, 'Edit Defaults Pack set');
-    await act(async () => { defaultsMode.click(); });
-    assert.equal(defaultsMode.getAttribute('aria-pressed'), 'true');
-    assert.equal(ceremonyOwnerCount(container), 1);
-    assert.ok(container.querySelector('button[aria-label^="Toggle Defaults Pack"]'));
-
-    await act(async () => { buttonContaining(container, 'Activate this Profile').click(); });
+    await act(async () => {
+      buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click();
+    });
     assert.equal(ceremonyOwnerCount(container), 1);
     assert.equal(container.querySelectorAll('button[aria-label^="Toggle Defaults Pack"]').length, 0);
+    assert.doesNotMatch(container.textContent ?? '', /Defaults Pack-set editor/);
 
     await act(async () => {
       root.render(
@@ -416,9 +447,9 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
         />,
       );
     });
-    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.equal(ceremonyOwnerCount(container), 0);
     assert.match(container.textContent ?? '', /Loading authoritative Profile definitions/);
-    assert.match(container.textContent ?? '', /Defaults Pack-set editor/);
+    assert.match(container.textContent ?? '', /Select a verified Profile definition/);
 
     await act(async () => {
       root.render(
@@ -435,7 +466,7 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
         />,
       );
     });
-    assert.equal(ceremonyOwnerCount(container), 1);
+    assert.equal(ceremonyOwnerCount(container), 0);
     assert.match(container.textContent ?? '', /HTTP API session mismatch/);
     assert.ok(container.querySelector('[role="alert"]'));
   } finally {
@@ -443,6 +474,166 @@ test('selector keeps one ceremony owner and preserves the separate Defaults edit
     dom.window.close();
     Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
     Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('Profile catalog failure copies the complete visible diagnostic, not a hidden raw error', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const {dom, container, root} = createDom();
+  let copied = '';
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: {writeText: async (text: string) => { copied = text; }},
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope(), {
+            data: null,
+            status: 'error',
+            stale: true,
+            error: {code: 'FAILED', message: 'The Broker rejected the signed catalog response.'},
+          })}
+          packs={[]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    const copy = buttonByLabel(container, 'Copy Profile catalog error');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    assert.match(container.textContent ?? '', /Authoritative Profile catalog is locked/);
+    assert.match(container.textContent ?? '', /The Broker rejected the signed catalog response\./);
+    assert.match(container.textContent ?? '', /The last accepted definitions remain read-only until the catalog refreshes\./);
+    assert.equal(copied, [
+      'Authoritative Profile catalog is locked',
+      'The Broker rejected the signed catalog response.',
+      'The last accepted definitions remain read-only until the catalog refreshes.',
+    ].join('\n'));
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    Object.defineProperty(globalThis, 'navigator', {value: previousNavigator, configurable: true});
+  }
+});
+
+test('selected Profile shows only its own optional verified capability snapshot', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createDom();
+  useAppStore.setState({
+    frontendCatalog: optionalConversationCatalog(),
+    frontendCatalogLoading: false,
+    frontendCatalogError: null,
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.match(container.textContent ?? '', /Optional verified capabilities/);
+    assert.match(container.textContent ?? '', /defaults conversation/);
+    assert.match(container.textContent ?? '', /defaults-ui-pack/);
+
+    await act(async () => {
+      buttonByLabel(container, 'Select Profile Alternate Profile (alternate)').click();
+    });
+    assert.match(container.textContent ?? '', /This Profile is browse-only/);
+    assert.doesNotMatch(container.textContent ?? '', /defaults-ui-pack/);
+    assert.doesNotMatch(container.textContent ?? '', /defaults conversation/);
+
+    await act(async () => {
+      useAppStore.setState({frontendCatalog: optionalConversationCatalog('alternate', false)});
+    });
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope('alternate'))}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    assert.match(container.textContent ?? '', /No verified conversation capability is published/);
+    assert.ok(container.querySelector('[data-testid="profile-conversation-capability"] [role="status"]'));
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('Profile capability errors copy the displayed safe diagnostic instead of hidden catalog detail', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const previousNavigator = globalThis.navigator;
+  const previousState = useAppStore.getState();
+  const {dom, container, root} = createDom();
+  let copied = '';
+  Object.defineProperty(dom.window.navigator, 'clipboard', {
+    configurable: true,
+    value: {writeText: async (text: string) => { copied = text; }},
+  });
+  useAppStore.setState({
+    frontendCatalog: null,
+    frontendCatalogLoading: false,
+    frontendCatalogError: 'Host-only catalog transport detail',
+  });
+  try {
+    await act(async () => {
+      root.render(
+        <ProfileCatalogSelector
+          profileSurface={surfaceState()}
+          catalogSurface={catalogState(catalogEnvelope())}
+          packs={[pack('provider-pack')]}
+          packsLoading={false}
+          loadPacks={async () => undefined}
+        />,
+      );
+    });
+    await act(async () => undefined);
+    const capability = container.querySelector<HTMLElement>(
+      '[data-testid="profile-conversation-capability"]',
+    );
+    assert.ok(capability);
+    assert.match(capability.textContent ?? '', /No accepted capability snapshot is bound to this active Profile\./);
+    assert.doesNotMatch(capability.textContent ?? '', /Host-only catalog transport detail/);
+    const copy = buttonByLabel(capability, 'Copy Profile capability error');
+    await act(async () => {
+      copy.click();
+      await Promise.resolve();
+    });
+    assert.equal(copied, 'No accepted capability snapshot is bound to this active Profile.');
+  } finally {
+    act(() => root.unmount());
+    useAppStore.setState(previousState, true);
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+    Object.defineProperty(globalThis, 'navigator', {value: previousNavigator, configurable: true});
   }
 });
 
@@ -646,7 +837,12 @@ test('fresh selector mount rehydrates the active marker from the catalog project
 
     const empty: RuntimeSurfaceEnvelope<RuntimeProfileCatalogProjection> = {
       ...catalogEnvelope('alternate'),
-      data: {...catalogEnvelope('alternate').data, count: 0, profiles: []},
+      data: {
+        ...catalogEnvelope('alternate').data,
+        active_profile_id: null,
+        count: 0,
+        profiles: [],
+      },
     };
     await act(async () => {
       root.render(
@@ -739,6 +935,46 @@ test('Pack catalog metadata changes refresh authoritative candidates without add
     await act(async () => undefined);
     assert.equal(catalogRefreshes, 1);
     assert.equal(container.querySelectorAll('button[aria-label^="Select Profile"]').length, 2);
+  } finally {
+    act(() => root.unmount());
+    dom.window.close();
+    Object.defineProperty(globalThis, 'window', {value: previousWindow, configurable: true});
+    Object.defineProperty(globalThis, 'document', {value: previousDocument, configurable: true});
+  }
+});
+
+test('Profile catalog remains browseable while runtime ceremony actions are gated', async () => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  const {dom, container, root} = createDom();
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <ProfileCatalogSelector
+            profileSurface={surfaceState()}
+            catalogSurface={catalogState(catalogEnvelope())}
+            packs={[pack('provider-pack')]}
+            packsLoading={false}
+            loadPacks={async () => undefined}
+            runtimeVerified={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+    await act(async () => undefined);
+
+    assert.match(container.textContent ?? '', /Defaults Profile/);
+    assert.match(container.textContent ?? '', /Alternate Profile/);
+    assert.match(container.textContent ?? '', /Profile activation is unavailable/);
+    assert.match(container.textContent ?? '', /Complete Setup verification/);
+    assert.ok(container.querySelector('a[href="/setup"]'));
+    assert.equal([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('Resolve candidate')), false);
+    assert.ok(container.querySelector('[data-testid="profile-ceremony-gate"]'));
+    assert.equal(
+      container.querySelector('button[aria-label="Copy Profile ceremony gate warning"]'),
+      null,
+    );
   } finally {
     act(() => root.unmount());
     dom.window.close();

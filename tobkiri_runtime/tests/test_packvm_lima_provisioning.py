@@ -1401,7 +1401,7 @@ def test_failed_provision_cleanup_refuses_replaced_same_name_orphan(
 def test_runtime_surface_recomputes_exact_packvm_attestation_digest(
     provisioner,
 ) -> None:
-    from core_runtime.runtime_surface_v4 import _packvm_attested
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import _packvm_attested
 
     manager, _fake, _command = provisioner
     plan = manager.prepare()

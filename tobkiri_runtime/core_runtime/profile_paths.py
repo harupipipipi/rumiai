@@ -17,12 +17,12 @@ def active_profile_id(user_data_root: Path | None = None) -> str | None:
     """Return the active verified Profile identity, never an ambient override."""
 
     try:
-        from .bootstrap.profile_capture import capture_default_profile
+        from .active_profile_store_v4 import ActiveProfileStore
 
-        captured = capture_default_profile(base_dir=user_data_root)
+        root = Path(user_data_root) if user_data_root is not None else _default_user_data_root()
+        profile_id = ActiveProfileStore(root).require(verify_snapshot=True).profile_id
     except Exception:
         return None
-    profile_id = str(captured.resolved.profile["profile_id"])
     return validate_profile_id(profile_id)
 
 

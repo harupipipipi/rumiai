@@ -22,6 +22,50 @@ def _load_module():
     return module
 
 
+def test_run_command_preserves_explicit_environment_and_disables_bytecode(monkeypatch):
+    module = _load_module()
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    environment = {"PATH": "/test/bin", "PYTHONDONTWRITEBYTECODE": "0"}
+    module.run_command(["python", "--version"], env=environment)
+
+    assert captured["env"] == {
+        "PATH": "/test/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    assert environment["PYTHONDONTWRITEBYTECODE"] == "0"
+
+
+def test_prepare_dev_defaults_refuses_false_clean_source_provenance(tmp_path, monkeypatch):
+    module = _load_module()
+    artifact = tmp_path / "test.AppImage"
+    artifact.write_bytes(b"development shell")
+    runtime_root = tmp_path / "tobkiri_runtime"
+    (runtime_root / "ecosystem/defaultspack/v4").mkdir(parents=True)
+    monkeypatch.setattr(module, "_target_shell_spec", lambda *_args: {
+        "platform": "linux", "architecture": "x86_64", "bundle": "appimage",
+        "artifact": artifact, "relative_path": "Tobkiri.AppImage",
+        "entrypoint": "Tobkiri.AppImage",
+    })
+    commands = []
+
+    def fake_command(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=" M source.py\n")
+
+    monkeypatch.setattr(module, "run_command", fake_command)
+    with pytest.raises(RuntimeError, match="refusing to attest"):
+        module.prepare_dev_defaults(tmp_path, "x86_64-unknown-linux-gnu")
+
+    assert not (runtime_root / module.SOURCE_PROVENANCE_FILENAME).exists()
+    assert not any("-c" in command for command in commands)
+
+
 def test_resolve_target_prefers_explicit_then_tauri_environment(monkeypatch):
     module = _load_module()
     monkeypatch.setattr(module, "host_target", lambda: "host-target")

@@ -36,10 +36,13 @@ from tobkiri_protocol import platform_artifact
 from tobkiri_protocol.provenance import (
     informational_source_commit,
     normative_generated_provenance,
+    repository_tree_digest,
     trusted_source_commit,
 )
 from scripts import generate_defaultspack_v4_bundle
+from scripts import generate_packaged_defaultspack_v4_bundle
 from scripts.generate_packaged_defaultspack_v4_bundle import stage_packaged_bundle
+from scripts.profile_compatibility_provenance import validate_compatibility_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_BUNDLE = ROOT / "ecosystem" / "defaultspack" / "v4"
@@ -378,7 +381,7 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
     )
     monkeypatch.setattr(
         profile_capture,
-        "_resolve_candidate",
+        "_resolve_bootstrap_candidate",
         lambda **_kwargs: (successor, confirmation),
     )
 
@@ -567,6 +570,31 @@ def test_packaged_generator_binds_macos_tree_and_entrypoint_digests(
         bundle_identity="io.tobkiri.shell.tauri",
         source_provenance_file=provenance,
     )
+    profile = json.loads((bundle / "defaults.profile.v4.json").read_text())
+    assert profile["provenance"]["normative"] is False
+    validate_compatibility_profile(profile)
+    for companion in (
+        "defaults.profile.intent.v1.json",
+        "defaults.profile.lock.v5.json",
+        "defaults.release.provenance.json",
+    ):
+        assert not (bundle / companion).exists()
+    bundle_lock = json.loads((bundle / "bundle.lock.json").read_text())
+    profile_entry = next(
+        item
+        for item in bundle_lock["entries"]
+        if item["path"] == "defaults.profile.v4.json"
+    )
+    assert profile_entry["digest"] == "sha256:" + hashlib.sha256(
+        (bundle / "defaults.profile.v4.json").read_bytes()
+    ).hexdigest()
+    assert profile["provenance"]["repository_tree"] == repository_tree_digest(
+        ROOT,
+        [
+            Path(generate_packaged_defaultspack_v4_bundle.__file__),
+            *generate_packaged_defaultspack_v4_bundle.COMPATIBILITY_PROVENANCE_INPUTS,
+        ],
+    )
     shell = json.loads((bundle / "shell.tauri.default.shell.v1.json").read_text())
     variant = shell["launch"]["variants"][0]
     assert variant["artifact_digest"] != variant["entrypoint_digest"]
@@ -590,8 +618,10 @@ def test_production_bundle_root_ignores_environment_attack(
     from core_runtime import pack_control_v4
     from core_runtime.app_lifecycle_manager import AppLifecycleManager
     from core_runtime.bootstrap import profile_capture
-    from core_runtime.pack_api_server import _load_production_capture_inputs
-    from core_runtime.runtime_surface_v4 import RuntimeSurfaceService
+    from ecosystem.defaultspack.defaultspack.runtime_composition import (
+        defaultspack_runtime_capture_inputs,
+    )
+    from ecosystem.defaultspack.domain.runtime_surface_v4 import RuntimeSurfaceService
 
     attacker = tmp_path / "attacker-bundle"
     attacker.mkdir()
@@ -611,12 +641,15 @@ def test_production_bundle_root_ignores_environment_attack(
         raise CatalogProbe
 
     monkeypatch.setattr(BundledCatalog, "load", classmethod(probe))
-    monkeypatch.setattr(profile_capture, "capture_default_profile", lambda **_kwargs: object())
+    monkeypatch.setattr(profile_capture, "capture_bootstrap_profile", lambda **_kwargs: object())
     entrypoints = (
         lambda: RuntimeSurfaceService._load_catalog(),
         lambda: pack_control_v4._required_profile_pack_ids("defaults"),
-        _load_production_capture_inputs,
-        lambda: AppLifecycleManager(base_dir=tmp_path).activate_default_profile({}),
+        defaultspack_runtime_capture_inputs,
+        lambda: AppLifecycleManager(
+            base_dir=tmp_path,
+            runtime_capture_factory=defaultspack_runtime_capture_inputs,
+        ).activate_bootstrap_profile({}),
     )
     for entrypoint in entrypoints:
         with pytest.raises(CatalogProbe):
@@ -1006,7 +1039,7 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
     monkeypatch.setattr(profile_capture, "_bundle_root", lambda _base=None: catalog.root)
     monkeypatch.setattr(
         profile_capture,
-        "_resolve_candidate",
+        "_resolve_bootstrap_candidate",
         lambda **_kwargs: (resolved, confirmation),
     )
 

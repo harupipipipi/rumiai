@@ -19,6 +19,7 @@ from core_runtime.authority.v4 import (
 )
 from core_runtime.global_contract_dispatch import GlobalContractInvocationError
 from core_runtime.bootstrap.production_v4 import capture_production_dispatch
+from core_runtime.packvm_lifecycle_v4 import PackVMLifecycleV4
 from core_runtime import credential_transport as credential_transport_module
 from core_runtime.credential_transport import CredentialMaterialStoreBinding
 from core_runtime.bootstrap.profile_capture import (
@@ -26,6 +27,12 @@ from core_runtime.bootstrap.profile_capture import (
     prepare_default_profile_confirmation,
 )
 from ecosystem.defaultspack.domain.runtime_v4 import ProfileResolutionDenied
+from ecosystem.defaultspack.defaultspack.runtime_composition import (
+    defaultspack_activation_snapshot_loader,
+)
+from ecosystem.defaultspack.domain.runtime_surface_v4 import (
+    create_runtime_surface_services,
+)
 from ecosystem.rumi_credential_broker_pack.runtime.service import (
     CredentialBrokerService,
 )
@@ -194,6 +201,8 @@ def test_production_dispatch_executes_credentialed_provider_request(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
         credential_store_factory=_credential_store_factory,
     )
     try:
@@ -238,6 +247,8 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
         backends=BackendRegistry((backend,)),
         target_backend_digests={target.principal_id: backend.status.backend_digest},
     )
@@ -279,11 +290,7 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     assert approval is not None
     assert approval.caller == current_caller
     assert approval.target == target
-    provider = next(
-        item
-        for item in store.list_provider_authorities()
-        if item.provider == target
-    )
+    provider = next(item for item in store.list_provider_authorities() if item.provider == target)
     assert provider.execution_domain_id == target_domain.domain_id
     assert provider.execution_domain_identity_digest == target_domain.identity_digest
     translated, translated_scope = control._translate_query(
@@ -332,6 +339,8 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
             bundle_root=_bundle_root(),
             ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
             authority_store=store,
+            activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+            runtime_surface_factory=create_runtime_surface_services,
             backends=BackendRegistry((_CapturedBackend(_digest("backend")),)),
             target_backend_digests={target.principal_id: _digest("backend")},
         )
@@ -353,20 +362,32 @@ def test_clean_home_broker_dispatches_then_revocation_fails_closed(
     assert not (user_data / "settings" / "startup_profiles.json").exists()
 
 
-def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
+def test_direct_vz_auth_failure_never_falls_back_to_path_lima_or_mints_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The required baseline remains hidden until an exact PackVM is live."""
+    """Production exposes direct-VZ failure and leaves baseline authority absent."""
+
+    import ecosystem.defaultspack.backend.sandbox.isolation.macos_vz_provisioner as vz
 
     user_data = tmp_path / "unavailable-packvm"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    invocation_marker = tmp_path / "limactl-invoked"
+    limactl = tmp_path / "limactl"
+    limactl.write_text(
+        f"#!/bin/sh\ntouch '{invocation_marker}'\nexit 0\n",
+        encoding="utf-8",
+    )
+    limactl.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(vz, "_default_state_dir", lambda: user_data / "packvm-vz")
+    monkeypatch.setattr(vz, "_packaged_packvm_bundle_binding", lambda: None)
+    lifecycle = PackVMLifecycleV4(vz.default_packvm_provisioner())
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
     binding = next(
         item
         for item in active.resolved.plan["bindings"]
-        if item["contract_id"] == "conversation.turn.v1"
-        and item["operation_id"] == "complete"
+        if item["contract_id"] == "conversation.turn.v1" and item["operation_id"] == "complete"
     )
     target = FunctionPrincipal.from_dict(binding["function_principal"])
     store = AuthorityStore(user_data / "authority" / "v4.sqlite3")
@@ -375,8 +396,16 @@ def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
+        packvm_provisioner=lifecycle,
     )
     try:
+        readiness = lifecycle.readiness_snapshot()
+        assert readiness["ready"] is False
+        assert "PackVM VZ" in str(readiness["reason"])
+        assert "backend_substrate" not in readiness
+        assert not invocation_marker.exists()
         context = session.context_for(
             "conversation.turn.v1",
             "complete",
@@ -384,14 +413,15 @@ def test_unavailable_packvm_does_not_mint_baseline_conversation_authority(
         )
         assert store.get_domain(context.target_domain_id) is None
         assert all(item.target != target for item in store.list_grants())
+        assert all(item.provider != target for item in store.list_provider_authorities())
         assert all(
-            item.provider != target for item in store.list_provider_authorities()
+            target.principal_id not in json.dumps(event, sort_keys=True)
+            for event in store.audit_events()
         )
         metadata = session.provider_metadata("conversation.turn.v1")
         assert len(metadata) == 1
-        assert "authenticated PackVM supervisor" in metadata[0][
-            "backend_unavailable_reason"
-        ]
+        assert "authenticated PackVM supervisor" in metadata[0]["backend_unavailable_reason"]
+        assert not invocation_marker.exists()
     finally:
         session.broker.close()
 
@@ -408,8 +438,7 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
     conversation_binding = next(
         item
         for item in active.resolved.plan["bindings"]
-        if item["contract_id"] == "conversation.turn.v1"
-        and item["operation_id"] == "complete"
+        if item["contract_id"] == "conversation.turn.v1" and item["operation_id"] == "complete"
     )
     target = FunctionPrincipal.from_dict(conversation_binding["function_principal"])
     backend = _CapturedBackend(_digest("bridge-backend"))
@@ -419,6 +448,8 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
         bundle_root=_bundle_root(),
         ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
         authority_store=store,
+        activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+        runtime_surface_factory=create_runtime_surface_services,
         backends=BackendRegistry((backend,)),
         target_backend_digests={target.principal_id: backend.status.backend_digest},
     )
@@ -491,9 +522,7 @@ def test_packvm_bridge_uses_only_the_captured_ai_capability(
         assert set(payload) == {"messages", "requirements", "_session_id"}
         host_session_id = payload["_session_id"]
         assert isinstance(host_session_id, str)
-        assert host_session_id.startswith(
-            f"session.packvm-bridge.{context.request_id}."
-        )
+        assert host_session_id.startswith(f"session.packvm-bridge.{context.request_id}.")
         assert bridge_request["continuation"]["nonce"] not in host_session_id
         assert result["result"] == {
             "status": "ok",
@@ -562,6 +591,8 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
             bundle_root=_bundle_root(),
             ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
             authority_store=store,
+            activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+            runtime_surface_factory=create_runtime_surface_services,
         )
 
     session = capture()
@@ -585,7 +616,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
         "catalog.read",
         {"_session_id": "session.panel.first-start"},
     )
-    assert result["count"] == 143
+    assert result["count"] == 140
     assert result["profile_id"] == "defaults"
     assert result["plan_digest"] == active.resolved.plan["plan_digest"]
     assert [event["event_state"] for event in store.audit_events()][-3:] == [
@@ -650,7 +681,7 @@ def test_pack_catalog_read_is_profile_bound_audited_and_restart_safe(
             "catalog.read",
             {"_session_id": "session.panel.restart"},
         )["count"]
-        == 143
+        == 140
     )
 
     catalog_grant = next(
@@ -681,9 +712,7 @@ def test_dispatch_rejects_authority_store_from_another_state_root(
     user_data = tmp_path / "canonical-home"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     active = capture_default_profile(confirmation=prepare_default_profile_confirmation())
-    alternate_store = AuthorityStore(
-        tmp_path / "alternate-home" / "authority" / "v4.sqlite3"
-    )
+    alternate_store = AuthorityStore(tmp_path / "alternate-home" / "authority" / "v4.sqlite3")
 
     try:
         with pytest.raises(AuthorityDenied, match="not bound to the captured"):
@@ -692,6 +721,8 @@ def test_dispatch_rejects_authority_store_from_another_state_root(
                 bundle_root=_bundle_root(),
                 ecosystem_root=Path(__file__).resolve().parents[1] / "ecosystem",
                 authority_store=alternate_store,
+                activation_snapshot_loader=defaultspack_activation_snapshot_loader,
+                runtime_surface_factory=create_runtime_surface_services,
             )
     finally:
         alternate_store.close()

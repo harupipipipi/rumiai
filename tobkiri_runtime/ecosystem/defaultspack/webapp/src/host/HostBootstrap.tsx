@@ -14,8 +14,8 @@ import {
   contributionsForRoute,
 } from "./DynamicFrontendHost";
 import type {
-  CapabilityInvocation,
-  FrontendCapabilityClient,
+  CapturedCapabilityInvocation,
+  FrontendCapabilityInvoker,
   FrontendCatalog,
 } from "./frontendContracts";
 
@@ -52,8 +52,7 @@ export async function fetchDynamicCatalog(): Promise<FrontendCatalog> {
 }
 
 export async function invokeCapability(
-  profileId: string,
-  request: CapabilityInvocation,
+  request: CapturedCapabilityInvocation,
 ): Promise<unknown> {
   const response = await defaultspackApiFetch(defaultspackContractRoute("api/ui/capability/invoke"), {
     method: "POST",
@@ -61,7 +60,9 @@ export async function invokeCapability(
     body: JSON.stringify({
       request_id: crypto.randomUUID(),
       expires_at: Date.now() / 1000 + 30,
-      profile_id: profileId,
+      profile_id: request.profileId,
+      profile_revision: request.profileRevision,
+      activation_id: request.activationId,
       plan_hash: request.planHash,
       catalog_hash: request.catalogHash,
       contribution_id: request.contributionId,
@@ -121,11 +122,12 @@ export function HostBootstrap({
     };
   }, [refreshCatalog]);
 
-  const capabilities = useMemo<FrontendCapabilityClient | null>(() => {
-    if (!catalog) return null;
-    const invoke = async (request: CapabilityInvocation): Promise<unknown> => {
+  const capabilities = useMemo<FrontendCapabilityInvoker>(() => {
+    const invoke = async (
+      request: CapturedCapabilityInvocation,
+    ): Promise<unknown> => {
       try {
-        return await invokeCapability(catalog.profile_id, request);
+        return await invokeCapability(request);
       } catch (error) {
         if (
           error instanceof FrontendCapabilityError
@@ -140,7 +142,7 @@ export function HostBootstrap({
       invokeAction: invoke,
       readDataSource: invoke,
     };
-  }, [catalog, refreshCatalog]);
+  }, [refreshCatalog]);
 
   const retry = () => {
     void refreshCatalog().catch(() => undefined);
@@ -155,7 +157,7 @@ export function HostBootstrap({
       />
     );
   }
-  if (!catalog || !capabilities) return <TobkiriLoadingScreen />;
+  if (!catalog) return <TobkiriLoadingScreen />;
   const hasRoute = contributionsForRoute(
     catalog,
     route,

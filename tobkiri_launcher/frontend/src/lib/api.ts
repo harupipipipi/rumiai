@@ -45,6 +45,27 @@ import {
   removeSafeStorageValue,
   writeSafeStorageValue,
 } from './safeStorage';
+import {
+  parseNamedProfileRegistry,
+  validateNamedProfileMutation,
+  type CreateNamedProfileInput,
+  type DeleteNamedProfileInput,
+  type DuplicateNamedProfileInput,
+  type NamedProfileMutationInput,
+  type NamedProfileRecord,
+  type NamedProfileRegistry,
+  type UpdateNamedProfileInput,
+} from './profileRegistry';
+import {parsePacksResponse} from './packScope';
+export type {
+  CreateNamedProfileInput,
+  DeleteNamedProfileInput,
+  DuplicateNamedProfileInput,
+  NamedProfileMutationInput,
+  NamedProfileRecord,
+  NamedProfileRegistry,
+  UpdateNamedProfileInput,
+} from './profileRegistry';
 
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
@@ -57,6 +78,11 @@ const EXACT_NON_MAP_API_ROUTES = [
   {method: 'GET', path: '/api/setup/packs'},
   {method: 'POST', path: '/api/setup/packs/install'},
   {method: 'POST', path: '/api/setup/runtime/reconcile'},
+  {method: 'GET', path: '/api/v4/profiles'},
+  {method: 'POST', path: '/api/v4/profiles/create'},
+  {method: 'POST', path: '/api/v4/profiles/update'},
+  {method: 'POST', path: '/api/v4/profiles/duplicate'},
+  {method: 'POST', path: '/api/v4/profiles/delete'},
   {method: 'POST', path: '/api/v4/packvm/prepare'},
   {method: 'POST', path: '/api/v4/packvm/consent'},
   {method: 'POST', path: '/api/v4/packvm/provision'},
@@ -188,6 +214,11 @@ export function parseHealthResponse(value: unknown): HealthResponseData {
     runtime_ready: requiredBoolean(value, 'runtime_ready'),
     runtime_status: value.runtime_status as RuntimeStatus,
     runtime_error: requiredRuntimeError(value),
+    host_catalog_verified: requiredBoolean(value, 'host_catalog_verified'),
+    profile_ceremony_available: requiredBoolean(value, 'profile_ceremony_available'),
+    active_profile_ready: requiredBoolean(value, 'active_profile_ready'),
+    launch_ready: requiredBoolean(value, 'launch_ready'),
+    defaults_bootstrap_required: requiredBoolean(value, 'defaults_bootstrap_required'),
   };
   assertCoherentHealth(health);
   return health;
@@ -301,7 +332,11 @@ function isPackVMLifecyclePath(path: string): boolean {
 }
 
 function isPanelSessionApiPath(path: string): boolean {
-  return isSetupApiPath(path) || isFrontendContractPath(path) || isPackVMLifecyclePath(path);
+  return isSetupApiPath(path)
+    || path === '/api/v4/profiles'
+    || path.startsWith('/api/v4/profiles/')
+    || isFrontendContractPath(path)
+    || isPackVMLifecyclePath(path);
 }
 
 function isExactAllowedApiRequest(path: string, method: string): boolean {
@@ -786,6 +821,34 @@ export function fetchDashboard(): Promise<ApiDashboard> {
   return apiFetch<ApiDashboard>(frontendContractPath('GET', '/api/home/dashboard'));
 }
 
+export function fetchNamedProfiles(): Promise<NamedProfileRegistry> {
+  return apiFetch<unknown>('/api/v4/profiles', {cache: 'no-store'}).then(parseNamedProfileRegistry);
+}
+
+function mutateNamedProfile(
+  action: 'create' | 'update' | 'duplicate' | 'delete',
+  payload: NamedProfileMutationInput,
+): Promise<NamedProfileRegistry> {
+  const validated = validateNamedProfileMutation(action, payload);
+  return apiFetch<unknown>(`/api/v4/profiles/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(validated),
+  }).then(parseNamedProfileRegistry);
+}
+
+export const createNamedProfile = (payload: CreateNamedProfileInput) => (
+  mutateNamedProfile('create', payload)
+);
+export const updateNamedProfile = (payload: UpdateNamedProfileInput) => (
+  mutateNamedProfile('update', payload)
+);
+export const duplicateNamedProfile = (payload: DuplicateNamedProfileInput) => (
+  mutateNamedProfile('duplicate', payload)
+);
+export const deleteNamedProfile = (payload: DeleteNamedProfileInput) => (
+  mutateNamedProfile('delete', payload)
+);
+
 export async function fetchFrontendCatalog(): Promise<ApiDynamicFrontendCatalog> {
   const data = await apiFetch<{dynamic_host?: ApiDynamicFrontendCatalog | null}>(
     frontendContractPath('GET', '/api/ui/catalog'),
@@ -872,6 +935,8 @@ export function invokeFrontendCapability(
       request_id: requestId,
       expires_at: Date.now() / 1000 + 30,
       profile_id: request.profileId,
+      profile_revision: request.profileRevision,
+      activation_id: request.activationId,
       plan_hash: request.planHash,
       catalog_hash: request.catalogHash,
       contribution_id: request.contributionId,
@@ -952,7 +1017,7 @@ function validatePackApprovalResponse(value: unknown, packId: string): PackAppro
 }
 
 export function fetchPacks(): Promise<PacksResponseData> {
-  return dispatchPackControl<PacksResponseData>('catalog.read');
+  return dispatchPackControl<unknown>('catalog.read').then(parsePacksResponse);
 }
 
 export async function installPack(

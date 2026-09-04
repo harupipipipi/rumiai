@@ -1108,6 +1108,64 @@ test("command protocol catalog is authoritative and invocation preserves its env
   ]);
 });
 
+test("high-risk command routes expose only invocation-scoped follow-ups", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    requests.push({ url: requestTarget(input), body });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: body.phase === "list_pending"
+        ? { invocations: [] }
+        : {
+            invocation_id: "high-risk-1",
+            approval_request_id: "approval-1",
+            state: body.phase === "resume" ? "succeeded" : "approval_pending",
+            expires_at: 1234,
+            redacted_metadata: { action: "execute" },
+          },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.prepareHighRiskCommand({
+      invocation_id: "high-risk-1",
+      command_ref: "terminal",
+      arguments: { command: "git status", cwd: ".", env: {}, timeout: 30 },
+      presentation: { title: "Terminal", summary: "Run a terminal command." },
+    });
+    await api.listHighRiskCommands();
+    await api.highRiskCommandStatus("high-risk-1");
+    await api.resumeHighRiskCommand("high-risk-1");
+    await api.cancelHighRiskCommand("high-risk-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests.map((request) => request.url), [
+    routeKey("api/command-protocol/v1/high-risk"),
+    routeKey("api/command-protocol/v1/high-risk"),
+    routeKey("api/command-protocol/v1/high-risk"),
+    routeKey("api/command-protocol/v1/high-risk"),
+    routeKey("api/command-protocol/v1/high-risk"),
+  ]);
+  assert.deepEqual(requests[0].body, {
+    phase: "prepare",
+    invocation_id: "high-risk-1",
+    command_ref: "terminal",
+    arguments: { command: "git status", cwd: ".", env: {}, timeout: 30 },
+    presentation: { title: "Terminal", summary: "Run a terminal command." },
+  });
+  assert.deepEqual(requests.slice(1).map((request) => request.body), [
+    { phase: "list_pending" },
+    { phase: "status", invocation_id: "high-risk-1" },
+    { phase: "resume", invocation_id: "high-risk-1" },
+    { phase: "cancel", invocation_id: "high-risk-1" },
+  ]);
+  assert.doesNotMatch(JSON.stringify(requests.slice(1)), /effect_id|token|scope|arguments/i);
+});
+
 test("updateUiSettingsPatches sends field-scoped settings mutations", async () => {
   const originalFetch = globalThis.fetch;
   let body: unknown;
@@ -2545,6 +2603,77 @@ test("authority approval helpers send signed ui operator provenance", async () =
   assert.ok(seen[1].csrf);
 });
 
+test("interactive approval helpers use fixed tokenless routes and exact bodies", async () => {
+  const originalFetch = globalThis.fetch;
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const uiOperator = {
+    version: 1,
+    kind: "ui_operator" as const,
+    origin: "tauri_webview_window",
+    window_label: "authority-approval",
+    request_id: "interactive-1",
+    issued_at: 1700000000,
+    expires_at: 1700000180,
+    nonce: "nonce",
+    signature: "sig",
+  };
+  const redacted = {
+    request_id: "interactive-1",
+    request_snapshot_digest: "a".repeat(64),
+    state: "pending",
+    expires_at: 1700000300,
+    typed_confirmation_required: true,
+    typed_confirmation_digest: "b".repeat(64),
+    redacted_metadata: { summary: "Run the prepared effect" },
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: requestTarget(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: requestTarget(input).includes("/list") ? { approvals: [redacted] } : redacted,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.listInteractiveApprovals();
+    await api.getInteractiveApproval("interactive-1");
+    await api.approveInteractiveApproval("interactive-1", {
+      confirmation_text: "APPROVE",
+      ui_operator: uiOperator,
+    });
+    await api.denyInteractiveApproval("interactive-1", { ui_operator: uiOperator });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen, [
+    { input: routeKey("api/interactive-approval/v1/list"), method: "GET", body: undefined },
+    {
+      input: routeKey("api/interactive-approval/v1/get"),
+      method: "POST",
+      body: { request_id: "interactive-1" },
+    },
+    {
+      input: routeKey("api/interactive-approval/v1/approve"),
+      method: "POST",
+      body: {
+        request_id: "interactive-1",
+        confirmation_text: "APPROVE",
+        ui_operator: uiOperator,
+      },
+    },
+    {
+      input: routeKey("api/interactive-approval/v1/deny"),
+      method: "POST",
+      body: { request_id: "interactive-1", ui_operator: uiOperator },
+    },
+  ]);
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
@@ -2757,6 +2886,53 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     method: "POST",
     body: { peer_id: "peer-a", text: "hello" },
   });
+});
+
+test("mobile pairing review and approve helpers use admin review contract", async () => {
+  const seen: Array<{ input: string; method: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    const data = String(input).endsWith("/review")
+      ? {
+          pairing: { pairing_id: "pair-1", status: "claimed", expires_at: 123 },
+          claim: {
+            device_label: "Haru iPhone",
+            requested_scopes: ["chat.read"],
+            allowed_scopes: ["chat.read"],
+          },
+          claim_hash: "sha256:abc",
+        }
+      : { ok: true, token_delivery: "mobile_encrypted_pickup" };
+    return new Response(JSON.stringify({ status: "ok", data }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.getMobilePairingReview("pair-1");
+    await api.approveMobilePairing("pair-1", {
+      claim_hash: "sha256:abc",
+      scopes: ["chat.read"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen, [
+    {
+      input: `/api/contracts/defaultspack/${encodeURIComponent("GET /api/mobile/v1/pairings/pair-1/review")}`,
+      method: "GET",
+      body: undefined,
+    },
+    {
+      input: `/api/contracts/defaultspack/${encodeURIComponent("POST /api/mobile/v1/pairings/pair-1/approve")}`,
+      method: "POST",
+      body: { claim_hash: "sha256:abc", scopes: ["chat.read"] },
+    },
+  ]);
 });
 
 test("coding workspace and compact helpers serialize request bodies", async () => {
