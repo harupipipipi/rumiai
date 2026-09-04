@@ -205,7 +205,7 @@ test("ambient requests never forward browser approval credentials", () => {
 test("ambient action failures expand details so auth errors are visible", () => {
   const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 
-  assert.match(panelSource, /catch \(error\) \{\s*setExpanded\(true\);\s*setMessage\(error instanceof Error \? error\.message : "操作を完了できませんでした。"\)/);
+  assert.match(panelSource, /catch \(error\) \{\s*setExpanded\(true\);\s*setErrorMessage\(error instanceof Error \? error\.message : "操作を完了できませんでした。"\)/);
 });
 
 test("real OK-mark recording routes audio through transcription before dispatch", () => {
@@ -279,7 +279,7 @@ test("ambient browser-owned monitor keeps camera lifecycle local to the active w
   assert.match(panelSource, /function replaceCameraStream\(nextStream: MediaStream \| null\)/);
   assert.match(panelSource, /track\.addEventListener\("ended", handleEnded, \{ once: true \}\)/);
   assert.match(panelSource, /track\.addEventListener\("mute", handleEnded, \{ once: true \}\)/);
-  assert.match(panelSource, /setMessage\("カメラの接続が切れました。/);
+  assert.match(panelSource, /setErrorMessage\("カメラの接続が切れました。/);
   assert.match(landmarkerSource, /onError\?: \(error: unknown\) => void/);
   assert.match(landmarkerSource, /catch \(error\) \{\s*stopLoop\(error\);/);
   assert.match(panelSource, /async function acquireCameraForMonitoring\(\)/);

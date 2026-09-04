@@ -585,9 +585,18 @@ function CreatorSettingsCard({
         />
       )}
       {testResult && (
-        <p className="mt-2 line-clamp-3 rounded border border-zinc-800 bg-black/20 px-2 py-1.5 text-[10px] text-zinc-400">
-          {testResult.message || testResult.summary || testResult.status || (testResult.ok ? "Creator test passed." : "Creator test returned.")}
-        </p>
+        testResult.ok === false ? (
+          <ErrorNotice
+            className="mt-2 px-2 py-1.5 text-[10px]"
+            copyLabel="Creator テストエラーをコピー"
+            errorIcon="creator-test"
+            message={testResult.message || testResult.summary || testResult.status || "Creator test failed."}
+          />
+        ) : (
+          <p className="mt-2 line-clamp-3 rounded border border-zinc-800 bg-black/20 px-2 py-1.5 text-[10px] text-zinc-400">
+            {testResult.message || testResult.summary || testResult.status || "Creator test passed."}
+          </p>
+        )
       )}
       <button
         type="button"

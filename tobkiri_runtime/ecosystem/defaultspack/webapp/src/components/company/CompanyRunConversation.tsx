@@ -55,6 +55,7 @@ export function CompanyRunConversation({
           return (
             isError ? (
               <ErrorNotice
+                announce={false}
                 key={`${message.role}:${index}`}
                 className="px-2 py-1.5 text-[10px] leading-relaxed"
                 copyLabel={`${label}をコピー`}

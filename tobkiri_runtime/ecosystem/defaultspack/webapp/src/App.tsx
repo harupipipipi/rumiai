@@ -137,7 +137,7 @@ import { promptResources } from "./features/prompts/resources/promptResources";
 import { manualRuntimeModeSelectionEnabled } from "./features/runtimeMode/runtimeMode";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ComposerSteerStatus, ContextUsageInfo, DroppedWidget, SettingsLoadState, SettingsSaveState } from "./renderers/types";
 import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
@@ -2587,7 +2587,7 @@ function ChatApp() {
   const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialActiveWorkspaceTabIdForPathname(window.location.pathname));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
-  const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
+  const [modelSteerStatus, setModelSteerStatus] = useState<ComposerSteerStatus | null>(null);
   const [modelSteerBusy, setModelSteerBusy] = useState(false);
   const [steerItems, setSteerItems] = useState<ConversationSteerItem[]>([]);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
@@ -4680,9 +4680,15 @@ function ChatApp() {
       const items = "items" in result && Array.isArray(result.items) ? result.items : [];
       setSteerItems(items);
       const queuedCount = items.filter((item) => item.status === "queued").length;
-      setModelSteerStatus(queuedCount ? `${queuedCount}件のステアが待機中` : null);
+      setModelSteerStatus(queuedCount ? {
+        kind: "success",
+        message: `${queuedCount}件のステアが待機中`,
+      } : null);
     } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer refresh failed");
+      setModelSteerStatus({
+        kind: "error",
+        message: steerError instanceof Error ? steerError.message : "Steer refresh failed",
+      });
     } finally {
       setModelSteerBusy(false);
     }
@@ -4707,10 +4713,16 @@ function ChatApp() {
         },
       });
       setInput("");
-      setModelSteerStatus(isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました");
+      setModelSteerStatus({
+        kind: "success",
+        message: isGenerating || isConversationPending ? "ステアを送りました" : "ステアを予約しました",
+      });
       await refreshSteerQueue();
     } catch (steerError) {
-      setModelSteerStatus(steerError instanceof Error ? steerError.message : "Steer queue failed");
+      setModelSteerStatus({
+        kind: "error",
+        message: steerError instanceof Error ? steerError.message : "Steer queue failed",
+      });
     } finally {
       setModelSteerBusy(false);
     }
@@ -6682,7 +6694,7 @@ function ChatApp() {
               for (const item of processed) byId.set(item.id, item);
               return Array.from(byId.values());
             });
-            setModelSteerStatus("ステアを反映しました");
+            setModelSteerStatus({ kind: "success", message: "ステアを反映しました" });
           }
         }
 

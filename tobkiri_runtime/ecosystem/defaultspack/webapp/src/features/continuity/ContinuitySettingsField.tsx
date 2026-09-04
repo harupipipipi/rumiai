@@ -494,10 +494,14 @@ export function ContinuitySettingsField({
                 <span className="text-zinc-200">{checkLabel(check.label ?? check.code)}</span>
               </div>
             ))}
-            {(probe?.errors ?? []).slice(0, 3).map((item, index) => (
-              <div key={`${String(item.code ?? "error")}-${index}`} className="rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-100">
-                <span>{checkLabel(item.message ?? item.code ?? "Needs attention")}</span>
-              </div>
+            {probe?.ok === false && (probe.errors ?? []).slice(0, 3).map((item, index) => (
+              <ErrorNotice
+                className="px-2.5 py-2 text-[11px]"
+                copyLabel="事前確認エラーをコピー"
+                errorIcon="continuity-probe"
+                key={`${String(item.code ?? "error")}-${index}`}
+                message={checkLabel(item.message ?? item.code ?? "Needs attention")}
+              />
             ))}
             {!probe && !plan && (
               <div className="rounded border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">

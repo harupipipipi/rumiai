@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type SetStateAction } from "react";
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronUp, ExternalLink, Hand, Loader2, Mic, Radio, RefreshCcw, Settings, Shield, Video, Volume2, VolumeX, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
@@ -139,7 +139,16 @@ export function AmbientTriggerPanel({
   const [manualRumiFallbackOpen, setManualRumiFallbackOpen] = useState(false);
   const [rumiApprovalOpen, setRumiApprovalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessageState] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<"status" | "error">("status");
+  const setMessage = useCallback((next: SetStateAction<string | null>) => {
+    setMessageTone("status");
+    setMessageState(next);
+  }, []);
+  const setErrorMessage = useCallback((next: string) => {
+    setMessageTone("error");
+    setMessageState(next);
+  }, []);
   const [miniConversationIdOverride, setMiniConversationIdOverride] = useState<string | null>(null);
   const [miniConversation, setMiniConversation] = useState<Conversation | null>(null);
   const [miniChatLoading, setMiniChatLoading] = useState(false);
@@ -434,7 +443,7 @@ export function AmbientTriggerPanel({
       pendingAmbientResponseRef.current = null;
       const errorMessage = ambientResultMessage(result, "AIに送信できませんでした。");
       setPinchDetectorStatus("error");
-      setMessage(errorMessage);
+      setErrorMessage(errorMessage);
       setMiniChatError(errorMessage);
       return;
     }
@@ -577,7 +586,7 @@ export function AmbientTriggerPanel({
         if (!cancelled) void refreshDevices();
       })
       .catch((error) => {
-        if (!cancelled) setMessage(error instanceof Error ? error.message : "指で録音の状態を確認できませんでした。");
+        if (!cancelled) setErrorMessage(error instanceof Error ? error.message : "指で録音の状態を確認できませんでした。");
       });
     return () => {
       cancelled = true;
@@ -661,7 +670,7 @@ export function AmbientTriggerPanel({
       replaceCameraStream(null);
       setTrackingFrame(null);
       setPinchDetectorStatus("unavailable");
-      setMessage("カメラの接続が切れました。接続を確認してから、合図待ちをもう一度開始してください。");
+      setErrorMessage("カメラの接続が切れました。接続を確認してから、合図待ちをもう一度開始してください。");
       void ambientTriggerClient.stopMonitor()
         .catch(() => undefined)
         .finally(() => refresh({ probeOs: true }).catch(() => undefined));
@@ -743,7 +752,7 @@ export function AmbientTriggerPanel({
     try {
       const recording = await recorder.stop();
       if (recording.size <= 0) {
-        setMessage(`${ambientOperationLabels.failed}: 録音が空でした。もう一度お試しください。`);
+        setErrorMessage(`${ambientOperationLabels.failed}: 録音が空でした。もう一度お試しください。`);
         setMiniChatError("録音が空でした。もう一度お試しください。");
         setPinchDetectorStatus("tracking");
         return;
@@ -806,7 +815,7 @@ export function AmbientTriggerPanel({
       });
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信できませんでした。録音は保存されていません。";
-      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setErrorMessage(`${ambientOperationLabels.failed}: ${errorText}`);
       setMiniChatError(errorText);
     }
   }, [activateMiniConversationFromSubmitResult, dispatchTemplateContext, miniConversation, miniConversationId, settleAmbientSubmission]);
@@ -875,7 +884,7 @@ export function AmbientTriggerPanel({
       setPinchRecording(false);
       setRecordingStartedAt(null);
       setPinchDetectorStatus("tracking");
-      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "録音を開始できませんでした。"}`);
+      setErrorMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "録音を開始できませんでした。"}`);
     }
   }, [allOsPermissionsGranted, allRumiPermissionsGranted, rumiApprovalPending, selectedMicId]);
 
@@ -957,7 +966,7 @@ export function AmbientTriggerPanel({
       })
       .catch((error) => {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : "カメラを切り替えられませんでした。");
+          setErrorMessage(error instanceof Error ? error.message : "カメラを切り替えられませんでした。");
           setPinchDetectorStatus(cameraStream ? "tracking" : "unavailable");
         }
       });
@@ -988,7 +997,7 @@ export function AmbientTriggerPanel({
         if (cancelled) return;
         const messageText = error instanceof Error ? error.message : "カメラ監視を再開できませんでした。";
         setPinchDetectorStatus("unavailable");
-        setMessage(messageText);
+        setErrorMessage(messageText);
         await ambientTriggerClient.stopMonitor().catch(() => undefined);
         await refresh({ probeOs: true }).catch(() => undefined);
       }
@@ -1068,7 +1077,7 @@ export function AmbientTriggerPanel({
       if (success) setMessage(success);
     } catch (error) {
       setExpanded(true);
-      setMessage(error instanceof Error ? error.message : "操作を完了できませんでした。");
+      setErrorMessage(error instanceof Error ? error.message : "操作を完了できませんでした。");
       await refresh({ probeOs: true }).catch(() => undefined);
     } finally {
       setBusy(false);
@@ -1191,12 +1200,12 @@ export function AmbientTriggerPanel({
         }
       }
       miniAuthorityContinuationErrorRequestRef.current = requestId;
-      setMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+      setErrorMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
       setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
     } catch (error) {
       console.warn("[ambient] authority approval continuation polling failed", error);
       miniAuthorityContinuationErrorRequestRef.current = requestId;
-      setMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
+      setErrorMessage(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
       setMiniChatError(MINI_AUTHORITY_CONTINUATION_PENDING_ERROR);
     } finally {
       miniAuthorityContinuationWaitRef.current.delete(requestId);
@@ -1288,7 +1297,7 @@ export function AmbientTriggerPanel({
       setMessage(String(result.reason ?? "声で起動する音声を登録しました。"));
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "声で起動する音声を登録できませんでした。");
+      setErrorMessage(error instanceof Error ? error.message : "声で起動する音声を登録できませんでした。");
     } finally {
       setBusy(false);
     }
@@ -1322,14 +1331,14 @@ export function AmbientTriggerPanel({
         onError: (error) => {
           audioStopRef.current = null;
           setMicListening(false);
-          setMessage(error instanceof Error ? error.message : "音声待機が停止しました。マイク接続を確認してください。");
+          setErrorMessage(error instanceof Error ? error.message : "音声待機が停止しました。マイク接続を確認してください。");
         },
       });
       audioStopRef.current = stop;
       setMicListening(true);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
+      setErrorMessage(error instanceof Error ? error.message : "マイクを開始できませんでした。");
     }
   }
 
@@ -1486,7 +1495,7 @@ export function AmbientTriggerPanel({
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信できませんでした。";
       setMiniChatError(errorText);
-      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setErrorMessage(`${ambientOperationLabels.failed}: ${errorText}`);
     } finally {
       setMiniSending(false);
     }
@@ -1522,7 +1531,7 @@ export function AmbientTriggerPanel({
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "新規チャットを作成できませんでした。";
       setMiniChatError(errorText);
-      setMessage(errorText);
+      setErrorMessage(errorText);
     } finally {
       setMiniChatCreating(false);
     }
@@ -1577,7 +1586,7 @@ export function AmbientTriggerPanel({
       await onApprovalGestureRef.current?.(decision);
       await refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "承認ジェスチャーを処理できませんでした。");
+      setErrorMessage(error instanceof Error ? error.message : "承認ジェスチャーを処理できませんでした。");
     } finally {
       approvalGestureBusyRef.current = false;
       setPinchDetectorStatus("tracking");
@@ -1605,7 +1614,7 @@ export function AmbientTriggerPanel({
       });
     } catch (error) {
       const errorText = error instanceof Error ? error.message : "送信を許可できませんでした。";
-      setMessage(`${ambientOperationLabels.failed}: ${errorText}`);
+      setErrorMessage(`${ambientOperationLabels.failed}: ${errorText}`);
       setMiniChatError(errorText);
       await refresh().catch(() => undefined);
     } finally {
@@ -1623,7 +1632,7 @@ export function AmbientTriggerPanel({
       setMessage(String(result.status ?? "") === "denied" ? "送信を破棄しました。" : String(result.reason ?? "送信を破棄しました。"));
       await refresh();
     } catch (error) {
-      setMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信待ちを破棄できませんでした。"}`);
+      setErrorMessage(`${ambientOperationLabels.failed}: ${error instanceof Error ? error.message : "送信待ちを破棄できませんでした。"}`);
       await refresh().catch(() => undefined);
     } finally {
       setBusy(false);
@@ -2177,9 +2186,17 @@ export function AmbientTriggerPanel({
             )}
 
             {visibleMessage && (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-400">
-                {visibleMessage}
-              </div>
+              messageTone === "error" ? (
+                <ErrorNotice
+                  className="px-2 py-1.5 text-[11px]"
+                  copyLabel="アンビエント操作エラーをコピー"
+                  message={visibleMessage}
+                />
+              ) : (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-400">
+                  {visibleMessage}
+                </div>
+              )
             )}
           </div>
         )}

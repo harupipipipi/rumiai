@@ -9,6 +9,7 @@ type CopyTextEnvironment = {
 };
 
 type ErrorCopyActionProps = {
+  announce?: boolean;
   className?: string;
   copyText: string;
   failureMessage?: string;
@@ -18,6 +19,7 @@ type ErrorCopyActionProps = {
 };
 
 export type ErrorNoticeProps = {
+  announce?: boolean;
   children?: ReactNode;
   className?: string;
   copyLabel?: string;
@@ -93,6 +95,7 @@ export async function copyTextWithFallback(
  * it never replaces the double-square Copy glyph with a success or error icon.
  */
 export function ErrorCopyAction({
+  announce = true,
   className,
   copyText,
   failureMessage = "コピーできませんでした。エラー本文を選択してコピーしてください。",
@@ -142,7 +145,12 @@ export function ErrorCopyAction({
       >
         <Copy aria-hidden="true" data-copy-icon="" size={14} />
       </button>
-      <span className="sr-only" id={feedbackId} role="status" aria-live="polite">
+      <span
+        role={announce ? "status" : undefined}
+        aria-live={announce ? "polite" : undefined}
+        className="sr-only"
+        id={feedbackId}
+      >
         {feedbackMessage}
       </span>
     </span>
@@ -153,6 +161,7 @@ export function ErrorCopyAction({
  * Semantic notice for errors and warnings with a separate, stable copy action.
  */
 export function ErrorNotice({
+  announce = true,
   children,
   className,
   copyLabel,
@@ -173,7 +182,7 @@ export function ErrorNotice({
 
   return (
     <div
-      aria-live={liveMode}
+      aria-live={announce ? liveMode : undefined}
       className={cn(
         "flex items-start gap-2 rounded-lg border p-3",
         severity === "warning"
@@ -182,7 +191,7 @@ export function ErrorNotice({
         className,
       )}
       data-error-notice={iconId}
-      role={noticeRole}
+      role={announce ? noticeRole : undefined}
     >
       <SeverityIcon
         aria-hidden="true"
@@ -201,6 +210,7 @@ export function ErrorNotice({
         {children}
       </div>
       <ErrorCopyAction
+        announce={announce}
         copyText={copyText ?? errorNoticeCopyText(title, message)}
         label={copyLabel}
       />

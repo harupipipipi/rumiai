@@ -559,6 +559,13 @@ test("retried tool attempts render discard history beside the clean running atte
   assert.match(html, /README\.md/);
   assert.match(html, /1件失敗/);
   assert.match(html, /作業中/);
+  assert.match(html, /data-error-notice="tool-activity-failed"/);
+  assert.match(html, /data-error-icon="tool-activity-failed"/);
+  assert.match(html, /aria-label="ツール実行エラーをコピー"/);
+  assert.match(html, /data-copy-action=""/);
+  assert.match(html, /role="group"/);
+  const staticErrorTag = html.match(/<div[^>]*data-error-notice="tool-activity-failed"[^>]*>/)?.[0] ?? "";
+  assert.doesNotMatch(staticErrorTag, /aria-live|role="alert"/);
 });
 
 test("tool previews match retry generations while legacy events still use call ids", () => {

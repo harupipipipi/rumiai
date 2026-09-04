@@ -2888,6 +2888,8 @@ export function ComposerRenderer({
   const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
     item.visible !== false && String(item.prompt ?? "").trim()
   ));
+  const steerError = steerStatus?.kind === "error" ? steerStatus.message : null;
+  const steerSuccessStatus = steerStatus?.kind === "success" ? steerStatus.message : null;
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
@@ -4544,7 +4546,7 @@ export function ComposerRenderer({
                 </div>
                 <div className="flex min-w-0 flex-shrink items-center justify-end gap-1.5">
                   {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
-                  {steerStatus && <span className="truncate">{steerStatus}</span>}
+                  {steerSuccessStatus && <span className="truncate">{steerSuccessStatus}</span>}
                 </div>
               </div>
               <div className="grid gap-1">
@@ -4562,6 +4564,16 @@ export function ComposerRenderer({
                 ))}
               </div>
             </div>
+          )}
+
+          {steerError && (
+            <ErrorNotice
+              className="mx-2 mt-1 rounded-xl px-2 py-1.5 text-[10px] leading-4"
+              copyLabel="ステアエラーをコピー"
+              errorIcon="conversation-steer"
+              message={steerError}
+              title="追加指示を送信できませんでした"
+            />
           )}
 
           {toolSelectionReview && (
@@ -4821,8 +4833,8 @@ export function ComposerRenderer({
                   {steerQueuedCount}件待機
                 </span>
               )}
-              {steerStatus && (
-                <span className="min-w-[8rem] flex-1 break-words text-zinc-500">{steerStatus}</span>
+              {steerSuccessStatus && (
+                <span className="min-w-[8rem] flex-1 break-words text-zinc-500">{steerSuccessStatus}</span>
               )}
             </div>
           )}

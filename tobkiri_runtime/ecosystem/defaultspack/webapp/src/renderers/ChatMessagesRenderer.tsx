@@ -1,11 +1,11 @@
-import { Box, Calculator, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, RefreshCw, Terminal, Wrench, X } from "lucide-react";
+import { Box, Calculator, ChevronRight, CircleAlert, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, RefreshCw, Terminal, Wrench, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ArtifactPreviewDialog, type ArtifactPreviewDialogItem } from "../components/ArtifactPreviewDialog";
-import { ErrorNotice, copyTextWithFallback } from "../components/ErrorNotice";
+import { ErrorCopyAction, ErrorNotice, copyTextWithFallback } from "../components/ErrorNotice";
 import { PromptUsageDisclosure } from "../components/prompts/PromptUsageDisclosure";
 import { cn } from "../lib/cn";
 import { elapsedDurationLabel, formatCompactDuration, timestampMs } from "../lib/duration";
@@ -1499,24 +1499,41 @@ function ToolActivityTimelineRow({
   const artifactPreviewId = isToolActivityItem(item) ? item.artifacts?.find((artifact) => artifact.url)?.path : undefined;
   const previewId = toolActivityPreviewId(item, previewableCallIds) ?? artifactPreviewId;
   const hasPreview = Boolean(previewId);
-  const statusLabel = item.status === "failed" || item.status === "blocked"
+  const hasError = item.status === "failed" || item.status === "blocked";
+  const itemLabel = item.title || item.detail || (isToolActivityItem(item) ? item.toolName : item.folderLabel);
+  const statusLabel = hasError
     ? "エラー"
     : item.status === "waiting_approval"
       ? "承認待ち"
       : "";
   const statusLine = [statusLabel, item.detail].filter(Boolean).join(" · ");
+  const errorCopyText = [
+    "ツール実行エラー",
+    itemLabel,
+    item.detail && item.detail !== itemLabel ? item.detail : "",
+    item.nextStep ? `次: ${item.nextStep}` : "",
+  ].filter(Boolean).join("\n");
+  const errorIconId = `tool-activity-${item.status}`;
   const Icon = toolActivityIcon(item.folder);
   const body = (
     <>
-      <span className={cn("mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[11px] leading-none", activityStatusTone(item.status))}>
-        {activityStatusMarker(item.status)}
-      </span>
+      {hasError ? (
+        <CircleAlert
+          aria-hidden="true"
+          className="mt-[3px] h-4 w-4 shrink-0 text-red-300"
+          data-error-icon={errorIconId}
+        />
+      ) : (
+        <span className={cn("mt-[3px] flex h-4 w-4 shrink-0 items-center justify-center font-mono text-[11px] leading-none", activityStatusTone(item.status))}>
+          {activityStatusMarker(item.status)}
+        </span>
+      )}
       <span className="mt-[5px] flex h-3 w-3 shrink-0 items-center justify-center text-zinc-500" title={item.folderLabel}>
         <Icon size={12} />
       </span>
       <span className="min-w-0 max-w-full flex-1 overflow-hidden">
         <span className="flex min-w-0 max-w-full items-baseline gap-2 text-[12px] leading-4 text-zinc-300">
-          <span className="min-w-0 flex-1 truncate">{item.title || item.detail || (isToolActivityItem(item) ? item.toolName : item.folderLabel)}</span>
+          <span className="min-w-0 flex-1 truncate">{itemLabel}</span>
           {item.durationLabel && <span className="shrink-0 font-mono text-[10px] text-zinc-600">{item.durationLabel}</span>}
         </span>
         {statusLine && (
@@ -1531,7 +1548,7 @@ function ToolActivityTimelineRow({
       {hasPreview && <ChevronRight size={12} className="mt-[5px] shrink-0 text-zinc-600" />}
     </>
   );
-  return hasPreview ? (
+  const row = hasPreview ? (
     <button
       type="button"
       className={cn("group/tool flex min-h-7 w-full min-w-0 max-w-full items-start gap-2 overflow-hidden rounded px-1.5 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-600 sm:min-h-8", activityRowTone(item.status))}
@@ -1544,6 +1561,23 @@ function ToolActivityTimelineRow({
   ) : (
     <div className={cn("flex min-h-7 w-full min-w-0 max-w-full items-start gap-2 overflow-hidden rounded px-1.5 py-1 sm:min-h-8", activityRowTone(item.status))}>
       {body}
+    </div>
+  );
+  if (!hasError) return row;
+  return (
+    <div
+      aria-label="ツール実行エラー"
+      className="flex min-w-0 items-start gap-1"
+      data-error-notice={errorIconId}
+      role="group"
+    >
+      {row}
+      <ErrorCopyAction
+        announce={false}
+        className="mt-0.5 h-6 w-6"
+        copyText={errorCopyText}
+        label="ツール実行エラーをコピー"
+      />
     </div>
   );
 }
