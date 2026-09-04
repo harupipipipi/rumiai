@@ -55,17 +55,19 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
               role="alert"
               className={`flex items-center gap-3 border-b px-6 py-3 text-sm ${
                 runtimeBanner.tone === 'danger'
-                  ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300'
-                  : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-300'
+                  ? 'border-destructive/35 bg-destructive/8 text-destructive'
+                  : 'border-warning/35 bg-warning/8 text-warning'
               }`}
             >
-              {runtimeIconKind === 'error' ? (
-                <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" data-runtime-banner-icon="error" />
-              ) : runtimeIconKind === 'warning' ? (
-                <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0" data-runtime-banner-icon="warning" />
-              ) : (
-                <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500" data-runtime-banner-icon="progress" />
-              )}
+              <span aria-hidden="true" className="flex h-4 w-4 shrink-0 items-center justify-center">
+                {runtimeIconKind === 'error' ? (
+                  <AlertCircle className="h-4 w-4" data-runtime-banner-icon="error" />
+                ) : runtimeIconKind === 'warning' ? (
+                  <AlertTriangle className="h-4 w-4" data-runtime-banner-icon="warning" />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-current" data-runtime-banner-icon="progress" />
+                )}
+              </span>
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{runtimeBanner.title}</p>
                 <p className="text-xs opacity-80">{runtimeBanner.detail}</p>

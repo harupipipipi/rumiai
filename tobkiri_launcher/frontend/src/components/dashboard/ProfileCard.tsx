@@ -1,13 +1,12 @@
 import type {FormEvent} from 'react';
 import {
   AlertCircle,
-  Box,
+  CheckCircle2,
   Copy,
   Edit2,
   MoreHorizontal,
   Package,
   Rocket,
-  Star,
   Trash2,
 } from 'lucide-react';
 import {Link} from 'react-router';
@@ -45,6 +44,14 @@ export interface ProfileCardProps {
   onEditingNameChange: (name: string) => void;
   onLaunch: (profile: NamedProfileRecord) => void;
   onSubmitEdit: (event: FormEvent<HTMLFormElement>, profile: NamedProfileRecord) => void;
+}
+
+/** Two-character identity mark taken from the Profile's own display name. */
+export function profileMonogram(displayName: string): string {
+  const words = displayName.trim().split(/[\s._-]+/u).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return [...words[0]].slice(0, 2).join('');
+  return [...words[0]][0] + [...words[1]][0];
 }
 
 function actionButtonClass(): string {
@@ -98,7 +105,7 @@ export function ProfileCard({
     <Card
       aria-labelledby={`profile-${profile.profile_id}-title`}
       className={cn(
-        'group relative flex min-h-[245px] flex-col overflow-hidden transition-all duration-[var(--transition-base)] hover:shadow-[var(--shadow-md)]',
+        'group relative flex min-h-[245px] flex-col overflow-hidden transition-shadow duration-[var(--transition-base)] hover:shadow-[var(--shadow-md)]',
         isActive && 'ring-1 ring-accent/30',
         isBrowsing && 'border-accent/50',
       )}
@@ -107,19 +114,18 @@ export function ProfileCard({
     >
       <div className="flex flex-1 flex-col p-5">
         <div className="relative flex min-h-[112px] flex-col items-center text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
-            <Box aria-hidden="true" className="h-6 w-6" />
+          <div
+            aria-hidden="true"
+            className="flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-bg-hover text-base font-semibold uppercase text-text-main"
+          >
+            {profileMonogram(displayName)}
           </div>
           <div className="mt-3 flex max-w-full items-center justify-center gap-2">
             <h3 className="truncate text-base font-semibold text-text-main" id={`profile-${profile.profile_id}-title`}>
               {displayName}
             </h3>
             {isActive && (
-              <span
-                aria-label="Active execution Profile"
-                className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]"
-                role="img"
-              />
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-accent" />
             )}
           </div>
           <p className="mt-1 flex max-w-full items-center justify-center gap-1.5 truncate text-xs text-text-muted">
@@ -158,7 +164,7 @@ export function ProfileCard({
                       role="menuitem"
                       type="button"
                     >
-                      <Star aria-hidden="true" className="h-3.5 w-3.5 fill-accent text-accent" /> Active
+                      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-accent" /> Active
                     </button>
                   ) : (
                     <Link
@@ -176,7 +182,7 @@ export function ProfileCard({
                       title={profileCeremonyAvailable ? 'Open v4 activation ceremony' : 'Profile ceremony is unavailable'}
                       to={activationHref}
                     >
-                      <Star aria-hidden="true" className="h-3.5 w-3.5" /> Set Active
+                      <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5" /> Set Active
                     </Link>
                   )}
                   <button
@@ -191,7 +197,7 @@ export function ProfileCard({
                   <div aria-hidden="true" className="my-1 border-t border-border" />
                   <button
                     aria-label={`Delete ${displayName}`}
-                    className={cn(actionButtonClass(), 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/20')}
+                    className={cn(actionButtonClass(), 'text-destructive hover:bg-destructive/10')}
                     disabled={isActive || mutationDisabled}
                     onClick={() => onDelete(profile)}
                     role="menuitem"
@@ -207,14 +213,14 @@ export function ProfileCard({
         </div>
 
         <div className="mt-4 flex min-h-[54px] flex-wrap content-start justify-center gap-1.5">
-          {isActive && <Badge variant="success" className="text-[10px]">Active execution</Badge>}
-          {isBrowsing && <Badge variant="default" className="text-[10px]">Selected browsing</Badge>}
+          {isActive && <Badge variant="success">Active execution</Badge>}
+          {isBrowsing && <Badge variant="default">Selected browsing</Badge>}
           {profileView.status === 'ready' ? (
-            <Badge variant="success" className="text-[10px]">Ready</Badge>
+            <Badge variant="success">Ready</Badge>
           ) : (
             <div
               aria-label={profileErrorDiagnostic ?? undefined}
-              className="flex w-full items-start gap-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700 dark:bg-red-950/20 dark:text-red-300"
+              className="flex w-full items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/8 p-2.5 text-xs text-destructive"
               role="alert"
             >
               <AlertCircle aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -272,17 +278,6 @@ export function ProfileCard({
             </Link>
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              aria-label={`Edit ${displayName}`}
-              disabled={mutationDisabled}
-              onClick={() => onEdit(profile)}
-              size="sm"
-              title={mutationsAvailable ? `Edit ${displayName}` : 'Profile catalog verification is unavailable'}
-              type="button"
-              variant="ghost"
-            >
-              <Edit2 aria-hidden="true" className="h-3.5 w-3.5" /> Edit
-            </Button>
             <Button
               aria-label={`Launch ${displayName}`}
               disabled={launchDisabled}

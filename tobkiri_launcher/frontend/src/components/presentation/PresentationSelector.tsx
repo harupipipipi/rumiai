@@ -57,7 +57,7 @@ function AuthoritySummary({
       <div className="flex items-start gap-2">
         <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">{label} authority</p>
+          <p className="text-xs font-semibold text-text-muted">{label} authority</p>
           <p className="mt-1 text-sm font-medium text-text-main">{authorityLabel(authority.authority_mode)}</p>
           <p className="mt-1 text-xs leading-5 text-text-muted">{authority.blast_radius}</p>
         </div>
@@ -94,7 +94,7 @@ function IdentitySummary({
   return (
     <Card className="p-5" data-testid="presentation-profile-identity">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">
+        <p className="text-xs font-semibold text-text-muted">
           Verified profile identity
         </p>
         <p className="mt-2 text-sm leading-6 text-text-muted">
@@ -172,7 +172,7 @@ export function PresentationSelector({
   return (
     <div className="space-y-5" data-testid="presentation-selector">
       <div>
-        <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">Presentation</p>
+        <p className="text-xs font-medium text-text-muted">Presentation</p>
         <h2 className="mt-2 text-xl font-semibold tracking-[-.02em] text-text-main">
           Choose a Base Pack, then its Shell
         </h2>
@@ -292,7 +292,7 @@ export function PresentationSelector({
       <Card className="p-5" data-testid="presentation-materialization">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[.12em] text-text-muted">Selected presentation</p>
+            <p className="text-xs font-semibold text-text-muted">Selected presentation</p>
             <p className="mt-2 text-sm font-semibold text-text-main">
               {materializationLabel(state.materialization)}
             </p>

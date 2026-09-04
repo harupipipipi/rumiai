@@ -3,6 +3,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Link, useSearchParams} from 'react-router';
 import {
   AlertCircle,
+  ArrowRight,
   Monitor,
   Package,
   Plus,
@@ -352,7 +353,7 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 overflow-y-auto px-6 py-8 scrollbar-hidden page-enter lg:px-10">
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 overflow-y-auto px-6 py-8 page-enter lg:px-10">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-main">Home</h1>
@@ -387,7 +388,7 @@ export function Dashboard() {
         </section>
 
         {dashboardError && (
-          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="alert">
+          <div className="flex items-center gap-3 rounded-lg border border-warning/35 bg-warning/8 px-4 py-3 text-sm text-warning" role="alert">
             <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
             <span className="flex-1">{dashboardError}</span>
             <CopyErrorButton text={dashboardError} label="Copy dashboard error" />
@@ -398,7 +399,7 @@ export function Dashboard() {
         )}
 
         {runtimeStatus === 'error' && (
-          <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
+          <div className="flex items-start gap-3 rounded-lg border border-destructive/35 bg-destructive/8 px-4 py-3 text-sm text-destructive" role="alert">
             <AlertCircle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-medium">Runtime could not finish starting.</span>
@@ -412,17 +413,17 @@ export function Dashboard() {
         )}
 
         {!runtimeReady && runtimeStatus === 'panel_ready' && (
-          <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" role="status">
+          <div className="flex items-center gap-3 rounded-lg border border-warning/35 bg-warning/8 px-4 py-3 text-sm text-warning" role="status">
             <TobkiriLoadingMark />
             <span className="flex-1">Runtime is still preparing. Profiles and Add remain available; launch and activation wait for readiness.</span>
           </div>
         )}
 
         <div aria-label="Profile execution status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
-          <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">Execution</span>
+          <span className="text-xs font-medium text-text-main">Execution</span>
           {activeProfile ? (
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-accent" />
               <span className="truncate text-sm font-medium text-text-main">{namedProfileDisplayName(activeProfile)}</span>
               <span className="font-mono text-[11px] text-text-muted">{activeProfile.profile_id}</span>
             </div>
@@ -540,7 +541,7 @@ export function Dashboard() {
           )}
 
           {profileError && (
-            <div aria-live="assertive" className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-200" role="alert">
+            <div aria-live="assertive" className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/35 bg-destructive/8 px-3 py-2 text-sm text-destructive" role="alert">
               <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
               <span className="flex-1">{profileError}</span>
               <CopyErrorButton text={profileError} label="Copy Profile error" />
@@ -590,12 +591,17 @@ export function Dashboard() {
                 {visibleProfiles.map((entry) => {
                   const active = isActiveExecutionProfile(registry, entry);
                   const profileView = buildNamedProfileView(entry);
-                  const busy = profileBusy === 'create'
-                    || profileBusy?.endsWith(`:${entry.profile_id}`) === true;
+                  // Only the card whose own action is in flight reports busy.
+                  // Any pending mutation still locks the catalog for every card
+                  // through mutationsAvailable, so a create cannot race a rename.
+                  const cardBusyKey = profileBusy?.endsWith(`:${entry.profile_id}`) === true
+                    ? profileBusy
+                    : null;
+                  const busy = cardBusyKey !== null;
                   return (
                     <ProfileCard
                       activationHref={profileHref(entry.profile_id, 'profile-ceremony')}
-                      actionType={profileBusy?.startsWith('launch:') ? 'launch' : profileBusy?.split(':')[0]}
+                      actionType={cardBusyKey?.split(':')[0] ?? null}
                       browseHref={profileHref(entry.profile_id)}
                       closureHref={profileHref(entry.profile_id, 'profile-closure')}
                       desktopShellAvailable={desktopShellAvailable}
@@ -605,7 +611,7 @@ export function Dashboard() {
                       isBrowsing={browsingProfileId === entry.profile_id}
                       isBusy={busy}
                       key={entry.profile_id}
-                      mutationsAvailable={profileCatalogVerified}
+                      mutationsAvailable={profileCatalogVerified && profileBusy === null}
                       onCancelEdit={() => {
                         setEditingProfileId(null);
                         setEditingProfileName('');
@@ -634,31 +640,35 @@ export function Dashboard() {
 
         <section aria-label="Workspace summary" className="grid gap-4 sm:grid-cols-3">
           <Link
-            className="rounded-xl border border-border bg-bg-card p-4 transition hover:border-accent/25 hover:bg-bg-hover/40"
+            className="group rounded-xl border border-border bg-bg-card p-4 transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
             to={panelRoutes.packs}
           >
             <div className="flex items-center gap-2">
-              <Package aria-hidden="true" className="h-4 w-4 text-accent" />
-              <h2 className="text-sm font-semibold text-text-main">Active Packs</h2>
+              <Package aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+              <h3 className="text-sm font-semibold text-text-main group-hover:underline">Active Packs</h3>
+              <ArrowRight aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-text-muted" />
             </div>
             <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{dashboard.activePacks}</div>
             <p className="mt-1 text-xs text-text-muted">Enabled in the current v4 Profile</p>
           </Link>
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <div className="flex items-center gap-2">
-              <Workflow aria-hidden="true" className="h-4 w-4 text-accent" />
-              <h2 className="text-sm font-semibold text-text-main">Flows</h2>
+              <Workflow aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+              <h3 className="text-sm font-semibold text-text-main">Flows</h3>
             </div>
             <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{dashboard.registeredFlows}</div>
             <p className="mt-1 text-xs text-text-muted">Registered flow definitions</p>
           </div>
           <div className="rounded-xl border border-border bg-bg-card p-4">
             <div className="flex items-center gap-2">
-              <Monitor aria-hidden="true" className="h-4 w-4 text-accent" />
-              <h2 className="text-sm font-semibold text-text-main">Kernel</h2>
+              <Monitor aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+              <h3 className="text-sm font-semibold text-text-main">Kernel</h3>
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <span className={dashboard.kernelStatus === 'running' ? 'h-2.5 w-2.5 rounded-full bg-emerald-500' : 'h-2.5 w-2.5 rounded-full bg-amber-500'} />
+              <span
+                aria-hidden="true"
+                className={dashboard.kernelStatus === 'running' ? 'h-2.5 w-2.5 shrink-0 rounded-full bg-success' : 'h-2.5 w-2.5 shrink-0 rounded-full bg-warning'}
+              />
               <span className="text-lg font-semibold tracking-tight text-text-main">
                 {dashboard.kernelStatus === 'running' ? 'Running' : 'Stopped'}
               </span>

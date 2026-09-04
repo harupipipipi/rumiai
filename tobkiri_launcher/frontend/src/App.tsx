@@ -265,7 +265,7 @@ function VerificationMessage({
       data-testid={testId}
       role={copy.role}
     >
-      <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">
+      <p className="text-xs font-medium text-text-muted">
         Runtime access
       </p>
       {compact ? (
@@ -371,7 +371,7 @@ export function DevtoolsRouteGate({children, enabled}: DevtoolsRouteGateProps) {
       aria-labelledby="devtools-route-gate-title"
       data-testid="devtools-route-gate"
     >
-      <p className="text-xs font-medium uppercase tracking-[.12em] text-text-muted">
+      <p className="text-xs font-medium text-text-muted">
         Launcher preference
       </p>
       <h2
@@ -535,7 +535,7 @@ function DeferredRouteTree({
           aria-label="Opening page"
           className="pointer-events-none fixed inset-x-0 top-0 z-[100] h-0.5 overflow-hidden bg-accent/15"
         >
-          <div className="h-full w-1/3 animate-pulse bg-accent" />
+          <div className="h-full w-full origin-left animate-pulse bg-accent" />
         </div>
       )}
     </>

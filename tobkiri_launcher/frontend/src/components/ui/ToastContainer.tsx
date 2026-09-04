@@ -19,12 +19,14 @@ export function ToastContainer() {
         <div
           key={toast.id}
           className={cn(
-            "flex items-center gap-2 rounded-md px-4 py-3 text-sm font-medium text-white shadow-lg transition-all animate-in slide-in-from-bottom-5",
-            toast.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+            "flex items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium shadow-[var(--shadow-lg)]",
+            toast.type === 'success'
+              ? 'border-success/35 bg-bg-card text-success'
+              : 'border-destructive/35 bg-bg-card text-destructive'
           )}
           role="alert"
         >
-          {toast.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+          {toast.type === 'success' ? <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" /> : <XCircle aria-hidden="true" className="h-4 w-4 shrink-0" />}
           <span className="min-w-0 flex-1 break-words">{toast.message}</span>
           {toast.type === 'error' ? (
             <CopyErrorButton

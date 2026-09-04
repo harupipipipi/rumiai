@@ -29,7 +29,7 @@ export function DefaultsReview({
 }: Props) {
   const canActivate = setup?.state === 'review_required' && !activationCommitted;
   return <section className="rounded-[18px] border border-border bg-bg-card p-7 shadow-lg" aria-labelledby="defaults-review-title">
-    <p className="text-xs font-medium uppercase tracking-wider text-text-muted">Defaults v4 bootstrap</p>
+    <p className="text-xs font-medium text-text-muted">Defaults v4 bootstrap</p>
     <h1 id="defaults-review-title" className="mt-3 text-2xl font-semibold text-text-main">
       {reconfirmationRequired ? 'Profile reconfirmation required' : 'Activate Defaults Profile'}
     </h1>

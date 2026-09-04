@@ -12,6 +12,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
+        aria-busy={loading || undefined}
         disabled={disabled || loading}
         className={cn(
           "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-[var(--transition-fast)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)] disabled:pointer-events-none disabled:opacity-50",
@@ -31,6 +32,12 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         {...props}
       >
+        {loading ? (
+          <span
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
+          />
+        ) : null}
         {children}
       </button>
     )

@@ -8,7 +8,6 @@ import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import { preloadPanelRoute } from '@/src/lib/routeModules';
 import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/Popover';
 import {
-  BrainCircuit,
   Folder,
   FolderOpen,
   GitBranch,
@@ -16,6 +15,7 @@ import {
   Network,
   PanelLeft,
   Route,
+  TextCursorInput,
   Settings,
   Share2,
   UserRound,
@@ -41,7 +41,7 @@ const routeIcons: Record<PanelRouteKey, LucideIcon> = {
   profileFiles: FolderOpen,
   flow: Workflow,
   graph: GitBranch,
-  aiInput: BrainCircuit,
+  aiInput: TextCursorInput,
   apiMap: Route,
   nodeManager: Network,
 };
@@ -86,9 +86,9 @@ export function Sidebar() {
       >
         <span
           className={cn(
-            "block min-w-0 overflow-hidden whitespace-nowrap text-base font-semibold tracking-tight text-text-main transition-[max-width,opacity,transform]",
+            "block min-w-0 truncate text-base font-semibold tracking-tight text-text-main transition-[max-width,opacity,transform]",
             sidebarAnimation,
-            isSidebarOpen ? "max-w-32 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+            isSidebarOpen ? "max-w-full translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
           )}
           aria-hidden={!isSidebarOpen}
         >
@@ -142,7 +142,7 @@ export function Sidebar() {
               <div
                 id={`sidebar-group-${group.id}`}
                 className={cn(
-                  "overflow-hidden px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70 transition-[max-height,padding,opacity,transform,border-color]",
+                  "overflow-hidden px-3 text-xs font-medium text-text-muted transition-[max-height,padding,opacity,transform,border-color]",
                   sidebarAnimation,
                   groupIndex > 0 && "border-t border-border/60",
                   isSidebarOpen
@@ -191,9 +191,9 @@ export function Sidebar() {
                         <link.icon className={cn("w-[18px] h-[18px] shrink-0", isActive ? "text-accent" : "text-text-muted group-hover:text-text-main")} />
                         <span
                           className={cn(
-                            "block min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform]",
+                            "block min-w-0 truncate transition-[max-width,opacity,transform]",
                             sidebarAnimation,
-                            isSidebarOpen ? "max-w-40 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+                            isSidebarOpen ? "max-w-full translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
                           )}
                           aria-hidden={!isSidebarOpen}
                         >
@@ -234,7 +234,7 @@ export function Sidebar() {
                 className={cn(
                   "min-w-0 flex-1 overflow-hidden transition-[max-width,opacity,transform]",
                   sidebarAnimation,
-                  isSidebarOpen ? "max-w-32 translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
+                  isSidebarOpen ? "max-w-full translate-x-0 opacity-100" : "max-w-0 -translate-x-2 opacity-0",
                 )}
                 aria-hidden={!isSidebarOpen}
               >
