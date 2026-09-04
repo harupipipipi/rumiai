@@ -9,7 +9,6 @@ type CopyTextEnvironment = {
 };
 
 type ErrorCopyActionProps = {
-  announce?: boolean;
   className?: string;
   copyText: string;
   failureMessage?: string;
@@ -95,7 +94,6 @@ export async function copyTextWithFallback(
  * it never replaces the double-square Copy glyph with a success or error icon.
  */
 export function ErrorCopyAction({
-  announce = true,
   className,
   copyText,
   failureMessage = "コピーできませんでした。エラー本文を選択してコピーしてください。",
@@ -146,8 +144,8 @@ export function ErrorCopyAction({
         <Copy aria-hidden="true" data-copy-icon="" size={14} />
       </button>
       <span
-        role={announce ? "status" : undefined}
-        aria-live={announce ? "polite" : undefined}
+        role="status"
+        aria-live="polite"
         className="sr-only"
         id={feedbackId}
       >
@@ -210,7 +208,6 @@ export function ErrorNotice({
         {children}
       </div>
       <ErrorCopyAction
-        announce={announce}
         copyText={copyText ?? errorNoticeCopyText(title, message)}
         label={copyLabel}
       />

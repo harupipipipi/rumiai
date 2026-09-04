@@ -208,6 +208,17 @@ test("ambient action failures expand details so auth errors are visible", () => 
   assert.match(panelSource, /catch \(error\) \{\s*setExpanded\(true\);\s*setErrorMessage\(error instanceof Error \? error\.message : "操作を完了できませんでした。"\)/);
 });
 
+test("ambient guidance and failures retain warning and error severity", () => {
+  const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
+
+  assert.match(panelSource, /setWarningMessage\("Tobkiriの許可と端末のマイク・カメラ許可がそろってから録音できます。"\)/);
+  assert.match(panelSource, /setWarningMessage\("この承認では拒否ジェスチャーは使えません。"\)/);
+  assert.match(panelSource, /setErrorMessage\("Tobkiri Launcherの承認ウィンドウを開けませんでした。/);
+  assert.match(panelSource, /setErrorMessage\("カメラが見つかりません。接続してからデバイス更新を押してください。"\)/);
+  assert.match(panelSource, /messageTone === "warning"[\s\S]*severity="warning"/);
+  assert.match(panelSource, /copyLabel="アンビエント操作の警告をコピー"/);
+});
+
 test("real OK-mark recording routes audio through transcription before dispatch", () => {
   const panelSource = readSource("ambient", "AmbientTriggerPanel.tsx");
 

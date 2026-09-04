@@ -1573,7 +1573,6 @@ function ToolActivityTimelineRow({
     >
       {row}
       <ErrorCopyAction
-        announce={false}
         className="mt-0.5 h-6 w-6"
         copyText={errorCopyText}
         label="ツール実行エラーをコピー"

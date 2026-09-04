@@ -140,13 +140,17 @@ export function AmbientTriggerPanel({
   const [rumiApprovalOpen, setRumiApprovalOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessageState] = useState<string | null>(null);
-  const [messageTone, setMessageTone] = useState<"status" | "error">("status");
+  const [messageTone, setMessageTone] = useState<"status" | "warning" | "error">("status");
   const setMessage = useCallback((next: SetStateAction<string | null>) => {
     setMessageTone("status");
     setMessageState(next);
   }, []);
   const setErrorMessage = useCallback((next: string) => {
     setMessageTone("error");
+    setMessageState(next);
+  }, []);
+  const setWarningMessage = useCallback((next: string) => {
+    setMessageTone("warning");
     setMessageState(next);
   }, []);
   const [miniConversationIdOverride, setMiniConversationIdOverride] = useState<string | null>(null);
@@ -844,7 +848,7 @@ export function AmbientTriggerPanel({
   const beginPinchRecording = useCallback(async (state: PinchState) => {
     if (pinchRecorderRef.current) return;
     if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
-      setMessage("Tobkiriの許可と端末のマイク・カメラ許可がそろってから録音できます。");
+      setWarningMessage("Tobkiriの許可と端末のマイク・カメラ許可がそろってから録音できます。");
       return;
     }
     lastPinchStateRef.current = state;
@@ -1105,7 +1109,7 @@ export function AmbientTriggerPanel({
     }
     setRumiApprovalOpen(false);
     setManualRumiFallbackOpen(true);
-    setMessage("Tobkiri Launcherの承認ウィンドウを開けませんでした。Viewerから開き直して許可してください。");
+    setErrorMessage("Tobkiri Launcherの承認ウィンドウを開けませんでした。Viewerから開き直して許可してください。");
   }
 
   async function openMiniAuthorityApproval(approval = miniAuthorityApproval, options?: { auto?: boolean }) {
@@ -1254,7 +1258,7 @@ export function AmbientTriggerPanel({
   async function startMonitoring() {
     if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
       setExpanded(true);
-      setMessage("Tobkiriの許可と端末のマイク・カメラ許可がそろってから合図待ちを開始できます。");
+      setWarningMessage("Tobkiriの許可と端末のマイク・カメラ許可がそろってから合図待ちを開始できます。");
       return;
     }
     await runAction(async () => {
@@ -1280,7 +1284,7 @@ export function AmbientTriggerPanel({
 
   async function enrollWakeVoice() {
     if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
-      setMessage("Tobkiriの許可と端末のマイク許可がそろってから声で起動を登録できます。");
+      setWarningMessage("Tobkiriの許可と端末のマイク許可がそろってから声で起動を登録できます。");
       return;
     }
     setBusy(true);
@@ -1312,7 +1316,7 @@ export function AmbientTriggerPanel({
     }
     try {
       if (!allRumiPermissionsGranted || !allOsPermissionsGranted || rumiApprovalPending) {
-        setMessage("Tobkiriの許可と端末のマイク許可がそろってから音声待機を開始できます。");
+        setWarningMessage("Tobkiriの許可と端末のマイク許可がそろってから音声待機を開始できます。");
         return;
       }
       const stop = await startWakeListening(async (embedding) => {
@@ -1559,7 +1563,7 @@ export function AmbientTriggerPanel({
     if (!target || approvalGestureBusyRef.current) return;
     if (decision === "approve" && target.canApprove === false) return;
     if (decision === "reject" && target.canReject === false) {
-      setMessage("この承認では拒否ジェスチャーは使えません。");
+      setWarningMessage("この承認では拒否ジェスチャーは使えません。");
       return;
     }
     approvalGestureBusyRef.current = true;
@@ -1643,7 +1647,7 @@ export function AmbientTriggerPanel({
     if (cameraUnavailable && (uiState === "readyOff" || uiState === "paused" || uiState === "blocked")) {
       setExpanded(true);
       setSettingsOpen(true);
-      setMessage("カメラが見つかりません。接続してからデバイス更新を押してください。");
+      setErrorMessage("カメラが見つかりません。接続してからデバイス更新を押してください。");
       return;
     }
     switch (uiState) {
@@ -2191,6 +2195,13 @@ export function AmbientTriggerPanel({
                   className="px-2 py-1.5 text-[11px]"
                   copyLabel="アンビエント操作エラーをコピー"
                   message={visibleMessage}
+                />
+              ) : messageTone === "warning" ? (
+                <ErrorNotice
+                  className="px-2 py-1.5 text-[11px]"
+                  copyLabel="アンビエント操作の警告をコピー"
+                  message={visibleMessage}
+                  severity="warning"
                 />
               ) : (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1.5 text-[11px] text-zinc-400">

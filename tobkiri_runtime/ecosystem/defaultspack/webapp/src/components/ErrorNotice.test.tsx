@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { ErrorNotice, copyTextWithFallback, errorNoticeCopyText } from "./ErrorNotice";
+import { ErrorCopyAction, ErrorNotice, copyTextWithFallback, errorNoticeCopyText } from "./ErrorNotice";
 
 test("error notices separate their severity icon from one stable copy glyph", () => {
   const markup = renderToStaticMarkup(
@@ -81,6 +81,27 @@ test("severity controls the notice live mode and default copy text includes its 
     "接続が一時的に切れました\n\n再試行できます。",
   );
   assert.equal(errorNoticeCopyText(undefined, "再試行できます。"), "再試行できます。");
+});
+
+test("non-announcing history keeps copy-result feedback available after a click", () => {
+  const markup = renderToStaticMarkup(
+    <ErrorNotice
+      announce={false}
+      message="過去の実行は失敗しました。"
+      title="履歴エラー"
+    />,
+  );
+
+  assert.doesNotMatch(markup, /role="alert"|aria-live="assertive"/);
+  assert.match(markup, /role="status" aria-live="polite"/);
+});
+
+test("copy feedback remains polite for static-history controls", () => {
+  const markup = renderToStaticMarkup(
+    <ErrorCopyAction copyText="過去のエラー" />,
+  );
+
+  assert.match(markup, /role="status" aria-live="polite"/);
 });
 
 test("copy feedback keeps the Copy glyph instead of swapping to a status icon", async () => {

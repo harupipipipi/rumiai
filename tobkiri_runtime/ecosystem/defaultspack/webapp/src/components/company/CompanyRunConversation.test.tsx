@@ -17,5 +17,6 @@ test("historical company errors are copyable without announcing every item on lo
   assert.match(markup, /data-error-notice="error"/);
   assert.match(markup, /aria-label="Agent errorをコピー"/);
   assert.match(markup, /data-copy-icon=""/);
-  assert.doesNotMatch(markup, /role="alert"|role="status"|aria-live=/);
+  assert.doesNotMatch(markup, /role="alert"|aria-live="assertive"/);
+  assert.match(markup, /role="status" aria-live="polite"/);
 });
