@@ -817,6 +817,20 @@ def _write_frozen_activation(
     (state / "active.json").write_bytes(canonical_json(pointer) + b"\n")
 
 
+def _legacy_packaged_catalog(tmp_path: Path) -> BundledCatalog:
+    """Model the v1 one-binding-per-target operation inventory before resolution."""
+    from dataclasses import replace
+
+    catalog = _packaged_catalog(tmp_path)
+    source = copy.deepcopy(catalog.profiles["defaults"])
+    edges = {}
+    for edge in source["requested_edges"]:
+        identity = (edge["target_provider_id"], edge["contract_id"], edge["operation_id"])
+        edges.setdefault(identity, edge)
+    source["requested_edges"] = list(edges.values())
+    return replace(catalog, profiles={**catalog.profiles, "defaults": source})
+
+
 def _compatible_legacy_fixture(resolved: Any) -> dict[str, Any]:
     profile = copy.deepcopy(resolved.profile)
     plan = {
@@ -940,7 +954,7 @@ def _remove_legacy_authority_edge(fixture: dict[str, Any]) -> None:
         binding
         for binding in plan["bindings"]
         if not (
-            binding["function_principal"]["function_id"] == removed["caller_function_id"]
+            binding["function_principal"]["function_id"] == removed["target_provider_id"]
             and binding["contract_id"] == removed["contract_id"]
             and binding["operation_id"] == removed["operation_id"]
         )
@@ -949,7 +963,7 @@ def _remove_legacy_authority_edge(fixture: dict[str, Any]) -> None:
 
 
 def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     resolved = _resolve(catalog)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -977,7 +991,7 @@ def test_exact_legacy_activation_migrates_once_without_drift(tmp_path: Path) -> 
 def test_valid_narrower_activation_requires_confirmed_reconciliation(
     tmp_path: Path,
 ) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     resolved = _resolve(catalog)
     fixture = _compatible_legacy_fixture(resolved)
     _remove_legacy_authority_edge(fixture)
@@ -1028,7 +1042,7 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
 ) -> None:
     from core_runtime.bootstrap import profile_capture
 
-    catalog = _packaged_catalog(tmp_path / "catalog")
+    catalog = _legacy_packaged_catalog(tmp_path / "catalog")
     resolved = _resolve(catalog)
     fixture = _compatible_legacy_fixture(resolved)
     _remove_legacy_authority_edge(fixture)
@@ -1044,6 +1058,9 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
     }
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setattr(profile_capture, "_bundle_root", lambda _base=None: catalog.root)
+    monkeypatch.setattr(
+        profile_capture.require_profile_runtime(), "load_catalog", lambda _root: catalog
+    )
     monkeypatch.setattr(
         profile_capture,
         "_resolve_bootstrap_candidate",
@@ -1063,7 +1080,7 @@ def test_capture_flow_reconciles_only_with_exact_explicit_confirmation(
 def test_reconfirmation_hard_denials_do_not_replace_predecessor(
     tmp_path: Path,
 ) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     resolved = _resolve(catalog)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1115,7 +1132,7 @@ def test_reconfirmation_hard_denials_do_not_replace_predecessor(
 def test_confirmed_reconciliation_recovers_commit_across_restart(
     tmp_path: Path,
 ) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     resolved = _resolve(catalog)
     fixture = _compatible_legacy_fixture(resolved)
     _remove_legacy_authority_edge(fixture)
@@ -1159,7 +1176,7 @@ def test_confirmed_reconciliation_recovers_commit_across_restart(
 
 @pytest.mark.parametrize("role", ("base", "shell", "pack"))
 def test_legacy_migration_rejects_self_consistent_artifact_drift(tmp_path: Path, role: str) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     fixture = _compatible_legacy_fixture(_resolve(catalog))
     _retarget_legacy_artifact(fixture, role)
     workspace = tmp_path / "workspace"
@@ -1178,7 +1195,7 @@ def test_legacy_migration_rejects_self_consistent_artifact_drift(tmp_path: Path,
 
 
 def test_legacy_migration_rejects_principal_drift(tmp_path: Path) -> None:
-    catalog = _packaged_catalog(tmp_path)
+    catalog = _legacy_packaged_catalog(tmp_path)
     fixture = _compatible_legacy_fixture(_resolve(catalog))
     fixture["plan"]["bindings"][0]["function_principal"]["function_implementation_digest"] = (
         "sha256:" + "e" * 64
