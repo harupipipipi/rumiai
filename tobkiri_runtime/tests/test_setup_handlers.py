@@ -358,3 +358,40 @@ def test_real_preview_is_exact_and_integrity_checked() -> None:
     )
     assert len(preview["pack_ids"]) == len(set(preview["pack_ids"]))
     assert preview["conversation_provider"]
+
+
+def test_post_commit_capture_failure_requests_cold_verification(tmp_path: Path) -> None:
+    """A committed activation must not be reported as a rejected no-write request."""
+    from core_runtime.app_lifecycle_manager import AppLifecycleManager
+    from core_runtime import restart_control
+
+    def fail_capture(_active: object) -> None:
+        raise RuntimeError("private diagnostic must not reach the response")
+
+    lifecycle = AppLifecycleManager(
+        base_dir=tmp_path, runtime_capture_factory=fail_capture
+    )
+    handler_type = PackAPIHandler.canonical_v4_server_handler(
+        panel_auth_manager=PanelAuthManager(bootstrap_secret="test-bootstrap"),
+        dispatch_session=None,
+        app_lifecycle_manager=lifecycle,
+    )
+    handler = object.__new__(handler_type)
+    restart_control.clear_kernel_restart_request()
+    try:
+        with (
+            patch.object(SetupHandlersMixin, "_setup_listing", return_value=_listing()),
+            patch.object(profile_capture, "capture_bootstrap_profile", return_value=_active()) as commit,
+        ):
+            result = handler._setup_install_pack(_request())
+        commit.assert_called_once()
+        assert result["state"] == "activation_committed"
+        assert result["status_code"] == 503
+        assert result["restart_required"] is True
+        assert "write_set" not in result
+        assert "private diagnostic" not in str(result)
+        assert handler._dispatch_session is None
+        handler._refresh_setup_runtime_after_response(result)
+        assert restart_control.is_kernel_restart_requested()
+    finally:
+        restart_control.clear_kernel_restart_request()

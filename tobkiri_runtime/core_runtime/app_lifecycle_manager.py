@@ -230,29 +230,36 @@ class AppLifecycleManager:
                 base_dir=self.base_dir,
                 confirmation=confirmation,
             )
-            user_data = runtime_user_data_root(self.base_dir)
-            capture_factory = self.runtime_capture_factory
-            if capture_factory is None:
-                raise RuntimeError("application runtime capture composition is unavailable")
-            inputs = capture_factory(active)
-            session = capture_production_dispatch(
-                active,
-                bundle_root=inputs.bundle_root,
-                ecosystem_root=inputs.ecosystem_root,
-                authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
-                packvm_provisioner=inputs.packvm_backend_factory,
-                packvm_readiness_reader=(
-                    self.packvm_lifecycle.readiness_snapshot
-                    if self.packvm_lifecycle is not None
-                    else None
-                ),
-                http_contract_bindings=inputs.contract_bindings,
-                activation_snapshot_loader=inputs.activation_snapshot_loader,
-                runtime_surface_factory=inputs.runtime_surface_factory,
-                capability_binding_snapshot_factory=(inputs.capability_binding_snapshot_factory),
-                capability_binding_selector=inputs.capability_binding_selector,
-                credential_store_factory=inputs.credential_store_factory,
-            )
+            try:
+                user_data = runtime_user_data_root(self.base_dir)
+                capture_factory = self.runtime_capture_factory
+                if capture_factory is None:
+                    raise RuntimeError("application runtime capture composition is unavailable")
+                inputs = capture_factory(active)
+                session = capture_production_dispatch(
+                    active,
+                    bundle_root=inputs.bundle_root,
+                    ecosystem_root=inputs.ecosystem_root,
+                    authority_store=AuthorityStore(user_data / "authority" / "v4.sqlite3"),
+                    packvm_provisioner=inputs.packvm_backend_factory,
+                    packvm_readiness_reader=(
+                        self.packvm_lifecycle.readiness_snapshot
+                        if self.packvm_lifecycle is not None
+                        else None
+                    ),
+                    http_contract_bindings=inputs.contract_bindings,
+                    activation_snapshot_loader=inputs.activation_snapshot_loader,
+                    runtime_surface_factory=inputs.runtime_surface_factory,
+                    capability_binding_snapshot_factory=(inputs.capability_binding_snapshot_factory),
+                    capability_binding_selector=inputs.capability_binding_selector,
+                    credential_store_factory=inputs.credential_store_factory,
+                )
+            except Exception as error:
+                from .activation_handoff import ActivationCommittedError
+
+                raise ActivationCommittedError(
+                    "activation committed; cold Host verification is required"
+                ) from error
             return active, session
 
     def activate_default_profile(self, confirmation: Mapping[str, Any]) -> Any:

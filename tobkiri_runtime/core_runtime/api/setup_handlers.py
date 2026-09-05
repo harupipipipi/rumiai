@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Mapping
 
+from ..activation_handoff import ActivationCommittedError
 from ..profile_runtime_port import require_profile_runtime
 
 
@@ -130,6 +131,7 @@ class SetupHandlersMixin:
 
         lifecycle = getattr(self.__class__, "app_lifecycle_manager", None)
         dispatch_session: Any = None
+        active_profile: Any = None
         try:
             if lifecycle is not None and hasattr(lifecycle, "activate_bootstrap_profile"):
                 activated = lifecycle.activate_bootstrap_profile(confirmation)
@@ -139,7 +141,23 @@ class SetupHandlersMixin:
             else:
                 active_profile = capture_bootstrap_profile(confirmation=confirmation)
             audit_receipt = activation_audit_receipt(active_profile)
-        except Exception:
+        except Exception as error:
+            if active_profile is not None or isinstance(error, ActivationCommittedError):
+                # Never claim no writes after the durable activation boundary.
+                # The old handler stays fenced; only a cold Host may validate
+                # the new capture. Do not ask the client to repeat activation.
+                cause = error.__cause__ or error
+                logger.error(
+                    "activation committed; cold verification required (%s)",
+                    type(cause).__name__,
+                )
+                return {
+                    "state": "activation_committed",
+                    "status_code": 503,
+                    "restart_required": True,
+                    "error": "Activation saved; restart verification is required",
+                }
+            logger.warning("activation rejected (%s)", type(error).__name__)
             return dict(runtime.setup_activation_failure())
         finally:
             # This process still serves the stale HostProfileControl handler.

@@ -652,8 +652,12 @@ def test_production_bundle_root_ignores_environment_attack(
         ).activate_bootstrap_profile({}),
     )
     for entrypoint in entrypoints:
-        with pytest.raises(CatalogProbe):
+        from core_runtime.activation_handoff import ActivationCommittedError
+
+        with pytest.raises((CatalogProbe, ActivationCommittedError)) as caught:
             entrypoint()
+        if isinstance(caught.value, ActivationCommittedError):
+            assert isinstance(caught.value.__cause__, CatalogProbe)
     assert observed == [SOURCE_BUNDLE] * len(entrypoints)
 
 

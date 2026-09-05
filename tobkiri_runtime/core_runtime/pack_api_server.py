@@ -813,7 +813,10 @@ class PackAPIHandler(
                 restarts the Host, which then captures one coherent pair.
                 """
 
-                if result.get("state") != "active":
+                if result.get("state") != "active" and not (
+                    result.get("state") == "activation_committed"
+                    and result.get("restart_required") is True
+                ):
                     return
                 from .restart_control import request_kernel_restart
 
