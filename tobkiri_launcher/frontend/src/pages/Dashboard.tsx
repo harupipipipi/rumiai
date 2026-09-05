@@ -101,6 +101,7 @@ export function Dashboard() {
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const summaryAvailable = runtimeReady && !dashboardLoading && !dashboardError;
   const [registry, setRegistry] = useState<NamedProfileRegistry | null>(null);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [profileActionError, setProfileActionError] = useState<string | null>(null);
@@ -633,7 +634,7 @@ export function Dashboard() {
               <h3 className="text-sm font-semibold text-text-main group-hover:underline">Active Packs</h3>
               <ArrowRight aria-hidden="true" className="ml-auto h-4 w-4 shrink-0 text-text-muted" />
             </div>
-            <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{dashboard.activePacks}</div>
+            <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{summaryAvailable ? dashboard.activePacks : '--'}</div>
             <p className="mt-1 text-xs text-text-muted">Enabled in the current v4 Profile</p>
           </Link>
           <div className="rounded-xl border border-border bg-bg-card p-4">
@@ -641,7 +642,7 @@ export function Dashboard() {
               <Workflow aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
               <h3 className="text-sm font-semibold text-text-main">Flows</h3>
             </div>
-            <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{dashboard.registeredFlows}</div>
+            <div className="mt-2 text-2xl font-semibold tracking-tight text-text-main">{summaryAvailable ? dashboard.registeredFlows : '--'}</div>
             <p className="mt-1 text-xs text-text-muted">Registered flow definitions</p>
           </div>
           <div className="rounded-xl border border-border bg-bg-card p-4">
@@ -652,13 +653,13 @@ export function Dashboard() {
             <div className="mt-2 flex items-center gap-2">
               <span
                 aria-hidden="true"
-                className={dashboard.kernelStatus === 'running' ? 'h-2.5 w-2.5 shrink-0 rounded-full bg-success' : 'h-2.5 w-2.5 shrink-0 rounded-full bg-warning'}
+                className={summaryAvailable && dashboard.kernelStatus === 'running' ? 'h-2.5 w-2.5 shrink-0 rounded-full bg-success' : 'h-2.5 w-2.5 shrink-0 rounded-full bg-warning'}
               />
               <span className="text-lg font-semibold tracking-tight text-text-main">
-                {dashboard.kernelStatus === 'running' ? 'Running' : 'Stopped'}
+                {!summaryAvailable ? 'Not verified' : dashboard.kernelStatus === 'running' ? 'Running' : dashboard.kernelStatus === 'error' ? 'Error' : 'Stopped'}
               </span>
             </div>
-            <p className="mt-1 text-xs text-text-muted">Uptime: {dashboard.uptime}</p>
+            <p className="mt-1 text-xs text-text-muted">Uptime: {summaryAvailable ? dashboard.uptime : '--'}</p>
           </div>
         </section>
       </div>

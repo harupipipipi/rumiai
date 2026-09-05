@@ -4,9 +4,9 @@
   "version": "1.0.0-beta.3",
   "identifier": "dev.rumiai.app",
   "build": {
-    "beforeBuildCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release",
+    "beforeBuildCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && node tobkiri_launcher/scripts/run_prepare_viewer_runtime.mjs --mode release",
     "beforeDevCommand": {
-      "script": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev",
+      "script": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && node tobkiri_launcher/scripts/run_prepare_viewer_runtime.mjs --mode dev",
       "wait": true
     },
     "frontendDist": "./splash"

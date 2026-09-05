@@ -247,7 +247,7 @@ where
             return Err(typed_error(
                 PythonProvisioningCode::InvalidArtifact,
                 format!(
-                    "development venv is missing {}; create tobkiri_runtime/.venv before starting Tobkiri Launcher",
+                    "development venv is missing {}; create the repository .venv before starting Tobkiri Launcher",
                     venv_python.display()
                 ),
             ));

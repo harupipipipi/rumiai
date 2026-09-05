@@ -269,6 +269,10 @@ test('Home keeps the Profile catalog visible while gating ceremony in unresolved
         assert.match(container.textContent ?? '', /Profiles/, scenario.name);
         assert.match(container.textContent ?? '', /Defaults Profile/, scenario.name);
         assert.match(container.textContent ?? '', /Research Profile/, scenario.name);
+        const summary = container.querySelector('[aria-label="Workspace summary"]');
+        assert.ok(summary);
+        assert.match(summary.textContent ?? '', /Not verified/, scenario.name);
+        assert.doesNotMatch(summary.textContent ?? '', /Stopped|Running/, scenario.name);
         assert.ok(container.querySelector('input[aria-label="Search Profiles"]'));
 
         const addProfile = [...container.querySelectorAll('button')].find(

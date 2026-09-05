@@ -128,11 +128,12 @@ impl AppConfig {
         } else {
             writable_root.join("uv")
         };
-        let venv_dir = match dev_workspace_root.as_ref() {
-            Some(_) if is_app_bundle => app_dir.join("dev-venv"),
-            Some(workspace_root) => workspace_root.join(".venv"),
-            None => writable_root.join("venv"),
-        };
+        let venv_dir = dev_workspace_root
+            .as_ref()
+            .map(|workspace_root| {
+                development_venv_dir(&app_dir, workspace_root, is_app_bundle)
+            })
+            .unwrap_or_else(|| writable_root.join("venv"));
         let user_data_dir = writable_root.join("user_data");
         let log_dir = writable_root.join("logs");
 
@@ -344,6 +345,27 @@ fn is_cargo_debug_resource_dir(resource_dir: &Path) -> bool {
 fn is_explicit_local_development_workspace_build() -> bool {
     LOCAL_DEV_WORKSPACE_BUILD == Some("1")
 }
+
+/// Select the venv that belongs to the runtime boundary selected for a
+/// development launch.
+///
+/// An unbundled debug `.app` deliberately runs the checkout runtime and must
+/// therefore use the checkout's `.venv`. A debug `.app` that contains a
+/// staged runtime instead uses the staged development venv copied beside that
+/// runtime. Production launches never call this helper.
+fn development_venv_dir(
+    app_dir: &Path,
+    workspace_root: &Path,
+    is_app_bundle: bool,
+) -> PathBuf {
+    let workspace_runtime = workspace_root.join("tobkiri_runtime");
+    if !is_app_bundle || app_dir == workspace_runtime {
+        workspace_root.join(".venv")
+    } else {
+        app_dir.join("dev-venv")
+    }
+}
+
 fn configured_uv_path() -> Option<PathBuf> {
     std::env::var_os(UV_PATH_ENV)
         .filter(|value| !value.is_empty())
@@ -638,6 +660,24 @@ mod tests {
         );
         assert!(config.is_dev_workspace());
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn development_app_bundle_venv_follows_the_selected_runtime_boundary() {
+        let workspace_root = PathBuf::from("/tmp/tobkiri-workspace");
+        let workspace_runtime = workspace_root.join("tobkiri_runtime");
+        let staged_runtime = PathBuf::from("/tmp/Launcher.app/Contents/Resources/app");
+
+        assert_eq!(
+            development_venv_dir(&workspace_runtime, &workspace_root, true),
+            workspace_root.join(".venv"),
+            "an unbundled debug app uses the checkout runtime and venv"
+        );
+        assert_eq!(
+            development_venv_dir(&staged_runtime, &workspace_root, true),
+            staged_runtime.join("dev-venv"),
+            "a staged debug app uses the venv staged with that runtime"
+        );
     }
 
     #[test]
