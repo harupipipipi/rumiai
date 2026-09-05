@@ -58,6 +58,8 @@ class ProfileResolutionDenied(DefaultProfileV4Error):
 class ProfileReconfirmationRequired(ProfileResolutionDenied):
     """Raised when a valid predecessor cannot authorize a changed Profile."""
 
+    verified_profile_definition_digest: str | None = None
+
 
 class ActivationLockTimeout(ProfileResolutionDenied):
     """Raised when the activation process lock is unavailable by its deadline."""
@@ -1989,10 +1991,17 @@ class ActivationStore:
             raise ProfileResolutionDenied(
                 "active activation authority, fence, or SecurityEpoch is stale"
             )
-        self._verify_selected_artifact(
-            profile,
-            allow_verified_successor_reconfirmation=True,
-        )
+        try:
+            self._verify_selected_artifact(
+                profile,
+                allow_verified_successor_reconfirmation=True,
+            )
+        except ProfileReconfirmationRequired as error:
+            # The record graph and current Authority reservation were verified
+            # above. Expose only its source identity for the explicit ceremony;
+            # the predecessor still cannot be captured for execution.
+            error.verified_profile_definition_digest = str(plan["profile_definition_digest"])
+            raise
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),
             activation=activation,

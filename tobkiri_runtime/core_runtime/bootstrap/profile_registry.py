@@ -13,7 +13,10 @@ from ..profile_definition_store_v4 import (
 
 
 def register_bootstrap_definition(
-    user_data: Path, source: Mapping[str, Any]
+    user_data: Path,
+    source: Mapping[str, Any],
+    *,
+    approved_predecessor_digest: str | None = None,
 ) -> None:
     """Create an absent definition, accepting only an identical live existing one."""
     definitions = ProfileDefinitionStore(user_data)
@@ -27,6 +30,22 @@ def register_bootstrap_definition(
             existing = definitions.get_profile(
                 str(source["profile_id"]), include_tombstone=True
             )
+            if existing is None:
+                raise
+    if (
+        existing is not None
+        and not existing.tombstone
+        and dict(existing.profile) != dict(source)
+        and approved_predecessor_digest is not None
+        and canonical_digest(existing.profile) == approved_predecessor_digest
+    ):
+        definitions.update_profile(
+            existing.profile_id,
+            source,
+            expected_profile_revision=existing.profile_revision,
+            expected_store_generation=generation,
+        )
+        return
     if existing is None or existing.tombstone or dict(existing.profile) != dict(source):
         raise ProfileDefinitionStoreConflict(
             "bootstrap Profile conflicts with the existing definition"

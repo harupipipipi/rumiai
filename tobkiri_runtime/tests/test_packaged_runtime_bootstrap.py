@@ -686,3 +686,52 @@ def test_committed_bootstrap_recovery_rejects_conflicting_state(
             user_data=user_data, pointer=pointer, runtime=runtime, catalog=catalog
         )
     assert definitions.snapshot() == before
+
+
+@pytest.mark.parametrize("customized", [False, True])
+def test_confirmed_bootstrap_upgrade_preserves_definition_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool
+) -> None:
+    """Only the verified predecessor may receive a confirmed source successor."""
+    import core_runtime.bootstrap.profile_capture as capture
+    from core_runtime.active_profile_store_v4 import ActiveProfileStore
+    from core_runtime.profile_definition_store_v4 import (
+        ProfileDefinitionStore,
+        ProfileDefinitionStoreConflict,
+    )
+    from core_runtime.profile_runtime_port import require_profile_runtime
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    user_data = tmp_path / "user_data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    first = capture.capture_default_profile(
+        confirmation=capture.prepare_default_profile_confirmation()
+    )
+    definitions = ProfileDefinitionStore(user_data)
+    original = definitions.get_profile("defaults")
+    if customized:
+        definitions.update_profile("defaults", display_name="My custom profile")
+    before = definitions.snapshot()
+    pointer_path = ActiveProfileStore(user_data).path
+    pointer_before = pointer_path.read_bytes()
+    runtime = require_profile_runtime()
+    catalog = runtime.load_catalog(packaged_profile_bundle_root())
+    successor_source = dict(catalog.profiles["defaults"], display_name="New bundled Defaults")
+    successor_catalog = runtime.catalog_with_profiles(catalog, {"defaults": successor_source})
+    monkeypatch.setattr(runtime, "load_catalog", lambda _root: successor_catalog)
+    confirmation = capture.prepare_default_profile_confirmation()
+    if customized:
+        with pytest.raises(ProfileDefinitionStoreConflict):
+            capture.capture_default_profile(confirmation=confirmation)
+        assert definitions.snapshot() == before
+        assert pointer_path.read_bytes() == pointer_before
+    else:
+        upgraded = capture.capture_default_profile(confirmation=confirmation)
+        assert upgraded.activation["activation_id"] != first.activation["activation_id"]
+        current = definitions.get_profile("defaults")
+        assert dict(current.profile) == successor_source
+        assert current.parent_revision == original.profile_revision
+        entry = next(p for p in definitions.snapshot()["profiles"] if p["profile_id"] == "defaults")
+        assert entry["revisions"][0]["profile"] == dict(original.profile)
+        assert capture.capture_active_profile().activation == upgraded.activation

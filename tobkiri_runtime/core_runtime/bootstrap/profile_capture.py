@@ -919,7 +919,6 @@ def capture_bootstrap_profile(
                     "bootstrap activation confirmation is stale or tampered"
                 )
             host_profile_catalog(base_dir)
-            register_bootstrap_definition(user_data, catalog.profiles[profile_id])
         with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
             store = runtime.activation_store(
                 root=state_root,
@@ -929,6 +928,21 @@ def capture_bootstrap_profile(
                 catalog=catalog,
             )
             if resolved_reconciliation is not None:
+                try:
+                    predecessor = store.load_active_snapshot()
+                except Exception as error:
+                    if not runtime.is_reconfirmation_required(error):
+                        raise
+                    predecessor_digest = getattr(
+                        error, "verified_profile_definition_digest", None
+                    )
+                else:
+                    predecessor_digest = predecessor.resolved.plan["profile_definition_digest"]
+                register_bootstrap_definition(
+                    user_data,
+                    catalog.profiles[profile_id],
+                    approved_predecessor_digest=predecessor_digest,
+                )
                 activation_id = (
                     f"activation:{profile_id}-reconcile-"
                     + resolved_reconciliation.plan["plan_digest"].removeprefix("sha256:")[:16]
