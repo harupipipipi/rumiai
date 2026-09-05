@@ -25,8 +25,16 @@ export function runtimeBannerIconKind(
   return 'progress';
 }
 
+/** Page content can place recovery beside its own heading instead of above the scroll area. */
+export interface LayoutOutletContext {
+  verificationBanner?: ReactNode;
+}
+
 export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
   const location = useLocation();
+  const isHome = location.pathname.replace(/\/$/, '') === panelRoutes.home.replace(/\/$/, '');
+  // Runtime-only routes render their own blocking recovery gate.
+  const showLayoutVerification = location.pathname === panelRoutes.profile || location.pathname === panelRoutes.settings;
   const runtimeReady = useAppStore(state => state.runtimeReady);
   const runtimeStatus = useAppStore(state => state.runtimeStatus);
   const runtimeError = useAppStore(state => state.runtimeError);
@@ -49,7 +57,7 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
         <main id="panel-main" tabIndex={-1} className="flex-1 flex flex-col relative overflow-hidden">
-          {verificationBanner}
+          {showLayoutVerification && verificationBanner}
           {!runtimeReady && !verificationBanner && (
             <div
               role="alert"
@@ -81,7 +89,7 @@ export function Layout({verificationBanner}: {verificationBanner?: ReactNode}) {
             </div>
           )}
           <RouteBoundary>
-            <Outlet />
+            <Outlet context={{verificationBanner: isHome ? verificationBanner : null} satisfies LayoutOutletContext} />
           </RouteBoundary>
           {location.pathname === panelRoutes.home && <ViewerVersionLabel />}
         </main>

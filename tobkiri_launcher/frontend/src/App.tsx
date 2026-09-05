@@ -202,10 +202,12 @@ function VerificationActions({
   onRetry,
   retrying,
   linkClassName,
+  compact = false,
 }: {
   onRetry?: () => void | Promise<void>;
   retrying: boolean;
   linkClassName: string;
+  compact?: boolean;
 }) {
   const retry = () => {
     if (!onRetry || retrying) return;
@@ -213,7 +215,7 @@ function VerificationActions({
   };
 
   return (
-    <div className="mt-6 flex flex-wrap items-center gap-3">
+    <div className={compact ? 'flex shrink-0 flex-wrap items-center gap-2' : 'mt-6 flex flex-wrap items-center gap-3'}>
       {onRetry ? (
         <button
           type="button"
@@ -260,34 +262,37 @@ function VerificationMessage({
       aria-labelledby={resolvedTitleId}
       aria-live={copy.role === 'status' ? 'polite' : 'assertive'}
       className={compact
-        ? 'rounded-xl border border-border bg-bg-card p-5'
+        ? 'flex min-w-0 flex-col gap-3 rounded-xl border border-border bg-bg-card p-4 lg:flex-row lg:items-center lg:justify-between'
         : 'w-full max-w-xl rounded-2xl border border-border bg-bg-card p-7 shadow-lg'}
       data-testid={testId}
       role={copy.role}
     >
-      <p className="text-xs font-medium text-text-muted">
-        Runtime access
-      </p>
-      {compact ? (
-        <h2 id={resolvedTitleId} className="mt-2 text-lg font-semibold tracking-tight">
-          {copy.title}
-        </h2>
-      ) : (
-        <h1 id={resolvedTitleId} className="mt-3 text-2xl font-semibold tracking-tight">
-          {copy.title}
-        </h1>
-      )}
-      <div className="mt-3 flex items-start gap-2">
-        {state === 'denied' ? <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" data-error-icon="setup-verification" /> : null}
-        <p className="min-w-0 flex-1 text-sm leading-6 text-text-muted">{copy.detail}</p>
-        {state === 'denied' ? (
-          <CopyErrorButton
-            label="Copy setup verification error"
-            text={`${copy.title}\n${copy.detail}`}
-          />
-        ) : null}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-text-muted">
+          Runtime access
+        </p>
+        {compact ? (
+          <h2 id={resolvedTitleId} className="mt-1 text-sm font-semibold tracking-tight">
+            {copy.title}
+          </h2>
+        ) : (
+          <h1 id={resolvedTitleId} className="mt-3 text-2xl font-semibold tracking-tight">
+            {copy.title}
+          </h1>
+        )}
+        <div className={compact ? 'mt-1 flex items-start gap-2' : 'mt-3 flex items-start gap-2'}>
+          {state === 'denied' ? <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" data-error-icon="setup-verification" /> : null}
+          <p className="min-w-0 flex-1 text-sm leading-6 text-text-muted">{copy.detail}</p>
+          {state === 'denied' ? (
+            <CopyErrorButton
+              label="Copy setup verification error"
+              text={`${copy.title}\n${copy.detail}`}
+            />
+          ) : null}
+        </div>
       </div>
       <VerificationActions
+        compact={compact}
         linkClassName={linkClassName}
         onRetry={onRetry}
         retrying={retrying}
@@ -325,7 +330,7 @@ export function SetupVerificationBanner({
   };
 
   return (
-    <div className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200" data-testid="setup-verification-banner">
+    <div className="text-text-main" data-testid="setup-verification-banner">
       <VerificationMessage
         state={state}
         onRetry={onRetry ? retry : undefined}

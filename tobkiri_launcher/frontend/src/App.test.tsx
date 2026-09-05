@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import {act, type ComponentProps} from 'react';
+import {act, type ComponentProps, type ReactNode} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {JSDOM} from 'jsdom';
 import test from 'node:test';
-import {MemoryRouter, Route, Routes} from 'react-router';
+import {MemoryRouter, Route, Routes, useOutletContext} from 'react-router';
 import {renderToStaticMarkup} from 'react-dom/server';
 
 import {
@@ -147,7 +147,11 @@ test('empty bootstrap keeps Home recovery-gated even when generic runtime health
   assert.doesNotMatch(gate, /unsafe runtime page/);
 });
 
-test('Home route keeps its child catalog mounted behind an inline verification banner', () => {
+test('Home route gives its scrolling page the recovery banner instead of fixing it above the catalog', () => {
+  function HomeContent() {
+    const {verificationBanner} = useOutletContext<{verificationBanner: ReactNode}>();
+    return <div data-testid="home-scroll-content"><h1>Home heading</h1>{verificationBanner}<div data-testid="home-profile-catalog">Profile catalog and CRUD</div></div>;
+  }
   const html = renderToStaticMarkup(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
@@ -161,7 +165,7 @@ test('Home route keeps its child catalog mounted behind an inline verification b
             />
           }
         >
-          <Route index element={<div data-testid="home-profile-catalog">Profile catalog and CRUD</div>} />
+          <Route index element={<HomeContent />} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -169,6 +173,9 @@ test('Home route keeps its child catalog mounted behind an inline verification b
 
   assert.match(html, /data-testid="setup-verification-banner"/);
   assert.match(html, /data-testid="home-profile-catalog"/);
+  assert.equal((html.match(/data-testid="setup-verification-banner"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('Home heading') < html.indexOf('data-testid="setup-verification-banner"'));
+  assert.ok(html.indexOf('data-testid="setup-verification-banner"') < html.indexOf('data-testid="home-profile-catalog"'));
   assert.doesNotMatch(html, /data-testid="setup-verification-gate"/);
   assert.doesNotMatch(html, /min-h-screen items-center/);
 });
@@ -304,4 +311,21 @@ test('verified health renders the selected route and retry action is interactive
       navigator: {value: previousNavigator, configurable: true},
     });
   }
+});
+
+
+test('runtime-only routes show one recovery gate without a duplicate layout banner', () => {
+  const props = gateProps({defaultsBootstrapRequired: true});
+  const html = renderToStaticMarkup(
+    <MemoryRouter initialEntries={['/packs']}>
+      <Routes>
+        <Route path="/" element={<HomeRoute verificationBanner={<SetupVerificationBanner {...props} />} />}>
+          <Route path="packs" element={<SetupVerificationGate {...props} embedded><p>runtime content</p></SetupVerificationGate>} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  );
+  assert.doesNotMatch(html, /data-testid="setup-verification-banner"/);
+  assert.match(html, /data-testid="runtime-route-verification-gate"/);
+  assert.doesNotMatch(html, /runtime content/);
 });

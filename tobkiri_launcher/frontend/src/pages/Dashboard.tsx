@@ -1,6 +1,6 @@
 import type {FormEvent} from 'react';
 import {useEffect, useMemo, useState} from 'react';
-import {Link, useSearchParams} from 'react-router';
+import {Link, useSearchParams, useOutletContext} from 'react-router';
 import {
   AlertCircle,
   ArrowRight,
@@ -12,6 +12,7 @@ import {
   Workflow,
 } from 'lucide-react';
 
+import type {LayoutOutletContext} from '@/src/components/layout/Layout';
 import {ProfileCard} from '@/src/components/dashboard/ProfileCard';
 import {Button} from '@/src/components/ui/Button';
 import {CopyErrorButton} from '@/src/components/ui/CopyErrorButton';
@@ -86,6 +87,7 @@ function sortModeFromParam(value: string | null): NamedProfileSortMode {
 }
 
 export function Dashboard() {
+  const verificationBanner = useOutletContext<LayoutOutletContext | undefined>()?.verificationBanner;
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
@@ -348,12 +350,12 @@ export function Dashboard() {
   };
 
   if (dashboardLoading && !registry && !profileError) {
-    return <DashboardSkeleton />;
+    return <div className="flex min-w-0 flex-1 flex-col overflow-y-auto p-6">{verificationBanner}<DashboardSkeleton /></div>;
   }
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 overflow-y-auto px-6 py-8 page-enter lg:px-10">
+    <div className="flex min-w-0 flex-1 overflow-hidden">
+      <div className="mx-auto flex min-w-0 w-full max-w-[1100px] flex-col gap-6 overflow-y-auto px-6 py-8 page-enter lg:px-10">
         <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-main">Home</h1>
@@ -387,6 +389,8 @@ export function Dashboard() {
           </div>
         </section>
 
+        {verificationBanner}
+
         {dashboardError && (
           <div className="flex items-center gap-3 rounded-lg border border-warning/35 bg-warning/8 px-4 py-3 text-sm text-warning" role="alert">
             <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
@@ -398,7 +402,7 @@ export function Dashboard() {
           </div>
         )}
 
-        {!runtimeReady && runtimeStatus === 'panel_ready' && (
+        {!verificationBanner && !runtimeReady && runtimeStatus === 'panel_ready' && (
           <div className="flex items-center gap-3 rounded-lg border border-warning/35 bg-warning/8 px-4 py-3 text-sm text-warning" role="status">
             <TobkiriLoadingMark />
             <span className="flex-1">Runtime is still preparing. Profiles and Add remain available; launch and activation wait for readiness.</span>
@@ -573,7 +577,7 @@ export function Dashboard() {
               </div>
             )}
             {registry && visibleProfiles.length > 0 && (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="profile-grid">
+              <div className="grid min-w-0 auto-rows-fr gap-4" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))'}} data-testid="profile-grid">
                 {visibleProfiles.map((entry) => {
                   const active = isActiveExecutionProfile(registry, entry);
                   const profileView = buildNamedProfileView(entry);

@@ -27,6 +27,7 @@ test('ProfileCard copies the complete visible Profile error diagnostic', async (
   const previousNavigator = globalThis.navigator;
   let root: Root | null = null;
   let copied = '';
+  let launches = 0;
   try {
     Object.defineProperties(globalThis, {
       window: {value: dom.window, configurable: true},
@@ -63,7 +64,7 @@ test('ProfileCard copies the complete visible Profile error diagnostic', async (
             onDuplicate={() => undefined}
             onEdit={() => undefined}
             onEditingNameChange={() => undefined}
-            onLaunch={() => undefined}
+            onLaunch={() => { launches += 1; }}
             onSubmitEdit={() => undefined}
             profile={profile}
             profileCeremonyAvailable
@@ -80,6 +81,15 @@ test('ProfileCard copies the complete visible Profile error diagnostic', async (
       );
     });
     assert.match(container.textContent ?? '', /Error\. The v4 Base Pack is missing\./);
+    const cover = container.querySelector('svg[viewBox="0 0 320 180"]');
+    assert.equal(cover?.getAttribute('aria-hidden'), 'true');
+    const titleLink = container.querySelector<HTMLAnchorElement>('h3')?.closest('a');
+    assert.equal(titleLink?.getAttribute('href'), '/profile');
+    const launch = container.querySelector<HTMLButtonElement>('button[aria-label="Launch Broken Profile"]');
+    assert.ok(launch?.disabled, 'A cover card must not enable launch for an unresolved Profile');
+    await act(async () => { titleLink?.click(); launch?.click(); });
+    assert.equal(launches, 0, 'Browsing the card title must not launch or activate it');
+
     const copy = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Copy Broken Profile Profile error"]',
     );
