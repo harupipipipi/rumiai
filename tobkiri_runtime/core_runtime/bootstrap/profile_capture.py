@@ -27,6 +27,10 @@ from ..profile_definition_store_v4 import (
     ProfileDefinitionStoreConflict,
 )
 from ..profile_runtime_port import require_profile_runtime
+from .profile_registry import (
+    recover_bootstrap_definition,
+    register_bootstrap_definition,
+)
 
 
 class ProfileResolutionDenied(Exception):
@@ -803,6 +807,15 @@ def capture_active_profile(*, base_dir: Path | None = None) -> Any:
     if workspace.is_symlink() or not workspace.is_dir():
         raise ProfileResolutionDenied("active Profile workspace is unavailable")
     catalog = host_profile_catalog(base_dir)
+    if pointer.profile_id == _bootstrap_profile_id() and pointer.profile_id not in catalog.profiles:
+        runtime = require_profile_runtime()
+        recover_bootstrap_definition(
+            user_data=user_data,
+            pointer=pointer,
+            runtime=runtime,
+            catalog=runtime.load_catalog(_bundle_root(base_dir)),
+        )
+        catalog = host_profile_catalog(base_dir)
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         store = require_profile_runtime().activation_store(
             root=workspace / "activation",
@@ -905,6 +918,8 @@ def capture_bootstrap_profile(
                 raise ProfileResolutionDenied(
                     "bootstrap activation confirmation is stale or tampered"
                 )
+            host_profile_catalog(base_dir)
+            register_bootstrap_definition(user_data, catalog.profiles[profile_id])
         with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
             store = runtime.activation_store(
                 root=state_root,
@@ -943,6 +958,11 @@ def capture_bootstrap_profile(
     resolved, expected_confirmation = _resolve_bootstrap_candidate(base_dir=base_dir)
     if dict(confirmation) != expected_confirmation:
         raise ProfileResolutionDenied("bootstrap activation confirmation is stale or tampered")
+    # Materialize legacy collections before adding the explicitly chosen template.
+    host_profile_catalog(base_dir)
+    register_bootstrap_definition(
+        user_data, runtime.load_catalog(_bundle_root(base_dir)).profiles[profile_id]
+    )
     workspace = user_data / "workspaces" / profile_id
     workspace.mkdir(parents=True, exist_ok=True)
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:

@@ -582,3 +582,70 @@ def test_clean_bootstrap_captures_and_restarts_without_legacy_profile(
     renamed_path = user_data / "authority" / "v4-renamed.sqlite3"
     authority_path.rename(renamed_path)
     renamed_path.rename(authority_path)
+
+
+@pytest.mark.parametrize("legacy_missing", [False, True])
+def test_bootstrap_registers_selected_definition_in_existing_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_missing: bool
+) -> None:
+    """Confirmed setup and old committed setup preserve existing user definitions."""
+    import core_runtime.bootstrap.profile_capture as capture
+    from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
+    from core_runtime.profile_runtime_port import require_profile_runtime
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    user_data = tmp_path / "user_data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    runtime = require_profile_runtime()
+    catalog = runtime.load_catalog(packaged_profile_bundle_root())
+    definitions = ProfileDefinitionStore(user_data)
+    existing = definitions.create_profile(catalog.profiles["defaults"], profile_id="existing")
+    assert "defaults" not in capture.host_profile_catalog().profiles
+    confirmation = capture.prepare_default_profile_confirmation()
+    with monkeypatch.context() as patch:
+        if legacy_missing:
+            patch.setattr(capture, "register_bootstrap_definition", lambda *_args: None)
+        active = capture.capture_default_profile(confirmation=confirmation)
+    assert (definitions.get_profile("defaults") is None) == legacy_missing
+    pointer_path = user_data / "active_profile.json"
+    pointer_before = pointer_path.read_bytes() if pointer_path.exists() else None
+    restarted = capture.capture_active_profile()
+    assert restarted.activation == active.activation
+    assert restarted.resolved.plan == active.resolved.plan
+    assert definitions.get_profile("existing") == existing
+    assert dict(definitions.get_profile("defaults").profile) == catalog.profiles["defaults"]
+    if pointer_before is not None:
+        assert pointer_path.read_bytes() == pointer_before
+    generation = definitions.snapshot()["generation"]
+    capture.capture_active_profile()
+    assert definitions.snapshot()["generation"] == generation
+
+
+@pytest.mark.parametrize("conflict", ["changed", "deleted"])
+def test_bootstrap_does_not_replace_existing_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str
+) -> None:
+    """Setup cannot overwrite a custom Defaults definition or revive its tombstone."""
+    import core_runtime.bootstrap.profile_capture as capture
+    from core_runtime.profile_definition_store_v4 import (
+        ProfileDefinitionStore,
+        ProfileDefinitionStoreConflict,
+    )
+    from core_runtime.profile_runtime_port import require_profile_runtime
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    user_data = tmp_path / "user_data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    catalog = require_profile_runtime().load_catalog(packaged_profile_bundle_root())
+    definitions = ProfileDefinitionStore(user_data)
+    definitions.create_profile(catalog.profiles["defaults"], display_name="My Defaults")
+    if conflict == "deleted":
+        definitions.delete_profile("defaults")
+    before = definitions.snapshot()
+    confirmation = capture.prepare_default_profile_confirmation()
+    with pytest.raises(ProfileDefinitionStoreConflict):
+        capture.capture_default_profile(confirmation=confirmation)
+    assert definitions.snapshot() == before
+    assert not (user_data / "workspaces" / "defaults" / "activation" / "active.json").exists()
