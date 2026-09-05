@@ -18,7 +18,7 @@ def register_bootstrap_definition(
     *,
     approved_predecessor_digest: str | None = None,
 ) -> None:
-    """Create an absent definition, accepting only an identical live existing one."""
+    """Register a source or append its explicitly confirmed predecessor's successor."""
     definitions = ProfileDefinitionStore(user_data)
     generation = definitions.snapshot()["generation"]
     existing = definitions.get_profile(str(source["profile_id"]), include_tombstone=True)
