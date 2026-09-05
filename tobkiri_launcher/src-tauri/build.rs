@@ -6764,7 +6764,7 @@ mod tests {
             before_dev
                 .get("script")
                 .and_then(serde_json::Value::as_str),
-            Some("cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && python tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev")
+            Some("cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build && cd ../.. && node tobkiri_launcher/scripts/run_prepare_viewer_runtime.mjs --mode dev")
         );
         assert_eq!(
             before_dev

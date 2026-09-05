@@ -88,15 +88,17 @@ def _read_yaml(path: Path) -> dict:
     return document
 
 
-def test_tauri_hooks_prepare_runtime_for_dev_and_release():
+def test_tauri_hooks_prepare_runtime_for_dev_and_release() -> None:
+    """Keep both Tauri hooks bound to the Python-selection wrapper."""
     config = _read_json(TAURI_CONFIG)
 
     before_dev = config["build"]["beforeDevCommand"]
     assert isinstance(before_dev, dict)
     assert before_dev["wait"] is True
-    assert "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode dev" in before_dev["script"]
+    wrapper = "node tobkiri_launcher/scripts/run_prepare_viewer_runtime.mjs"
+    assert f"{wrapper} --mode dev" in before_dev["script"]
     assert (
-        "tobkiri_launcher/scripts/prepare_viewer_runtime.py --mode release"
+        f"{wrapper} --mode release"
         in config["build"]["beforeBuildCommand"]
     )
 
