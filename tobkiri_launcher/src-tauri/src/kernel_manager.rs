@@ -75,9 +75,19 @@ fn verified_active_application_authority(
     {
         return Ok(None);
     }
-    let authority = crate::defaultspack_authority::resolve(config)
-        .context("failed to resolve durable active Application authority")?;
-    Ok(Some(authority))
+    match crate::defaultspack_authority::resolve(config) {
+        Ok(authority) => Ok(Some(authority)),
+        Err(error)
+            if error
+                .downcast_ref::<crate::defaultspack_authority::ShellReconfirmationRequired>()
+                .is_some() =>
+        {
+            // The Python Host must verify and reconfirm the successor before
+            // publishing any active execution identity or contributions.
+            Ok(None)
+        }
+        Err(error) => Err(error).context("failed to resolve durable active Application authority"),
+    }
 }
 
 fn write_kernel_host_contract(config: &AppConfig, bootstrap_secret: &str) -> Result<PathBuf> {

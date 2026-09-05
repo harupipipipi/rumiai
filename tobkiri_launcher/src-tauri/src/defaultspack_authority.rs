@@ -129,6 +129,19 @@ impl fmt::Display for ProfileReresolutionRequired {
 
 impl std::error::Error for ProfileReresolutionRequired {}
 
+/// An internally consistent activation selects older bytes of the same Shell.
+/// This permits only Host setup; it never constitutes execution authority.
+#[derive(Debug)]
+pub(crate) struct ShellReconfirmationRequired;
+
+impl fmt::Display for ShellReconfirmationRequired {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("packaged Shell changed; explicit Profile reconfirmation is required")
+    }
+}
+
+impl std::error::Error for ShellReconfirmationRequired {}
+
 impl ProfileReresolutionRequired {
     pub(crate) const CODE: &'static str = "PROFILE_RERESOLUTION_REQUIRED";
     pub(crate) const ACTION: &'static str = "reactivate_or_reresolve_profile";
@@ -311,8 +324,36 @@ impl SignedApplicationResolver {
         let bundle_lock = verify_bundle_lock(&bundle_root)?;
         #[cfg(test)]
         let catalog = fixture_catalog_with_shell_variant(catalog, &bundle_root, &bundle_lock)?;
-        let selected = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
-
+        let active = select_profile_authority(config, &catalog, &bundle_root, &bundle_lock)?;
+        let (selected, reconfirmation) = match validate_profile(&active.profile, &catalog, &active)
+        {
+            Ok(_) => (active, None),
+            Err(error)
+                if error
+                    .downcast_ref::<ShellReconfirmationRequired>()
+                    .is_some() =>
+            {
+                let candidate =
+                    select_bootstrap_profile_authority(&catalog, &bundle_root, &bundle_lock)?;
+                if candidate.profile_id != active.profile_id
+                    || candidate.base_pack_id != active.base_pack_id
+                    || candidate.shell_provider_id != active.shell_provider_id
+                    || candidate.shell_pack_id != active.shell_pack_id
+                    || candidate.application_pack_id != active.application_pack_id
+                {
+                    bail!("updated Shell requires an unchanged Base and Application selection");
+                }
+                (
+                    candidate,
+                    Some(
+                        active
+                            .launch_contribution
+                            .context("active launch selector is missing")?,
+                    ),
+                )
+            }
+            Err(error) => return Err(error),
+        };
         let selected_variant = validate_profile(&selected.profile, &catalog, &selected)?;
         validate_profile_pack_closure(&selected, &catalog, &bundle_root, &bundle_lock)?;
 
@@ -328,6 +369,14 @@ impl SignedApplicationResolver {
             &selected.application_pack_id,
             selected.application_artifact_digest.as_deref(),
         )?;
+        if let Some(previous) = reconfirmation.as_ref() {
+            validate_application_selector(previous, selected_variant, &application_pack)?;
+            if previous.relative_path != selected_variant.artifact_ref
+                || previous.entrypoint != selected_variant.entrypoint
+            {
+                bail!("updated Shell changed the active launch target");
+            }
+        }
 
         // The process root is still supplied by the current Launcher adapter,
         // but its identity is obtained from the selected closure. This keeps
@@ -342,6 +391,25 @@ impl SignedApplicationResolver {
             verify_pack_artifact_index(&pack_root, &bundle_root, &root_pack_id)?;
 
         let catalog_revision = crate::presentation::catalog_revision(&catalog)?;
+        if reconfirmation.is_some() {
+            #[cfg(target_os = "macos")]
+            if selected_variant.platform == "macos" {
+                let artifact = pack_root
+                    .join("platform-artifacts")
+                    .join(safe_relative(&selected_variant.artifact_ref)?);
+                let status = std::process::Command::new("/usr/bin/codesign")
+                    .args(["--verify", "--deep", "--strict", "--all-architectures"])
+                    .arg(artifact)
+                    .status()
+                    .context("updated Shell signature could not be verified")?;
+                if !status.success() {
+                    bail!("updated Shell signature is invalid");
+                }
+            }
+            // All new packaged closure and artifact checks above must succeed
+            // before exposing setup. The candidate is never execution authority.
+            return Err(ShellReconfirmationRequired.into());
+        }
         Ok(ApplicationAuthority {
             pack_root,
             verified_artifacts,
@@ -712,6 +780,14 @@ fn select_profile_authority(
         return Ok(selected);
     }
 
+    select_bootstrap_profile_authority(catalog, bundle_root, bundle_lock)
+}
+
+fn select_bootstrap_profile_authority(
+    catalog: &crate::presentation::PresentationCatalog,
+    bundle_root: &Path,
+    bundle_lock: &VerifiedBundleLock,
+) -> Result<SelectedProfileAuthority> {
     // A signed catalog can explicitly describe a bootstrap candidate. This is
     // a compatibility adapter for a fresh install only; it derives every
     // identity from the catalog/profile bytes and never substitutes a
@@ -1170,6 +1246,24 @@ fn bundle_pack_path(
     Ok(bundle_root.join(safe_relative(relative)?))
 }
 
+fn validate_application_selector(
+    selector: &RuntimeLaunchContribution,
+    variant: &crate::presentation::ArtifactVariant,
+    pack: &Value,
+) -> Result<()> {
+    if Some(selector.provider_id.as_str()) != value_str(pack, "/provider_catalog/0/provider_id")
+        || Some(selector.contract_id.as_str())
+            != value_str(pack, "/provider_catalog/0/contract_reference")
+        || Some(selector.operation_id.as_str())
+            != value_str(pack, "/operation_catalog/0/operation_id")
+        || selector.platform != variant.platform
+        || selector.architecture != variant.architecture
+    {
+        bail!("Application Pack differs from the active launch contribution");
+    }
+    Ok(())
+}
+
 fn validate_application_pack(
     application_pack_root: &Path,
     contract_map_root: &Path,
@@ -1223,16 +1317,7 @@ fn validate_application_pack(
         bail!("application Pack launch identity is invalid");
     }
     if let Some(selector) = launch_contribution {
-        if selector.provider_id != value_str(&providers[0], "/provider_id").unwrap_or_default()
-            || selector.contract_id
-                != value_str(&providers[0], "/contract_reference").unwrap_or_default()
-            || selector.operation_id
-                != value_str(&operations[0], "/operation_id").unwrap_or_default()
-            || selector.platform != selected_variant.platform
-            || selector.architecture != selected_variant.architecture
-        {
-            bail!("Application Pack differs from the active launch contribution");
-        }
+        validate_application_selector(selector, selected_variant, pack)?;
     }
 
     let executable_index = artifacts
@@ -1286,8 +1371,7 @@ fn validate_application_pack(
             .as_deref()
             .is_some_and(|digest| digest != entrypoint_digest)
         || (!cfg!(debug_assertions)
-            && (selected_variant.sha256.is_none()
-                || selected_variant.entrypoint_sha256.is_none()))
+            && (selected_variant.sha256.is_none() || selected_variant.entrypoint_sha256.is_none()))
     {
         bail!("application Pack differs from its signed release artifact");
     }
@@ -2067,16 +2151,36 @@ fn validate_profile<'a>(
             .launch_contribution
             .as_ref()
             .context("active Profile has no runtime launch contribution")?;
-        if !valid_digest(executable_digest)
-            || variants[0].entrypoint_sha256.as_deref() != Some(executable_digest)
-            || variants[0].sha256.as_deref() != Some(launch.artifact_digest.as_str())
-            || variants[0].artifact_ref != launch.relative_path
-            || variants[0].entrypoint != launch.entrypoint
-        {
-            bail!("active Profile Shell differs from its signed executable artifact");
-        }
+        validate_active_shell_variant(variants[0], launch, executable_digest)?;
     }
     Ok(variants[0])
+}
+
+fn validate_active_shell_variant(
+    variant: &crate::presentation::ArtifactVariant,
+    launch: &RuntimeLaunchContribution,
+    executable_digest: &str,
+) -> Result<()> {
+    if !valid_digest(executable_digest)
+        || !valid_digest(&launch.artifact_digest)
+        || !variant.sha256.as_deref().is_some_and(valid_digest)
+        || !variant
+            .entrypoint_sha256
+            .as_deref()
+            .is_some_and(valid_digest)
+        || variant.artifact_ref != launch.relative_path
+        || variant.entrypoint != launch.entrypoint
+        || variant.platform != launch.platform
+        || variant.architecture != launch.architecture
+    {
+        bail!("active Profile Shell differs from its signed executable artifact");
+    }
+    if variant.entrypoint_sha256.as_deref() != Some(executable_digest)
+        || variant.sha256.as_deref() != Some(launch.artifact_digest.as_str())
+    {
+        return Err(ShellReconfirmationRequired.into());
+    }
+    Ok(())
 }
 
 fn bootstrap_shell_variant_matches(
@@ -3823,6 +3927,74 @@ mod tests {
                 "entrypoint": "Fixture.AppImage"
             }
         })
+    }
+
+    #[test]
+    fn shell_update_requires_reconfirmation_without_accepting_changed_launch_targets() {
+        let launch = runtime_launch_contribution_from_plan(&runtime_launch_plan()).unwrap();
+        let executable_digest = format!("sha256:{}", "b".repeat(64));
+        let mut variant: crate::presentation::ArtifactVariant =
+            serde_json::from_value(serde_json::json!({
+                "artifact_id": "fixture.shell", "variant": "linux-x86_64",
+                "platform": launch.platform, "architecture": launch.architecture,
+                "artifact_ref": launch.relative_path, "entrypoint": launch.entrypoint,
+                "artifact_kind": "appimage", "descriptor_digest": launch.artifact_digest,
+                "sha256": launch.artifact_digest, "entrypoint_sha256": executable_digest,
+                "prebuilt": true, "production": true
+            }))
+            .unwrap();
+        validate_active_shell_variant(&variant, &launch, &executable_digest).unwrap();
+        variant.sha256 = Some(format!("sha256:{}", "c".repeat(64)));
+        assert!(
+            validate_active_shell_variant(&variant, &launch, &executable_digest)
+                .unwrap_err()
+                .downcast_ref::<ShellReconfirmationRequired>()
+                .is_some()
+        );
+
+        let updated = variant.clone();
+        let pack = serde_json::json!({
+            "provider_catalog": [{"provider_id": launch.provider_id, "contract_reference": launch.contract_id}],
+            "operation_catalog": [{"operation_id": launch.operation_id}]
+        });
+        validate_application_selector(&launch, &updated, &pack).unwrap();
+        for pointer in [
+            "/provider_catalog/0/provider_id",
+            "/provider_catalog/0/contract_reference",
+            "/operation_catalog/0/operation_id",
+        ] {
+            let mut corrupted = pack.clone();
+            *corrupted.pointer_mut(pointer).unwrap() = Value::String("different.identity".into());
+            assert!(validate_application_selector(&launch, &updated, &corrupted).is_err());
+        }
+        for field in [
+            "entrypoint",
+            "artifact_ref",
+            "platform",
+            "architecture",
+            "sha256",
+        ] {
+            variant = updated.clone();
+            match field {
+                "entrypoint" => variant.entrypoint = "Other.AppImage".into(),
+                "artifact_ref" => variant.artifact_ref = "Other.AppImage".into(),
+                "platform" => variant.platform = "windows".into(),
+                "architecture" => variant.architecture = "arm64".into(),
+                "sha256" => variant.sha256 = Some("invalid".into()),
+                _ => unreachable!(),
+            }
+            let error =
+                validate_active_shell_variant(&variant, &launch, &executable_digest).unwrap_err();
+            if matches!(field, "platform" | "architecture") {
+                assert!(validate_application_selector(&launch, &variant, &pack).is_err());
+            }
+            assert!(
+                error
+                    .downcast_ref::<ShellReconfirmationRequired>()
+                    .is_none(),
+                "{field}"
+            );
+        }
     }
 
     #[test]
