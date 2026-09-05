@@ -333,4 +333,4 @@ def test_prepare_release_removes_read_only_dev_uv_before_verified_stage(tmp_path
 
     assert not destination.exists()
     assert len(calls) == 2
-    assert "prepare_tauri_resources.py" in str(calls[1][1])
+    assert "prepare_tauri_resources.py" in str(calls[1][3])
