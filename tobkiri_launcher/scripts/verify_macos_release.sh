@@ -59,6 +59,18 @@ command -v codesign >/dev/null 2>&1 || {
   exit 1
 }
 codesign --verify --strict --all-architectures --verbose=2 "$app_bundle"
+# These runtime-loaded applications are resources, so outer signature verification
+# alone does not establish that macOS can validate their own bundle signatures.
+shopt -s nullglob
+for runtime_root in "$app_bundle/Contents/Resources/app" \
+                    "$app_bundle/Contents/Resources/app/python-runtime/app"; do
+  shell_artifacts=("$runtime_root"/bundled/presentation-artifacts/shell.tauri.default.macos-*/Tobkiri.app)
+  if ((${#shell_artifacts[@]} != 1)); then
+    printf 'macOS release requires exactly one packaged Tauri Shell: %s\n' "$runtime_root" >&2
+    exit 1
+  fi
+  codesign --verify --deep --strict --all-architectures --verbose=2 "${shell_artifacts[0]}"
+done
 details="$(codesign -d -r- --verbose=4 "$app_bundle" 2>&1)"
 if ! grep -Fqx 'Identifier=dev.rumiai.app' <<<"$details"; then
   printf 'macOS app has an unexpected code-signing identifier\n' >&2

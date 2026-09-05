@@ -720,6 +720,17 @@ def test_release_is_a_single_unsigned_ad_hoc_macos_artifact_path():
         assert "${{ matrix.signing_args }}" in build_command
     assert "tauri.shell.conf.json" in shell_build
     assert "--bundles app" in app_build
+    shell_signing = steps["Ad-hoc sign macOS Tauri Shell artifact"]["run"]
+    assert "/usr/bin/codesign --force --sign - --timestamp=none" in shell_signing
+    assert "/usr/bin/codesign --verify --deep --strict" in shell_signing
+    step_names = list(steps)
+    assert (
+        step_names.index("Build unsigned Tauri Shell artifact")
+        < step_names.index("Ad-hoc sign macOS Tauri Shell artifact")
+        < step_names.index("Build unsigned macOS application")
+    )
+    assert '"$app_bundle/Contents/Resources/app/python-runtime/app"' in verifier
+    assert "codesign --verify --deep --strict --all-architectures" in verifier
 
     signing = steps[
         "Stage and ad-hoc sign macOS PackVM VZ helper and application"
