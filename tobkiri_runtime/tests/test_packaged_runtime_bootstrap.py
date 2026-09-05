@@ -108,17 +108,7 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
     )
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
 
-    class SetupServer:
-        port = 8765
-        _contract_routes: tuple[object, ...] = ()
-
-        @staticmethod
-        def is_running() -> bool:
-            return True
-
-        @staticmethod
-        def stop() -> None:
-            return None
+    port = _free_port()
 
     def require_reconfirmation() -> None:
         raise ProfileReconfirmationRequired(diagnostic)
@@ -129,18 +119,19 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
         "capture_active_profile",
         require_reconfirmation,
     )
-    monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: 8765)
-    monkeypatch.setattr(
-        runtime_bootstrap,
-        "initialize_pack_api_server",
-        lambda **_kwargs: SetupServer(),
-    )
+    monkeypatch.setattr(runtime_bootstrap, "resolve_runtime_port", lambda: port)
 
     kernel = _kernel()
     try:
         result = kernel.run_startup_until(kernel.API_INIT_STEP)
         readiness = get_runtime_readiness()
-        assert result == {"status": "ok", "step_id": "api_init", "port": 8765}
+        assert result == {"status": "ok", "step_id": "api_init", "port": port}
+        assert kernel._dispatch_session.session_kind == "host_profile_control"
+        assert get_container().get_or_none("v4_dispatch_session") is None
+        with urlopen(f"http://127.0.0.1:{port}/health", timeout=10) as response:
+            health = json.load(response)["data"]
+        assert health["panel_ready"] is True
+        assert health["runtime_ready"] is False
         assert readiness == {
             "panel_ready": True,
             "runtime_ready": False,

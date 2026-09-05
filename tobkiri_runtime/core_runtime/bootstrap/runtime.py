@@ -202,7 +202,8 @@ class Kernel:
                     if not require_profile_runtime().is_reconfirmation_required(error):
                         raise
                     reconfirmation_error = str(error)
-            else:
+            if dispatch_session is None:
+                contract_bindings = bindings_factory()
                 dispatch_session = HostProfileControlSession(
                     bundle_root=bundle_root,
                     user_data_root=user_data,
