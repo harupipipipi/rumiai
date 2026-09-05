@@ -29,6 +29,7 @@ from .external_pack_catalog_v4 import (
     resolve_admitted_pack_root as resolve_pack_root,
 )
 from .profile_runtime_port import require_profile_runtime
+from .active_profile_store_v4 import ActiveProfilePointer
 
 HOST_PROFILE_CONTROL_OPERATIONS = frozenset(
     {
@@ -217,11 +218,11 @@ class _ApprovalCandidate:
 
 
 class HostProfileControlSession:
-    """Catalog-bound Host control session available before Profile activation.
+    """Catalog-bound Host control session for activation and reconfirmation.
 
     This session exposes no Pack, workspace, Conversation, credential, or Shell
     operation.  Its freshness fence is the immutable Profile catalog plus the
-    continued absence of a Host-global active pointer.
+    unchanged Host-global active pointer (normally absent before activation).
     """
 
     _OPERATIONS = HOST_PROFILE_CONTROL_OPERATIONS
@@ -232,12 +233,14 @@ class HostProfileControlSession:
         bundle_root: Path | None = None,
         user_data_root: Path | None = None,
         runtime_surface_factory: RuntimeSurfaceFactory | None = None,
+        active_profile_binding: ActiveProfilePointer | None = None,
     ) -> None:
         from .bootstrap.profile_capture import host_profile_catalog
         from .bootstrap.profile_capture import runtime_user_data_root
         from .profile_catalog_v4 import profile_catalog_digest
 
         self._bundle_root = bundle_root
+        self._active_profile_binding = active_profile_binding
         self._user_data_root = (
             Path(user_data_root).resolve()
             if user_data_root is not None
@@ -301,14 +304,15 @@ class HostProfileControlSession:
         return self._security_epoch
 
     def assert_current(self) -> None:
-        """Fence the session to the same catalog and an empty active pointer."""
+        """Fence the session to its exact catalog, epoch, and active selection."""
 
         from .active_profile_store_v4 import ActiveProfileStore
         from .authority.v4 import AuthorityStore
         from .profile_catalog_v4 import profile_catalog_digest
 
-        if ActiveProfileStore(self._user_data_root).load(verify_snapshot=True) is not None:
-            raise PackControlStaleRevision("Host active Profile is no longer empty")
+        current = ActiveProfileStore(self._user_data_root).load(verify_snapshot=True)
+        if current != self._active_profile_binding:
+            raise PackControlStaleRevision("Host active Profile selection changed")
         with AuthorityStore(self._user_data_root / "authority" / "v4.sqlite3") as authority:
             if authority.security_epoch != self._security_epoch:
                 raise PackControlStaleRevision("Host Authority epoch changed")

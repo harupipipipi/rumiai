@@ -107,6 +107,10 @@ def test_superseded_packaged_artifact_starts_ui_ready_reconfirmation(
         "packaged release; explicit reconfirmation is required"
     )
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "user_data"))
+    from core_runtime.bootstrap.profile_capture import prepare_default_profile_confirmation
+
+    capture_default_profile(confirmation=prepare_default_profile_confirmation())
 
     port = _free_port()
 

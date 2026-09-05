@@ -152,7 +152,11 @@ class Kernel:
                 raise RuntimeError("application HTTP composition is unavailable")
             contract_bindings = bindings_factory()
             reconfirmation_error: str | None = None
+            control_active_binding = None
             if active_profile_exists():
+                from ..active_profile_store_v4 import ActiveProfileStore
+
+                selected_pointer = ActiveProfileStore(user_data).load(verify_snapshot=True)
                 try:
                     active = capture_active_profile()
                     authority_store = AuthorityStore(
@@ -202,12 +206,14 @@ class Kernel:
                     if not require_profile_runtime().is_reconfirmation_required(error):
                         raise
                     reconfirmation_error = str(error)
+                    control_active_binding = selected_pointer
             if dispatch_session is None:
                 contract_bindings = bindings_factory()
                 dispatch_session = HostProfileControlSession(
                     bundle_root=bundle_root,
                     user_data_root=user_data,
                     runtime_surface_factory=self._runtime_surface_factory,
+                    active_profile_binding=control_active_binding,
                 )
                 self._dispatch_session = dispatch_session
             port = resolve_runtime_port()
