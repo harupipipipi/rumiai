@@ -700,11 +700,15 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         ProfileDefinitionStoreConflict,
     )
     from core_runtime.profile_runtime_port import require_profile_runtime
-    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+    from tests.test_profile_architecture_review_c import _packaged_catalog_revision
 
     user_data = tmp_path / "user_data"
     monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    runtime = require_profile_runtime()
+    catalog = _packaged_catalog_revision(tmp_path / "old", b"old")
+    monkeypatch.setattr(runtime, "load_catalog", lambda _root: catalog)
+    monkeypatch.setattr(capture, "_bundle_root", lambda _base=None: catalog.root)
     first = capture.capture_default_profile(
         confirmation=capture.prepare_default_profile_confirmation()
     )
@@ -715,11 +719,8 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     before = definitions.snapshot()
     pointer_path = ActiveProfileStore(user_data).path
     pointer_before = pointer_path.read_bytes()
-    runtime = require_profile_runtime()
-    catalog = runtime.load_catalog(packaged_profile_bundle_root())
-    successor_source = dict(catalog.profiles["defaults"], display_name="New bundled Defaults")
-    successor_catalog = runtime.catalog_with_profiles(catalog, {"defaults": successor_source})
-    monkeypatch.setattr(runtime, "load_catalog", lambda _root: successor_catalog)
+    catalog = _packaged_catalog_revision(tmp_path / "new", b"new")
+    successor_source = catalog.profiles["defaults"]
     confirmation = capture.prepare_default_profile_confirmation()
     if customized:
         with pytest.raises(ProfileDefinitionStoreConflict):

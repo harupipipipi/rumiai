@@ -320,8 +320,11 @@ def test_valid_active_artifact_revision_requires_explicit_reconfirmation(
     with pytest.raises(
         ProfileReconfirmationRequired,
         match="artifact identity was superseded",
-    ):
+    ) as required:
         store.load_active_snapshot()
+    assert required.value.verified_profile_definition_digest == (
+        predecessor.plan["profile_definition_digest"]
+    )
     assert (state / "active.json").read_bytes() == pointer_before
     assert predecessor_envelope.read_bytes() == predecessor_bytes
     assert len(tuple((state / "activations").iterdir())) == 1

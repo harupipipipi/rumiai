@@ -929,7 +929,7 @@ def capture_bootstrap_profile(
             )
             if resolved_reconciliation is not None:
                 try:
-                    predecessor = store.load_active_snapshot()
+                    store.load_active_snapshot()
                 except Exception as error:
                     if not runtime.is_reconfirmation_required(error):
                         raise
@@ -937,7 +937,7 @@ def capture_bootstrap_profile(
                         error, "verified_profile_definition_digest", None
                     )
                 else:
-                    predecessor_digest = predecessor.resolved.plan["profile_definition_digest"]
+                    raise ProfileResolutionDenied("activation confirmation was replayed")
                 register_bootstrap_definition(
                     user_data,
                     catalog.profiles[profile_id],
