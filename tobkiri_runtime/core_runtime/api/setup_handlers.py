@@ -141,6 +141,7 @@ class SetupHandlersMixin:
             else:
                 active_profile = capture_bootstrap_profile(confirmation=confirmation)
             audit_receipt = activation_audit_receipt(active_profile)
+            result = dict(runtime.setup_activation_success(active_profile, audit_receipt))
         except Exception as error:
             if active_profile is not None or isinstance(error, ActivationCommittedError):
                 # Never claim no writes after the durable activation boundary.
@@ -169,7 +170,6 @@ class SetupHandlersMixin:
                     close()
                 except Exception:
                     logger.exception("activated restart-only dispatch session did not close")
-        result = dict(runtime.setup_activation_success(active_profile, audit_receipt))
         if result.get("state") == "active":
             # The receipt has been durably committed, but this HTTP handler
             # remains bound to HostProfileControl until the Launcher performs
