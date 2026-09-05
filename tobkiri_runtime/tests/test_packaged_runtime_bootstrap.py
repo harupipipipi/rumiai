@@ -690,7 +690,7 @@ def test_committed_bootstrap_recovery_rejects_conflicting_state(
         definitions.create_profile(catalog.profiles["defaults"])
         definitions.delete_profile("defaults")
     before = definitions.snapshot()
-    with pytest.raises((runtime.denied, ProfileDefinitionStoreConflict)):
+    with pytest.raises((type(runtime.denied("test")), ProfileDefinitionStoreConflict)):
         recover_bootstrap_definition(
             user_data=user_data, pointer=pointer, runtime=runtime, catalog=catalog
         )
