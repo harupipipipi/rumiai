@@ -47,3 +47,31 @@ test("a preparer failure is returned without retrying another interpreter", () =
   }), 7);
   assert.equal(calls.length, 1);
 });
+
+test("release preparation uses the bound Python instead of system PATH", () => {
+  const calls = [];
+  const status = runPrepareViewerRuntime(["--mode", "release"], {
+    environment: { TOBKIRI_PACKAGING_PYTHON: "/sealed/venv/bin/python3", TOBKIRI_PACKAGING_PYTHON_SNAPSHOT: "/sealed" },
+    spawn(command, args, options) {
+      assert.equal(options.cwd, "/sealed");
+      calls.push([command, args]);
+      return { status: 0 };
+    },
+  });
+  assert.equal(status, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "/sealed/venv/bin/python3");
+  assert.deepEqual(calls[0][1].slice(0, 2), ["-I", "-B"]);
+});
+
+test("a missing bound interpreter never falls back to an ambient Python", () => {
+  const calls = [];
+  assert.throws(() => runPrepareViewerRuntime(["--mode", "release"], {
+    environment: { TOBKIRI_PACKAGING_PYTHON: "/sealed/venv/bin/python3", TOBKIRI_PACKAGING_PYTHON_SNAPSHOT: "/sealed" },
+    spawn(command) {
+      calls.push(command);
+      return { error: Object.assign(new Error("missing"), { code: "ENOENT" }) };
+    },
+  }), /Python 3 is required/);
+  assert.deepEqual(calls, ["/sealed/venv/bin/python3"]);
+});

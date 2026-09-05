@@ -668,7 +668,7 @@ def _resource_files(dest_root: Path) -> list[Path]:
                 "Staged resource contains symlink: "
                 f"{relative}"
             )
-        metadata = path.stat(follow_symlinks=False)
+        metadata = path.lstat()
         if stat.S_ISDIR(metadata.st_mode):
             continue
         if not stat.S_ISREG(metadata.st_mode):
@@ -791,7 +791,7 @@ def verify_runtime_resource_manifest(dest_root: Path) -> dict[str, object]:
         raise FileNotFoundError(
             f"Runtime resource manifest is missing or unsafe: {manifest_path}"
         )
-    if manifest_path.stat(follow_symlinks=False).st_nlink != 1:
+    if manifest_path.lstat().st_nlink != 1:
         raise RuntimeError("Runtime resource manifest is hardlinked")
     try:
         actual = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -849,7 +849,8 @@ def verify_staged_bootstrap_import(dest_root: Path) -> None:
     )
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-c", code],
-        cwd=dest_root.parent,
+        # Sealed Python resolves its relocatable home from the snapshot root.
+        cwd=os.environ.get(PACKAGING_PYTHON_SNAPSHOT_ENV, dest_root.parent),
         text=True,
         capture_output=True,
     )

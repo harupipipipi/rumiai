@@ -242,10 +242,16 @@ def test_prepare_dev_pack_shell_writes_verified_debug_digest(tmp_path, monkeypat
     ) == catalog.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("sealed", [False, True])
 def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(
     tmp_path,
     monkeypatch,
+    sealed,
 ):
+    if sealed:
+        monkeypatch.setenv("TOBKIRI_PACKAGING_PYTHON_SNAPSHOT", str(tmp_path / "sealed"))
+    else:
+        monkeypatch.delenv("TOBKIRI_PACKAGING_PYTHON_SNAPSHOT", raising=False)
     module = _load_module()
     manifest = tmp_path / "pack-shell" / "Cargo.toml"
     preparer_path = tmp_path / ".github" / "scripts" / "prepare_tauri_resources.py"
@@ -281,6 +287,8 @@ def test_prepare_release_builds_pack_shell_then_runs_verified_resource_preparer(
         tmp_path,
     )
     assert calls[2][0][0] == os.fspath(module.sys.executable)
+    assert calls[2][0][1:3] == ["-I", "-B"]
+    assert calls[2][1] == (tmp_path / "sealed" if sealed else tmp_path)
     assert "--uv-version" in calls[2][0]
     assert "0.11.14" in calls[2][0]
     assert "--require-runtime-tools" in calls[2][0]

@@ -481,6 +481,8 @@ def prepare_release(repo_root: Path, target: str) -> None:
     run_command(
         [
             sys.executable,
+            "-I",
+            "-B",
             repo_root / ".github" / "scripts" / "prepare_tauri_resources.py",
             "--repo-root",
             repo_root,
@@ -490,7 +492,8 @@ def prepare_release(repo_root: Path, target: str) -> None:
             preparer.UV_PINNED_VERSION,
             "--require-runtime-tools",
         ],
-        cwd=repo_root,
+        # The sealed interpreter resolves its relocatable home from this root.
+        cwd=Path(os.environ.get("TOBKIRI_PACKAGING_PYTHON_SNAPSHOT", repo_root)),
     )
 
 

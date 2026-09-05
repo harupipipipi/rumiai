@@ -9,6 +9,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PREPARER_PATH = fileURLToPath(
@@ -54,13 +55,23 @@ export const runPrepareViewerRuntime = (
     spawn = spawnSync,
   } = {},
 ) => {
-  const commands = python3Commands(platform);
+  // Release packaging binds a Python with the pinned validation dependencies.
+  // The Tauri runner deliberately puts Apple's system tools first in PATH;
+  // its older python3 is not the packaging interpreter.
+  const packagingPython = environment.TOBKIRI_PACKAGING_PYTHON;
+  const packagingRoot = environment.TOBKIRI_PACKAGING_PYTHON_SNAPSHOT;
+  if (packagingPython && (!isAbsolute(packagingPython) || !packagingRoot || !isAbsolute(packagingRoot))) {
+    throw new Error("Packaging Python requires an absolute interpreter and snapshot root");
+  }
+  const commands = packagingPython
+    ? [{ command: packagingPython, arguments: ["-I", "-B"] }]
+    : python3Commands(platform);
 
   for (const candidate of commands) {
     const result = spawn(
       candidate.command,
       [...candidate.arguments, PREPARER_PATH, ...args],
-      { env: environment, stdio: "inherit" },
+      { env: environment, stdio: "inherit", cwd: packagingPython ? packagingRoot : undefined },
     );
     if (result.error?.code === "ENOENT") {
       continue;
