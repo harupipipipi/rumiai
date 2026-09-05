@@ -608,15 +608,16 @@ def test_bootstrap_registers_selected_definition_in_existing_collection(
             patch.setattr(capture, "register_bootstrap_definition", lambda *_args: None)
         active = capture.capture_default_profile(confirmation=confirmation)
     assert (definitions.get_profile("defaults") is None) == legacy_missing
-    pointer_path = user_data / "active_profile.json"
-    pointer_before = pointer_path.read_bytes() if pointer_path.exists() else None
+    from core_runtime.active_profile_store_v4 import ActiveProfileStore
+
+    pointer_path = ActiveProfileStore(user_data).path
+    pointer_before = pointer_path.read_bytes()
     restarted = capture.capture_active_profile()
     assert restarted.activation == active.activation
     assert restarted.resolved.plan == active.resolved.plan
     assert definitions.get_profile("existing") == existing
     assert dict(definitions.get_profile("defaults").profile) == catalog.profiles["defaults"]
-    if pointer_before is not None:
-        assert pointer_path.read_bytes() == pointer_before
+    assert pointer_path.read_bytes() == pointer_before
     generation = definitions.snapshot()["generation"]
     capture.capture_active_profile()
     assert definitions.snapshot()["generation"] == generation
@@ -649,3 +650,48 @@ def test_bootstrap_does_not_replace_existing_definition(
         capture.capture_default_profile(confirmation=confirmation)
     assert definitions.snapshot() == before
     assert not (user_data / "workspaces" / "defaults" / "activation" / "active.json").exists()
+
+
+@pytest.mark.parametrize("conflict", ["source", "pointer", "tombstone"])
+def test_committed_bootstrap_recovery_rejects_conflicting_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: str
+) -> None:
+    """Repair requires an absent definition and the exact approved source and pointer."""
+    from dataclasses import replace
+
+    import core_runtime.bootstrap.profile_capture as capture
+    from core_runtime.active_profile_store_v4 import ActiveProfileStore
+    from core_runtime.bootstrap.profile_registry import recover_bootstrap_definition
+    from core_runtime.profile_definition_store_v4 import (
+        ProfileDefinitionStore,
+        ProfileDefinitionStoreConflict,
+    )
+    from core_runtime.profile_runtime_port import require_profile_runtime
+    from tests.conformance_support.packaged_profile import packaged_profile_bundle_root
+
+    user_data = tmp_path / "user_data"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    runtime = require_profile_runtime()
+    catalog = runtime.load_catalog(packaged_profile_bundle_root())
+    definitions = ProfileDefinitionStore(user_data)
+    definitions.create_profile(catalog.profiles["defaults"], profile_id="existing")
+    confirmation = capture.prepare_default_profile_confirmation()
+    with monkeypatch.context() as patch:
+        patch.setattr(capture, "register_bootstrap_definition", lambda *_args: None)
+        capture.capture_default_profile(confirmation=confirmation)
+    pointer = ActiveProfileStore(user_data).require(verify_snapshot=True)
+    if conflict == "source":
+        source = dict(catalog.profiles["defaults"], display_name="Unapproved change")
+        catalog = runtime.catalog_with_profiles(catalog, {"defaults": source})
+    elif conflict == "pointer":
+        pointer = replace(pointer, plan_digest="sha256:" + "0" * 64)
+    else:
+        definitions.create_profile(catalog.profiles["defaults"])
+        definitions.delete_profile("defaults")
+    before = definitions.snapshot()
+    with pytest.raises((runtime.denied, ProfileDefinitionStoreConflict)):
+        recover_bootstrap_definition(
+            user_data=user_data, pointer=pointer, runtime=runtime, catalog=catalog
+        )
+    assert definitions.snapshot() == before
