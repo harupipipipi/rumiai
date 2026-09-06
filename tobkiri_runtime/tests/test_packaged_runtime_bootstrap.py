@@ -690,6 +690,20 @@ def test_committed_bootstrap_recovery_rejects_conflicting_state(
     assert definitions.snapshot() == before
 
 
+def test_initial_setup_review_does_not_create_profile_or_authority_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading the initial confirmation must not initialize persistent Host stores."""
+    from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+    user_data = tmp_path / "not-yet-initialized"
+    monkeypatch.setenv("TOBKIRI_USER_DATA", str(user_data))
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
+    review = SetupHandlersMixin._setup_listing()
+    assert review["state"] == "review_required"
+    assert not user_data.exists()
+
+
 @pytest.mark.parametrize("customized", [False, True])
 @pytest.mark.parametrize("extra_pack", [False, True])
 def test_confirmed_bootstrap_upgrade_preserves_definition_history(

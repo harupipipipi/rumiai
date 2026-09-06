@@ -18,9 +18,14 @@ def bootstrap_review_catalog(
     *, runtime: Any, catalog: Any, user_data: Path, profile_id: str
 ) -> Any:
     """Keep the verified active definition when reviewing a packaged Shell update."""
+    pointer_path = user_data / "profiles" / "active.json"
+    if not pointer_path.exists() and not pointer_path.is_symlink():
+        return catalog
     pointer = ActiveProfileStore(user_data).load(verify_snapshot=True)
+    if pointer is None or pointer.profile_id != profile_id:
+        return catalog
     registered = ProfileDefinitionStore(user_data).get_profile(profile_id)
-    if pointer is None or pointer.profile_id != profile_id or registered is None:
+    if registered is None:
         return catalog
     workspace = user_data / "workspaces" / profile_id
     successor_required = False
