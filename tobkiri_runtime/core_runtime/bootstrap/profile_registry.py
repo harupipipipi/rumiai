@@ -75,7 +75,9 @@ def bootstrap_review_catalog(
         active_profile["shell"]["pack_id"],
     }
     if not closure_ids.issubset(catalog.packs):
-        raise runtime.denied("bootstrap review selects an unavailable Pack")
+        from ..pack_control_v4 import catalog_with_admitted_pack_closure
+
+        catalog, _ = catalog_with_admitted_pack_closure(catalog, sorted(closure_ids))
     dependency_ids = {
         dependency
         for pack_id in closure_ids

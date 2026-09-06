@@ -420,12 +420,14 @@ def _genesis_authority_snapshot_digest(bundle_lock_digest: str) -> str:
 def _bootstrap_review_candidate(*, base_dir: Path | None = None) -> tuple[Any, tuple[str, ...]]:
     """Return the exact bootstrap candidate without dropping active Pack selections."""
     runtime = require_profile_runtime()
-    return bootstrap_review_catalog(
-        runtime=runtime,
-        catalog=runtime.load_catalog(_bundle_root(base_dir)),
-        user_data=_user_data_root(base_dir),
-        profile_id=_bootstrap_profile_id(),
-    )
+    user_data = _user_data_root(base_dir)
+    with runtime_user_data_scope(user_data):
+        return bootstrap_review_catalog(
+            runtime=runtime,
+            catalog=runtime.load_catalog(_bundle_root(base_dir)),
+            user_data=user_data,
+            profile_id=_bootstrap_profile_id(),
+        )
 
 
 def _resolve_bootstrap_candidate(

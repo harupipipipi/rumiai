@@ -1459,6 +1459,48 @@ def _active_profile(
     }, profile
 
 
+def catalog_with_admitted_pack_closure(
+    catalog: Any, pack_ids: list[str]
+) -> tuple[Any, set[str]]:
+    """Extend a verified catalog only with admitted Pack manifests and dependencies."""
+    external_packs = dict(catalog.packs)
+    pending = list(dict.fromkeys(pack_ids))
+    requested_closure: set[str] = set()
+    while pending:
+        pack_id = pending.pop(0)
+        if pack_id not in requested_closure:
+            requested_closure.add(pack_id)
+        manifest = external_packs.get(pack_id)
+        if manifest is None:
+            record = load_pack_catalog().get(pack_id)
+            if record is None:
+                raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
+            root = resolve_pack_root(pack_id)
+            manifest_path = root / "pack.v4.json"
+            if manifest_path.is_symlink() or not manifest_path.is_file():
+                raise PackControlDigestMismatch("Pack v4 manifest is unavailable")
+            try:
+                manifest = validate_document(manifest_path.read_bytes(), "pack")
+            except Exception as error:
+                raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
+            external_normal = record.get("authority") == "host-signed-external-normal-v4"
+            if manifest["pack"]["id"] != pack_id or (
+                external_normal
+                and (
+                    manifest["pack"]["kind"] != "normal_sandbox"
+                    or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
+                )
+            ):
+                raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
+            external_packs[pack_id] = manifest
+        dependencies = set(manifest["requirements"]["pack_dependencies"])
+        pending.extend(
+            dependency for dependency in sorted(dependencies) if dependency not in requested_closure
+        )
+    runtime = require_profile_runtime()
+    return runtime.catalog_with_packs(catalog, external_packs), requested_closure
+
+
 def resolve_profile_pack_set(
     pack_ids: list[str],
     *,
@@ -1519,42 +1561,8 @@ def resolve_profile_pack_set(
             ) from error
     elif not trusted_active_resolution:
         raise PackControlUnapproved("selected Profile requires exact catalog bindings")
-    external_packs = dict(catalog.packs)
-    pending = list(dict.fromkeys(pack_ids))
-    requested_closure: set[str] = set()
-    while pending:
-        pack_id = pending.pop(0)
-        if pack_id not in requested_closure:
-            requested_closure.add(pack_id)
-        manifest = external_packs.get(pack_id)
-        if manifest is None:
-            record = load_pack_catalog().get(pack_id)
-            if record is None:
-                raise PackControlInvalidRequest("Pack is absent from the canonical v4 catalog")
-            root = resolve_pack_root(pack_id)
-            manifest_path = root / "pack.v4.json"
-            if manifest_path.is_symlink() or not manifest_path.is_file():
-                raise PackControlDigestMismatch("Pack v4 manifest is unavailable")
-            try:
-                manifest = validate_document(manifest_path.read_bytes(), "pack")
-            except Exception as error:
-                raise PackControlDigestMismatch("Pack v4 manifest is invalid") from error
-            external_normal = record.get("authority") == "host-signed-external-normal-v4"
-            if manifest["pack"]["id"] != pack_id or (
-                external_normal
-                and (
-                    manifest["pack"]["kind"] != "normal_sandbox"
-                    or manifest["pack"]["artifact_digest"] != record.get("artifact_digest")
-                )
-            ):
-                raise PackControlDigestMismatch("Pack v4 manifest identity is inconsistent")
-            external_packs[pack_id] = manifest
-        dependencies = set(manifest["requirements"]["pack_dependencies"])
-        pending.extend(
-            dependency for dependency in sorted(dependencies) if dependency not in requested_closure
-        )
     runtime = require_profile_runtime()
-    catalog = runtime.catalog_with_packs(catalog, external_packs)
+    catalog, requested_closure = catalog_with_admitted_pack_closure(catalog, pack_ids)
     source = catalog.profiles.get(profile_id)
     if source is None:
         raise PackControlInvalidRequest("selected Profile is unavailable")

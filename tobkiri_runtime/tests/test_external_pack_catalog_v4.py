@@ -236,6 +236,13 @@ def test_signed_external_pack_install_approve_enable_creates_profile_revision(
     assert _invoke(session, "pack.status", {"pack_id": PACK_ID})["enabled"] is False
     assert _invoke(session, "pack.enable", {"pack_id": PACK_ID})["enabled"] is True
 
+    from core_runtime.bootstrap.profile_capture import prepare_bootstrap_profile_review
+
+    review_catalog, _ = prepare_bootstrap_profile_review()
+    assert PACK_ID in review_catalog.packs
+    assert PACK_ID in {
+        item["pack_id"] for item in review_catalog.profiles["defaults"]["packs"]
+    }
     active = capture_default_profile()
     enabled_profile = json.loads(json.dumps(active.resolved.profile))
     assert canonical_digest(active.resolved.profile) != initial_revision
