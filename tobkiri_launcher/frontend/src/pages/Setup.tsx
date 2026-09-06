@@ -92,7 +92,7 @@ export function Setup() {
 
   useEffect(() => {
     let live = true;
-    void fetchDefaultsSetupState()
+    void fetchDefaultsSetupState({waitForRestart: true})
       .then((next) => {
         if (!live) return;
         setSetup(next);

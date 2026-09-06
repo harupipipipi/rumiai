@@ -721,6 +721,50 @@ test('activation verification waits through a slow restart without submitting an
   assert.equal(reads, 1);
 });
 
+test('Setup reconnects after Kernel connection resets without replaying activation', async (context) => {
+  context.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 0});
+  const fixture = JSON.parse(readFileSync(new URL(
+    '../../../../tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json', import.meta.url,
+  ), 'utf8'));
+  let reads = 0;
+  fetchHandler = async (input, init) => {
+    assert.equal(String(input), '/api/setup/packs');
+    assert.equal(init?.method, 'GET');
+    if (++reads <= 2) throw new TypeError('Load failed');
+    return new Response(JSON.stringify({success: true, data: fixture}));
+  };
+  const pending = fetchDefaultsSetupState({waitForRestart: true});
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    context.mock.timers.tick(500);
+  }
+  assert.equal((await pending).state, fixture.state);
+  assert.equal(reads, 3);
+});
+
+test('Setup connection recovery remains bounded and does not retry integrity errors', async (context) => {
+  context.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 0});
+  let reads = 0;
+  fetchHandler = async () => {
+    reads += 1;
+    throw new TypeError('Load failed');
+  };
+  const bounded = assert.rejects(fetchDefaultsSetupState({waitForRestart: true}), /Load failed/);
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    context.mock.timers.tick(500);
+  }
+  await bounded;
+  assert.ok(reads <= 120);
+  reads = 0;
+  fetchHandler = async () => {
+    reads += 1;
+    return new Response(JSON.stringify({success: false, error: 'Profile digest mismatch'}), {status: 409});
+  };
+  await assert.rejects(fetchDefaultsSetupState({waitForRestart: true}), /Profile digest mismatch/);
+  assert.equal(reads, 1);
+});
+
 test('presentation wrappers use Launcher-owned Tauri commands', async () => {
   await fetchPresentationState();
   await selectPresentation({

@@ -365,11 +365,23 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
 export async function fetchDefaultsSetupState(
   options: {waitForRestart?: boolean} = {},
 ): Promise<DefaultsSetupState> {
-  // Activation rotates the Kernel and panel session. Keep that one read alive
-  // for the same bounded restart window instead of abandoning it after 10 s.
-  return parseDefaultsSetupState(await apiFetch<unknown>(
-    '/api/setup/packs', {}, options.waitForRestart ? {timeoutMs: 60_000} : {},
-  ));
+  // Restart may close the connection before a response arrives. Retry only
+  // transport failures of this read; integrity/auth errors and POSTs are final.
+  const deadline = Date.now() + 60_000;
+  while (true) {
+    try {
+      return parseDefaultsSetupState(await apiFetch<unknown>(
+        '/api/setup/packs', {}, options.waitForRestart
+          ? {timeoutMs: Math.max(1, deadline - Date.now())} : {},
+      ));
+    } catch (error) {
+      const disconnected = error instanceof TypeError && [
+        'Load failed', 'Failed to fetch', 'NetworkError when attempting to fetch resource.',
+      ].includes(error.message);
+      if (!options.waitForRestart || !disconnected || Date.now() + 500 >= deadline) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    }
+  }
 }
 
 export function parseDefaultsActivationResponse(

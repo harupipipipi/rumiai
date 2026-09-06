@@ -366,13 +366,17 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
 }
 
 #[tauri::command]
-fn reauthorize_panel_session(
+async fn reauthorize_panel_session(
     window: tauri::WebviewWindow,
     config: tauri::State<'_, AppConfig>,
     km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
 ) -> Result<String, String> {
     validate_panel_session_caller(&window, config.inner())?;
-    request_fresh_panel_session_code(&config, km.inner())
+    let config = config.inner().clone();
+    let km = Arc::clone(km.inner());
+    tauri::async_runtime::spawn_blocking(move || request_fresh_panel_session_code(&config, &km))
+        .await
+        .map_err(|error| format!("panel reauthorization task failed: {error}"))?
         .map_err(|error| format!("panel reauthorization failed: {error}"))
 }
 
