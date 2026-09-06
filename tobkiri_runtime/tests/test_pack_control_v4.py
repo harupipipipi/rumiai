@@ -114,44 +114,45 @@ def test_catalog_separates_admission_and_active_pack_digests(captured_session) -
     assert _catalog_pack(catalog, TARGET_PACK)["pack_artifact_digest"] is None
 
 
-def test_catalog_install_approve_enable_and_restart_read_back(captured_session) -> None:
+@pytest.mark.parametrize("pack_id", [TARGET_PACK, "rumi_agent_workroom_pack"])
+def test_catalog_install_approve_enable_and_restart_read_back(captured_session, pack_id: str) -> None:
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, user_data = captured_session
     initial = _invoke(session, "catalog.read")
     assert initial["count"] == 140
-    target = _catalog_pack(initial, TARGET_PACK)
+    target = _catalog_pack(initial, pack_id)
     assert target["installed"] is False
     assert target["enabled"] is False
     assert target["approved"] is False
 
-    assert _invoke(session, "pack.install", {"pack_id": TARGET_PACK})["installed"]
+    assert _invoke(session, "pack.install", {"pack_id": pack_id})["installed"]
     candidate = _invoke(
         session,
         "approval.candidate",
-        {"pack_id": TARGET_PACK},
+        {"pack_id": pack_id},
     )
     approved = _invoke(
         session,
         "approval.approve",
-        {"pack_id": TARGET_PACK, "candidate_id": candidate["candidate_id"]},
+        {"pack_id": pack_id, "candidate_id": candidate["candidate_id"]},
     )
     assert approved["approved"] is True
-    enabled = _invoke(session, "pack.enable", {"pack_id": TARGET_PACK})
+    enabled = _invoke(session, "pack.enable", {"pack_id": pack_id})
     assert enabled["enabled"] is True
 
     restarted = _capture_control_session()
-    status = _invoke(restarted, "pack.status", {"pack_id": TARGET_PACK})
+    status = _invoke(restarted, "pack.status", {"pack_id": pack_id})
     assert status["installed"] is True
     assert status["approved"] is True
     assert status["enabled"] is True
 
     first_activation = capture_default_profile().activation["activation_id"]
     assert (
-        _invoke(restarted, "pack.disable", {"pack_id": TARGET_PACK})["enabled"] is False
+        _invoke(restarted, "pack.disable", {"pack_id": pack_id})["enabled"] is False
     )
     recaptured = _capture_control_session()
     assert (
-        _invoke(recaptured, "pack.status", {"pack_id": TARGET_PACK})["enabled"] is False
+        _invoke(recaptured, "pack.status", {"pack_id": pack_id})["enabled"] is False
     )
     assert capture_default_profile().activation["activation_id"] != first_activation
 
