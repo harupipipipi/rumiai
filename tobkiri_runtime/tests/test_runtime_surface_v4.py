@@ -263,6 +263,33 @@ def test_operation_and_principal_views_are_resolved_plan_derived(active_runtime)
     )
 
 
+def test_operations_include_only_approved_enabled_pack_evidence(
+    active_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Operation owners join verified Pack evidence without reviving revoked Packs."""
+    lifecycle = runtime_surface._captured_lifecycle_projection()
+    enabled = [pack for pack in lifecycle["packs"] if pack["enabled"] and pack["approved"]]
+    assert len(enabled) > 2
+    enabled[0]["approved"] = False
+    enabled[1]["enabled"] = False
+    monkeypatch.setattr(
+        runtime_surface, "_captured_lifecycle_projection", lambda *_args: lifecycle
+    )
+    service = _service(active_runtime)
+    evidence = service.read_advanced("operations")["data"]["packs"]
+    all_packs = service.read_advanced("packs")["data"]["packs"]
+    assert evidence == [pack for pack in all_packs if pack["enabled"] and pack["approved"]]
+    assert evidence
+    assert not {enabled[0]["pack_id"], enabled[1]["pack_id"]} & {
+        pack["pack_id"] for pack in evidence
+    }
+    locked = {
+        item["identity"]: item["artifact_digest"]
+        for item in active_runtime.resolved.lock["effective_set"]
+    }
+    assert all(pack["artifact_digest"] == locked[pack["pack_id"]] for pack in evidence)
+
+
 def test_contract_routes_are_exact_digest_pinned_broker_bindings(active_runtime) -> None:
     result = _service(active_runtime).read_advanced("contracts")
     routes = result["data"]["routes"]

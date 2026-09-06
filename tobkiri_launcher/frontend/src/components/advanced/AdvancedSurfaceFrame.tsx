@@ -67,7 +67,7 @@ function StatusNotice({
   state: SurfaceStateNotice;
   onRetry: () => void;
 }): ReactNode {
-  if (state.status === 'loading' && !state.stale) {
+  if ((state.status === 'idle' || state.status === 'loading') && !state.stale) {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-border bg-bg-card px-4 py-4 text-sm text-text-muted" role="status" aria-live="polite">
         <TobkiriLoadingMark />
@@ -172,7 +172,7 @@ export function AdvancedSurfaceFrame({
             Canonical v4 projection accepted. {actionStateCopy(descriptor.actions, state.status, state.stale)}
           </div>
         ) : null}
-        {children}
+        {state.stale || (state.status !== 'idle' && state.status !== 'loading') ? children : null}
       </div>
     </div>
   );

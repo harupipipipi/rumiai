@@ -1217,6 +1217,13 @@ class RuntimeSurfaceService:
         )
         deadline.checkpoint()
         data = {normalized: advanced[normalized]}
+        if normalized == "operations":
+            # Invocation controls must join operation and Pack identities from
+            # this same accepted snapshot, without a second catalog read.
+            data["packs"] = [
+                pack for pack in advanced["packs"]
+                if pack["enabled"] and pack["approved"]
+            ]
         if normalized == "contracts":
             data["routes"] = advanced["routes"]
         return self._read_envelope(snapshot, surface=normalized, data=data)

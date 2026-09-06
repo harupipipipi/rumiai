@@ -1,11 +1,28 @@
 import assert from 'node:assert/strict';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
+import {renderToStaticMarkup} from 'react-dom/server';
 import {JSDOM} from 'jsdom';
 import test from 'node:test';
 
 import {AdvancedSurfaceFrame} from './AdvancedSurfaceFrame';
 import {LAUNCHER_ADVANCED_VIEWS} from '@/src/lib/advancedSurfaces';
+
+test('initial loading does not announce empty results before a snapshot arrives', () => {
+  for (const status of ['idle', 'loading', 'ready'] as const) {
+    const html = renderToStaticMarkup(
+      <AdvancedSurfaceFrame
+        descriptor={LAUNCHER_ADVANCED_VIEWS.profileFiles}
+        state={{status, stale: false, error: null}}
+        onRetry={() => {}}
+      >
+        <p>No finite evidence entries are available</p>
+      </AdvancedSurfaceFrame>,
+    );
+    assert.equal(html.includes('No finite evidence entries are available'), status === 'ready');
+    assert.equal(html.includes('Loading the canonical v4 projection'), status !== 'ready');
+  }
+});
 
 function createSurface(): {dom: JSDOM; container: HTMLElement; root: Root} {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>');
