@@ -44,11 +44,11 @@ class SetupHandlersMixin:
 
         runtime = require_profile_runtime()
         from ..bootstrap.profile_capture import (
-            _bundle_root,
+            bootstrap_catalog_for_review,
             prepare_bootstrap_profile_confirmation,
         )
 
-        catalog = runtime.load_catalog(_bundle_root())
+        catalog = bootstrap_catalog_for_review()
         confirmation = prepare_bootstrap_profile_confirmation()
         return runtime.setup_listing(
             catalog,

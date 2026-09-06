@@ -1,15 +1,65 @@
 """Register explicitly selected bootstrap definitions without replacing user state."""
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from tobkiri_protocol.canonical import canonical_digest
 
 from ..authority.v4 import AuthorityStore
+from ..active_profile_store_v4 import ActiveProfileStore
 from ..profile_definition_store_v4 import (
     ProfileDefinitionStore,
     ProfileDefinitionStoreConflict,
 )
+
+
+def bootstrap_review_catalog(
+    *, runtime: Any, catalog: Any, user_data: Path, profile_id: str
+) -> Any:
+    """Keep the verified active definition when reviewing a packaged Shell update."""
+    pointer = ActiveProfileStore(user_data).load(verify_snapshot=True)
+    registered = ProfileDefinitionStore(user_data).get_profile(profile_id)
+    if pointer is None or pointer.profile_id != profile_id or registered is None:
+        return catalog
+    workspace = user_data / "workspaces" / profile_id
+    successor_required = False
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        try:
+            active = runtime.activation_store(
+                root=workspace / "activation",
+                workspace=workspace,
+                profile_id=profile_id,
+                authority=authority,
+                catalog=catalog,
+            ).load_active_snapshot()
+        except Exception as error:
+            if not runtime.is_reconfirmation_required(error):
+                raise
+            definition_digest = getattr(error, "verified_profile_definition_digest", None)
+            identity = getattr(error, "verified_activation_identity", None)
+            successor_required = True
+        else:
+            definition_digest = active.resolved.plan["profile_definition_digest"]
+            identity = (
+                active.resolved.plan["profile_revision"],
+                active.activation["activation_id"],
+                active.resolved.plan["plan_digest"],
+                active.resolved.lock["lock_digest"],
+            )
+    if identity != (
+        pointer.profile_revision,
+        pointer.activation_id,
+        pointer.plan_digest,
+        pointer.lock_digest,
+    ) or definition_digest != canonical_digest(registered.profile):
+        raise ProfileDefinitionStoreConflict(
+            "bootstrap review does not match the verified active definition"
+        )
+    candidate = deepcopy(dict(registered.profile))
+    if successor_required:
+        candidate["shell"] = deepcopy(catalog.profiles[profile_id]["shell"])
+    return runtime.catalog_with_profiles(catalog, {**catalog.profiles, profile_id: candidate})
 
 
 def register_bootstrap_definition(

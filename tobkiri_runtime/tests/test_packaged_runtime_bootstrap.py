@@ -33,9 +33,7 @@ from tobkiri_host.runtime import V4DispatchSession
 _LAUNCHER_BOOTSTRAP_REVISION = (
     "sha256:cce92a9b1d3092cdac63ba80b39e5d3a17d0905f3a716241250e8ac724095580"
 )
-_LAUNCHER_BOOTSTRAP_PLAN = (
-    "sha256:2a08fdc2de1e0d5e51d2f248b0984d4510db442e6905bcebc2984a44d23131a5"
-)
+_LAUNCHER_BOOTSTRAP_PLAN = "sha256:2a08fdc2de1e0d5e51d2f248b0984d4510db442e6905bcebc2984a44d23131a5"
 
 
 def _free_port() -> int:
@@ -693,8 +691,9 @@ def test_committed_bootstrap_recovery_rejects_conflicting_state(
 
 
 @pytest.mark.parametrize("customized", [False, True])
+@pytest.mark.parametrize("extra_pack", [False, True])
 def test_confirmed_bootstrap_upgrade_preserves_definition_history(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool, extra_pack: bool
 ) -> None:
     """Only the verified predecessor may receive a confirmed source successor."""
     import core_runtime.bootstrap.profile_capture as capture
@@ -711,6 +710,20 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     runtime = require_profile_runtime()
     catalog = _packaged_catalog_revision(tmp_path / "old", b"old")
+    if extra_pack:
+        from copy import deepcopy
+
+        source = deepcopy(catalog.profiles["defaults"])
+        source["packs"].append(
+            {
+                "pack_id": "rumi_agent_workroom_pack",
+                "role": "provider",
+                "artifact_digest": catalog.packs["rumi_agent_workroom_pack"]["pack"][
+                    "artifact_digest"
+                ],
+            }
+        )
+        catalog = runtime.catalog_with_profiles(catalog, {"defaults": source})
     monkeypatch.setattr(runtime, "load_catalog", lambda _root: catalog)
     monkeypatch.setattr(capture, "_bundle_root", lambda _base=None: catalog.root)
     first = capture.capture_default_profile(
@@ -725,17 +738,30 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     pointer_before = pointer_path.read_bytes()
     catalog = _packaged_catalog_revision(tmp_path / "new", b"new")
     successor_source = catalog.profiles["defaults"]
-    confirmation = capture.prepare_default_profile_confirmation()
     if customized:
         with pytest.raises(ProfileDefinitionStoreConflict):
-            capture.capture_default_profile(confirmation=confirmation)
+            capture.prepare_default_profile_confirmation()
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
     else:
+        confirmation = capture.prepare_default_profile_confirmation()
+        review = runtime.setup_listing(
+            capture.bootstrap_catalog_for_review(),
+            confirmation,
+            active=False,
+            activation_denied=False,
+            denial_diagnostic=None,
+        )
+        assert (
+            "rumi_agent_workroom_pack"
+            in {pack["pack_id"] for pack in review["recommended_default_profile"]["packs"]}
+        ) == extra_pack
+        assert definitions.snapshot() == before
+        assert pointer_path.read_bytes() == pointer_before
         upgraded = capture.capture_default_profile(confirmation=confirmation)
         assert upgraded.activation["activation_id"] != first.activation["activation_id"]
         current = definitions.get_profile("defaults")
-        assert dict(current.profile) == successor_source
+        assert dict(current.profile) == {**original.profile, "shell": successor_source["shell"]}
         assert current.parent_revision == original.profile_revision
         entry = next(p for p in definitions.snapshot()["profiles"] if p["profile_id"] == "defaults")
         assert entry["revisions"][0]["profile"] == dict(original.profile)

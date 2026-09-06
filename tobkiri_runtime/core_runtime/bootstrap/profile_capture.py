@@ -28,6 +28,7 @@ from ..profile_definition_store_v4 import (
 )
 from ..profile_runtime_port import require_profile_runtime
 from .profile_registry import (
+    bootstrap_review_catalog,
     recover_bootstrap_definition,
     register_bootstrap_definition,
     verify_registered_bootstrap_successor,
@@ -145,11 +146,7 @@ def _development_bundle_root(runtime_root: Path) -> Path | None:
     ):
         return bundled_development_bundle
     development_root = (
-        runtime_root.parent
-        / "tobkiri_launcher"
-        / "src-tauri"
-        / "target"
-        / "dev-defaults"
+        runtime_root.parent / "tobkiri_launcher" / "src-tauri" / "target" / "dev-defaults"
     )
     development_bundle = development_root / "v4"
     development_artifacts = development_root / "platform-artifacts"
@@ -404,13 +401,24 @@ def _genesis_authority_snapshot_digest(bundle_lock_digest: str) -> str:
     )
 
 
+def bootstrap_catalog_for_review(*, base_dir: Path | None = None) -> Any:
+    """Return the exact bootstrap candidate without dropping active Pack selections."""
+    runtime = require_profile_runtime()
+    return bootstrap_review_catalog(
+        runtime=runtime,
+        catalog=runtime.load_catalog(_bundle_root(base_dir)),
+        user_data=_user_data_root(base_dir),
+        profile_id=_bootstrap_profile_id(),
+    )
+
+
 def _resolve_bootstrap_candidate(*, base_dir: Path | None = None) -> tuple[Any, dict[str, Any]]:
     """Resolve the finite Pack-selected bootstrap candidate without writing."""
 
     user_data = _user_data_root(base_dir)
     bundle_root = _bundle_root(base_dir)
     runtime = require_profile_runtime()
-    catalog = runtime.load_catalog(bundle_root)
+    catalog = bootstrap_catalog_for_review(base_dir=base_dir)
     bundle_lock_digest = (
         "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
     )
@@ -927,7 +935,7 @@ def capture_bootstrap_profile(
             cache.pop(user_data, None)
     if active_pointer.is_file():
         workspace = user_data / "workspaces" / profile_id
-        catalog = runtime.load_catalog(_bundle_root(base_dir))
+        catalog = bootstrap_catalog_for_review(base_dir=base_dir)
         resolved_reconciliation: Any | None = None
         if confirmation is not None:
             resolved_reconciliation, expected_confirmation = _resolve_bootstrap_candidate(
@@ -952,9 +960,7 @@ def capture_bootstrap_profile(
                 except Exception as error:
                     if not runtime.is_reconfirmation_required(error):
                         raise
-                    predecessor_digest = getattr(
-                        error, "verified_profile_definition_digest", None
-                    )
+                    predecessor_digest = getattr(error, "verified_profile_definition_digest", None)
                 else:
                     raise ProfileResolutionDenied("activation confirmation was replayed")
                 register_bootstrap_definition(
