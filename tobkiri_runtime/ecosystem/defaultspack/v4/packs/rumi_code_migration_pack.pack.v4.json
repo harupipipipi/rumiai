@@ -1,0 +1,82 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:7630a7878301e434bfc5f227a5efe2f27bbcfdd14a25599128f11570afa0111d",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:ef8609540d3fdaac8dbdd58fbbcabfc48b16e86e411559201a9e42d7e1cde844",
+    "artifact_set_digest": "sha256:48e24756e4731694916a9d1728ec6d3d540ab0e66e2d2ff37e5cc6ec4dfb47e6",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_code_migration_pack",
+      "rumi_code_migration_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:c7e6b46d394682812bdf87e4e566409a5e36ae2a3815e4f8af89f81ef9a300cf",
+    "display_name": "Rumi Code Migration Pack",
+    "id": "rumi_code_migration_pack",
+    "kind": "application",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_code_migration_pack/pack.v4.json",
+    "source_digest": "sha256:ef8609540d3fdaac8dbdd58fbbcabfc48b16e86e411559201a9e42d7e1cde844",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:61c5d454e35ed8c84f0c7c34f38e81c1941ed540cd1defa1ebfa12a3d640c0dc",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:9bb9c746709d55db8bcc43b31047bdaf794d6887b02378f277ad064a24a4d73d",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_code_migration_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:ef8609540d3fdaac8dbdd58fbbcabfc48b16e86e411559201a9e42d7e1cde844"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [
+      "rumi_code_migration_pack.codemod_plan",
+      "rumi_code_migration_pack.compatibility_matrix",
+      "rumi_code_migration_pack.migration_plan",
+      "rumi_code_migration_pack.pr_shard_plan",
+      "rumi_code_migration_pack.repo_inventory",
+      "rumi_code_migration_pack.risk_ledger"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:cf451a91c8fb3e025ab24245a82fbb82ad694e662503953026a1759380d7d51e",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:d6ea7c70901bafaa01e13ed994753c6209ad15ad96a8647fe898c829e9eff5a7",
+    "artifact_set_digest": "sha256:7f40f2407d27ff7c2c40600f21c90b81c0c83800cea3b9a9862e15d8184c5e8c",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_sop_mining_pack",
+      "rumi_sop_mining_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:5102398c55350d94472f8420f05b2d50aec423c6d0754f00524aefc22fcd6b98",
+    "display_name": "Rumi SOP Mining Pack",
+    "id": "rumi_sop_mining_pack",
+    "kind": "application",
+    "version": "0.1.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_sop_mining_pack/pack.v4.json",
+    "source_digest": "sha256:d6ea7c70901bafaa01e13ed994753c6209ad15ad96a8647fe898c829e9eff5a7",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:3ef660b0490dcfa9aba6d8d87bcfc52c57dc808ffd84095dfed16f5617d870d1",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:d7c7f251be33c71808c3816b785cb1895ac05fc0ec6e518bc5003ebd6a2df123",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_sop_mining_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:d6ea7c70901bafaa01e13ed994753c6209ad15ad96a8647fe898c829e9eff5a7"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

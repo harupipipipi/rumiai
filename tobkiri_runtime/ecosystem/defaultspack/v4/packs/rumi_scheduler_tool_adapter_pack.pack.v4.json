@@ -1,0 +1,192 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:acaff42a6613ba94f83ee32ce8ab155b747bfb8d92af29429e091ae0f03e4335",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    },
+    {
+      "digest": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
+      "kind": "executable",
+      "path": "runtime/adapter.py"
+    }
+  ],
+  "contracts": [
+    {
+      "contract_id": "tobkiri.resource.tool.definition.contribution.v1",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions"
+      ],
+      "revision_digest": "sha256:a32b5e69496d1488bb466105b0836d9f2e30adf57b0ef821de625d392220e395"
+    },
+    {
+      "contract_id": "tobkiri.service.tool.local.operation.v1",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation"
+      ],
+      "revision_digest": "sha256:d753fb22387c558033f78166130ea196ba979072a220af7a2ab25da279531e7e"
+    }
+  ],
+  "functions": [
+    {
+      "contract_revision_digest": "sha256:d753fb22387c558033f78166130ea196ba979072a220af7a2ab25da279531e7e",
+      "id": "rumi_scheduler_tool_adapter_pack.tool-adapter.scheduler",
+      "implementation_digest": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation"
+      ],
+      "role": "brokered"
+    },
+    {
+      "contract_revision_digest": "sha256:a32b5e69496d1488bb466105b0836d9f2e30adf57b0ef821de625d392220e395",
+      "id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
+      "implementation_digest": "sha256:38909d724cb9210d7c44cee848b4a4885b7b0b3ed9e484a2a716485066ec8eae",
+      "isolation": "dedicated_process",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions"
+      ],
+      "role": "brokered"
+    }
+  ],
+  "integrity": {
+    "source_identity": "sha256:b62928d53703ee74ba1b23c017756f786429678950b9e2712701af25a104d3f3",
+    "artifact_set_digest": "sha256:c73855e331f628a0b2b672609a13126ea2a2ff7f954df5e9e09d1e9b6190e539",
+    "contract_catalog_digest": "sha256:f8bf028ba9e5d0c619d679626abaaebfdf14162cb3e9d712ff36013f38d5d203"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi.resource.tool.definition.contribution.v1",
+      "rumi.service.tool.local.operation.v1",
+      "rumi:ecosystem/rumi_scheduler_tool_adapter_pack",
+      "rumi_scheduler_tool_adapter_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2027-12-31"
+  },
+  "operation_catalog": [
+    {
+      "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation",
+      "owner": "rumi_scheduler_tool_adapter_pack",
+      "contract_reference": "tobkiri.service.tool.local.operation.v1",
+      "provider_id": "rumi_scheduler_tool_adapter_pack.tool-adapter.scheduler",
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
+    },
+    {
+      "operation_id": "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions",
+      "owner": "rumi_scheduler_tool_adapter_pack",
+      "contract_reference": "tobkiri.resource.tool.definition.contribution.v1",
+      "provider_id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
+      "source_kind": "canonical_v4_contract",
+      "effect_ceiling": []
+    }
+  ],
+  "pack": {
+    "artifact_digest": "sha256:7348e503b2d0523dfa72fc2c39c49ae9ab00a6e9d7044172963d7c7e34353bbf",
+    "display_name": "Rumi Scheduler Tool Adapter",
+    "id": "rumi_scheduler_tool_adapter_pack",
+    "kind": "normal_sandbox",
+    "version": "1.0.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_scheduler_tool_adapter_pack/pack.v4.json",
+    "source_digest": "sha256:b62928d53703ee74ba1b23c017756f786429678950b9e2712701af25a104d3f3",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:90ad1340f96fa0956ed94c24140e81a6c91d9e33f80179c3d3afe0984919de07",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:1b3f3f48e0cc45dc12fc523604c300ef826a2e72f4f190b283bb408043ed8a6e",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_scheduler_tool_adapter_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:b62928d53703ee74ba1b23c017756f786429678950b9e2712701af25a104d3f3"
+      }
+    ]
+  },
+  "provider_catalog": [
+    {
+      "provider_id": "rumi_scheduler_tool_adapter_pack.tool-adapter.scheduler",
+      "owner": "rumi_scheduler_tool_adapter_pack",
+      "contract_reference": "tobkiri.service.tool.local.operation.v1",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-operation"
+      ]
+    },
+    {
+      "provider_id": "rumi_scheduler_tool_adapter_pack.tool-definitions.scheduler",
+      "owner": "rumi_scheduler_tool_adapter_pack",
+      "contract_reference": "tobkiri.resource.tool.definition.contribution.v1",
+      "operations": [
+        "rumi_scheduler_tool_adapter_pack.scheduler-tool-definitions"
+      ]
+    }
+  ],
+  "requirements": {
+    "approval_policy": "capability_gated",
+    "capabilities": [
+      "host.authority.consume",
+      "schedule.manage",
+      "schedule.read",
+      "scheduler.control",
+      "service.invoke",
+      "service.mutate",
+      "tool.definition.contribute",
+      "tool.local.operation"
+    ],
+    "contract_dependencies": [
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.action.schedule.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      },
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.action.scheduler.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      },
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.resource.schedule.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      },
+      {
+        "cardinality": "one",
+        "contract_id": "tobkiri.service.host.authorize.v1",
+        "optional": false,
+        "version_range": ">=1.0.0 <2.0.0"
+      }
+    ],
+    "execution_boundary": "sandbox",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {
+      "rumi_host_authority_bridge_pack": ">=1.0.0,<2.0.0",
+      "rumi_schedule_store_pack": ">=1.0.0,<2.0.0",
+      "rumi_scheduler_runtime_pack": ">=1.0.0,<2.0.0",
+      "rumi_tool_local_executor_pack": ">=1.0.0,<2.0.0",
+      "rumi_tool_registry_pack": ">=1.0.0,<2.0.0"
+    },
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

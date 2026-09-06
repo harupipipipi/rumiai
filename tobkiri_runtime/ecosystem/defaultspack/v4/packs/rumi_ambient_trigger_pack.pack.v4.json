@@ -1,0 +1,79 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:b5d389c8f7217173076bb4ac578cf912059a5e24812f46dedaed523ca41dd2a1",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:09a12f90c36ceb7d073c337ca4c39f343df5a0de621f357c12db001880793b25",
+    "artifact_set_digest": "sha256:a2381877349190f3a1651c06f343d986efdaecdda20a145bbe96682043bd821a",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_ambient_trigger_pack",
+      "rumi_ambient_trigger_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:d35f856acc3b01b96eefc77b9a405d6d48c2df3ccf0191d2aef8aeed58d57835",
+    "display_name": "rumi_ambient_trigger_pack",
+    "id": "rumi_ambient_trigger_pack",
+    "kind": "application",
+    "version": "0.1.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_ambient_trigger_pack/pack.v4.json",
+    "source_digest": "sha256:09a12f90c36ceb7d073c337ca4c39f343df5a0de621f357c12db001880793b25",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:7ca4977992b30f25fba838be19960e350cc13ca25249369f280236c899110b67",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:2aabe326f73718c1f2fe8f1f4632e1205d5ddc189f69430e236b225f9b7088fd",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_ambient_trigger_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:09a12f90c36ceb7d073c337ca4c39f343df5a0de621f357c12db001880793b25"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "capability_gated",
+    "capabilities": [
+      "ambient.trigger.dispatch",
+      "host.camera.capture",
+      "host.microphone.capture"
+    ],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}
