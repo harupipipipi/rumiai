@@ -1160,9 +1160,11 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
         assert len(current_authority.audit_events()) == audit_before_legacy
 
 
+@pytest.mark.parametrize("refresh_error", [RuntimeError, TypeError])
 def test_pack_enable_keeps_journal_success_when_runtime_refresh_fails(
     production_server,
     monkeypatch: pytest.MonkeyPatch,
+    refresh_error: type[Exception],
 ) -> None:
     """A committed Pack enable is not rewritten by a failed runtime refresh."""
 
@@ -1225,7 +1227,7 @@ def test_pack_enable_keeps_journal_success_when_runtime_refresh_fails(
     def fail_refresh(_session: object | None = None) -> None:
         nonlocal refresh_attempts
         refresh_attempts += 1
-        raise RuntimeError("stale Host contract")
+        raise refresh_error("stale Host contract")
 
     monkeypatch.setattr(handler, "_runtime_refresh", staticmethod(fail_refresh))
 

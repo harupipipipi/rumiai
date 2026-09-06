@@ -1366,7 +1366,7 @@ class PackAPIHandler(
             return True
         try:
             self._refresh_after_operation(target.operation_id, safe_result)
-        except (HostCoreError, KeyError, OSError, RuntimeError, ValueError) as error:
+        except Exception as error:
             # Activation has already committed. A stale Host contract must not
             # change its durable outcome or cause the client to replay it.
             self._defer_response_log(
@@ -1825,7 +1825,7 @@ class PackAPIHandler(
             if self._runtime_refresh is not None:
                 try:
                     self._runtime_refresh(None)
-                except (HostCoreError, KeyError, OSError, RuntimeError, ValueError) as error:
+                except Exception as error:
                     self._defer_response_log(
                         logger,
                         logging.WARNING,
