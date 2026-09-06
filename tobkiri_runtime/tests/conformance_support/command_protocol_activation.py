@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
-from tempfile import TemporaryDirectory
 from urllib.parse import unquote
 
 
@@ -78,37 +77,37 @@ def route_pattern_exposes_command_protocol(pattern: object) -> bool:
 
 
 def load_current_signed_application_bindings() -> tuple[Any, ...]:
-    """Use the production capture loader for the verified bundled Application."""
-
-    from ecosystem.defaultspack.defaultspack.runtime_composition import (
-        defaultspack_runtime_capture_inputs,
+    """Check the bundled Profile's selected route map without activating a Host."""
+    from ecosystem.defaultspack.defaultspack.frontend_contract_loader import (
+        load_frontend_contract_bindings,
+        resolve_frontend_contract_map_path,
+    )
+    from ecosystem.defaultspack.defaultspack.profile_runtime_composition import (
+        defaultspack_profile_bundle_root,
     )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
-    from core_runtime.bootstrap.profile_capture import (
-        capture_default_profile,
-        prepare_default_profile_confirmation,
-        runtime_user_data_scope,
-    )
 
     runtime_root = Path(__file__).resolve().parents[2]
-    with TemporaryDirectory(prefix="tobkiri-route-map-") as user_data:
-        with runtime_user_data_scope(Path(user_data)):
-            active = capture_default_profile(
-                confirmation=prepare_default_profile_confirmation()
-            )
-            capture = defaultspack_runtime_capture_inputs(active)
-    catalog = BundledCatalog.load(capture.bundle_root)
-    bindings = tuple(capture.contract_bindings)
-    application_ids = {binding.application_id for binding in bindings}
-    if len(application_ids) != 1:
-        raise RuntimeError("production Application route identity is ambiguous")
-    application = catalog.packs[next(iter(application_ids))]
-    _assert_only_selected_route_map(
+    catalog = BundledCatalog.load(defaultspack_profile_bundle_root())
+    selected = [item for item in catalog.profiles["defaults"]["packs"]
+                if item.get("role") == "application"]
+    if len(selected) != 1:
+        raise RuntimeError("bundled Profile Application selection is ambiguous")
+    application = catalog.packs[selected[0]["pack_id"]]
+    pinned_digest = selected[0].get("artifact_digest")
+    if pinned_digest is not None and pinned_digest != application["pack"]["artifact_digest"]:
+        raise RuntimeError("bundled Profile Application artifact is stale")
+    artifact_root = runtime_root / "ecosystem" / "defaultspack"
+    bindings = tuple(load_frontend_contract_bindings(
+        resolve_frontend_contract_map_path(application, artifact_root),
         application,
-        runtime_root / "ecosystem" / "defaultspack",
+        artifact_root=artifact_root,
+    ))
+    _assert_only_selected_route_map(
+        application, artifact_root,
         selected_path=PurePosixPath(bindings[0].artifact_path),
     )
-    return tuple(bindings)
+    return bindings
 
 
 def load_captured_application_bindings(
