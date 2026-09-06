@@ -15,6 +15,7 @@ import os
 import re
 import time
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Protocol
@@ -59,6 +60,7 @@ class ProfileReconfirmationRequired(ProfileResolutionDenied):
     """Raised when a valid predecessor cannot authorize a changed Profile."""
 
     verified_profile_definition_digest: str | None = None
+    verified_profile: Mapping[str, Any] | None = None
     verified_activation_identity: tuple[str, str, str, str] | None = None
 
 
@@ -2002,6 +2004,7 @@ class ActivationStore:
             # above. Expose their source and activation identities for the ceremony;
             # the predecessor still cannot be captured for execution.
             error.verified_profile_definition_digest = str(plan["profile_definition_digest"])
+            error.verified_profile = deepcopy(profile)
             error.verified_activation_identity = (
                 str(plan["profile_revision"]),
                 str(activation["activation_id"]),

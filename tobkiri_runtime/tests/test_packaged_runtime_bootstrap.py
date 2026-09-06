@@ -724,25 +724,43 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     monkeypatch.setenv("RUMI_USER_DATA", str(user_data))
     runtime = require_profile_runtime()
     catalog = _packaged_catalog_revision(tmp_path / "old", b"old")
-    if extra_pack:
-        from copy import deepcopy
-
-        source = deepcopy(catalog.profiles["defaults"])
-        source["packs"].append(
-            {
-                "pack_id": "rumi_agent_workroom_pack",
-                "role": "provider",
-                "artifact_digest": catalog.packs["rumi_agent_workroom_pack"]["pack"][
-                    "artifact_digest"
-                ],
-            }
-        )
-        catalog = runtime.catalog_with_profiles(catalog, {"defaults": source})
     monkeypatch.setattr(runtime, "load_catalog", lambda _root: catalog)
     monkeypatch.setattr(capture, "_bundle_root", lambda _base=None: catalog.root)
     first = capture.capture_default_profile(
         confirmation=capture.prepare_default_profile_confirmation()
     )
+    if extra_pack:
+        from core_runtime.pack_control_v4 import activate_resolved_profile_pack_set
+
+        snapshot = first.resolved.plan["profile_authority_snapshot_digest"]
+        edges = [
+            *catalog.profiles["defaults"]["requested_edges"],
+            *runtime.dynamic_profile_edges(catalog, "defaults", ("rumi_agent_workroom_pack",)),
+        ]
+        enabled = runtime.resolve_profile(
+            catalog,
+            "defaults",
+            approved_artifact_digests={
+                p["pack"]["artifact_digest"] for p in catalog.packs.values()
+            },
+            authority_snapshot_digest=snapshot,
+            authority_bindings={
+                capture._edge_key(edge): capture._authority_reference(edge, snapshot)
+                for edge in edges
+            },
+            security_epoch=first.activation["security_epoch"],
+            additional_pack_ids=("rumi_agent_workroom_pack",),
+        )
+        activate_resolved_profile_pack_set(
+            enabled,
+            activation_id="activation:defaults-workroom-before-update",
+            expected_profile_revision=first.resolved.plan["profile_revision"],
+            expected_plan_digest=first.resolved.plan["plan_digest"],
+            expected_activation_id=first.activation["activation_id"],
+            bundle_root=catalog.root,
+            user_data_root=user_data,
+        )
+        first = capture.capture_active_profile()
     definitions = ProfileDefinitionStore(user_data)
     original = definitions.get_profile("defaults")
     if customized:
@@ -776,6 +794,13 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         assert upgraded.activation["activation_id"] != first.activation["activation_id"]
         current = definitions.get_profile("defaults")
         assert dict(current.profile) == {**original.profile, "shell": successor_source["shell"]}
+        assert "rumi_agent_workroom_pack" not in {
+            pack["pack_id"] for pack in current.profile["packs"]
+        }
+        assert (
+            "rumi_agent_workroom_pack"
+            in {pack["pack_id"] for pack in upgraded.resolved.profile["packs"]}
+        ) == extra_pack
         assert current.parent_revision == original.profile_revision
         entry = next(p for p in definitions.snapshot()["profiles"] if p["profile_id"] == "defaults")
         assert entry["revisions"][0]["profile"] == dict(original.profile)

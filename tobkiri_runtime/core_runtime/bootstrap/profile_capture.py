@@ -401,7 +401,7 @@ def _genesis_authority_snapshot_digest(bundle_lock_digest: str) -> str:
     )
 
 
-def bootstrap_catalog_for_review(*, base_dir: Path | None = None) -> Any:
+def _bootstrap_review_candidate(*, base_dir: Path | None = None) -> tuple[Any, tuple[str, ...]]:
     """Return the exact bootstrap candidate without dropping active Pack selections."""
     runtime = require_profile_runtime()
     return bootstrap_review_catalog(
@@ -413,15 +413,20 @@ def bootstrap_catalog_for_review(*, base_dir: Path | None = None) -> Any:
 
 
 def _resolve_bootstrap_candidate(
-    *, base_dir: Path | None = None, catalog: Any | None = None
+    *,
+    base_dir: Path | None = None,
+    review_candidate: tuple[Any, tuple[str, ...]] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Resolve the finite Pack-selected bootstrap candidate without writing."""
 
     user_data = _user_data_root(base_dir)
     bundle_root = _bundle_root(base_dir)
     runtime = require_profile_runtime()
-    if catalog is None:
-        catalog = bootstrap_catalog_for_review(base_dir=base_dir)
+    catalog, additional_pack_ids = (
+        _bootstrap_review_candidate(base_dir=base_dir)
+        if review_candidate is None
+        else review_candidate
+    )
     bundle_lock_digest = (
         "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
     )
@@ -443,6 +448,8 @@ def _resolve_bootstrap_candidate(
         _edge_key(edge): _authority_reference(edge, snapshot_digest)
         for edge in source_profile["requested_edges"]
     }
+    for edge in runtime.dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
+        authority_bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
     verified_artifacts = {
         str(manifest["pack"]["artifact_digest"]) for manifest in catalog.packs.values()
     }
@@ -453,6 +460,7 @@ def _resolve_bootstrap_candidate(
         authority_snapshot_digest=snapshot_digest,
         authority_bindings=authority_bindings,
         security_epoch=security_epoch,
+        additional_pack_ids=additional_pack_ids,
     )
     return resolved, dict(
         runtime.bootstrap_confirmation(
@@ -549,13 +557,17 @@ def prepare_bootstrap_profile_confirmation(*, base_dir: Path | None = None) -> d
     return confirmation
 
 
-def prepare_bootstrap_profile_review(
-    *, base_dir: Path | None = None
-) -> tuple[Any, dict[str, Any]]:
+def prepare_bootstrap_profile_review(*, base_dir: Path | None = None) -> tuple[Any, dict[str, Any]]:
     """Bind the displayed Pack selection and confirmation to one captured candidate."""
-    catalog = bootstrap_catalog_for_review(base_dir=base_dir)
-    _resolved, confirmation = _resolve_bootstrap_candidate(base_dir=base_dir, catalog=catalog)
-    return catalog, confirmation
+    candidate = _bootstrap_review_candidate(base_dir=base_dir)
+    resolved, confirmation = _resolve_bootstrap_candidate(
+        base_dir=base_dir, review_candidate=candidate
+    )
+    catalog = candidate[0]
+    preview_catalog = require_profile_runtime().catalog_with_profiles(
+        catalog, {**catalog.profiles, resolved.profile["profile_id"]: resolved.profile}
+    )
+    return preview_catalog, confirmation
 
 
 def prepare_default_profile_confirmation(*, base_dir: Path | None = None) -> dict[str, Any]:
@@ -947,11 +959,12 @@ def capture_bootstrap_profile(
             cache.pop(user_data, None)
     if active_pointer.is_file():
         workspace = user_data / "workspaces" / profile_id
-        catalog = bootstrap_catalog_for_review(base_dir=base_dir)
+        candidate = _bootstrap_review_candidate(base_dir=base_dir)
+        catalog = candidate[0]
         resolved_reconciliation: Any | None = None
         if confirmation is not None:
             resolved_reconciliation, expected_confirmation = _resolve_bootstrap_candidate(
-                base_dir=base_dir, catalog=catalog
+                base_dir=base_dir, review_candidate=candidate
             )
             if dict(confirmation) != expected_confirmation:
                 raise ProfileResolutionDenied(

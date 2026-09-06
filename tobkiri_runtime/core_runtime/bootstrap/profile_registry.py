@@ -16,17 +16,17 @@ from ..profile_definition_store_v4 import (
 
 def bootstrap_review_catalog(
     *, runtime: Any, catalog: Any, user_data: Path, profile_id: str
-) -> Any:
+) -> tuple[Any, tuple[str, ...]]:
     """Keep the verified active definition when reviewing a packaged Shell update."""
     pointer_path = user_data / "profiles" / "active.json"
     if not pointer_path.exists() and not pointer_path.is_symlink():
-        return catalog
+        return catalog, ()
     pointer = ActiveProfileStore(user_data).load(verify_snapshot=True)
     if pointer is None or pointer.profile_id != profile_id:
-        return catalog
+        return catalog, ()
     registered = ProfileDefinitionStore(user_data).get_profile(profile_id)
     if registered is None:
-        return catalog
+        return catalog, ()
     workspace = user_data / "workspaces" / profile_id
     successor_required = False
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
@@ -43,6 +43,7 @@ def bootstrap_review_catalog(
                 raise
             definition_digest = getattr(error, "verified_profile_definition_digest", None)
             identity = getattr(error, "verified_activation_identity", None)
+            active_profile = getattr(error, "verified_profile", None)
             successor_required = True
         else:
             definition_digest = active.resolved.plan["profile_definition_digest"]
@@ -52,6 +53,7 @@ def bootstrap_review_catalog(
                 active.resolved.plan["plan_digest"],
                 active.resolved.lock["lock_digest"],
             )
+            active_profile = active.resolved.profile
     if identity != (
         pointer.profile_revision,
         pointer.activation_id,
@@ -61,10 +63,31 @@ def bootstrap_review_catalog(
         raise ProfileDefinitionStoreConflict(
             "bootstrap review does not match the verified active definition"
         )
+    if not isinstance(active_profile, Mapping):
+        raise runtime.denied("bootstrap review has no verified Pack selection")
     candidate = deepcopy(dict(registered.profile))
     if successor_required:
         candidate["shell"] = deepcopy(catalog.profiles[profile_id]["shell"])
-    return runtime.catalog_with_profiles(catalog, {**catalog.profiles, profile_id: candidate})
+    declared_ids = {item["pack_id"] for item in candidate["packs"]}
+    selected_ids = {item["pack_id"] for item in active_profile["packs"]}
+    closure_ids = selected_ids | {
+        active_profile["base"]["pack_id"],
+        active_profile["shell"]["pack_id"],
+    }
+    if not closure_ids.issubset(catalog.packs):
+        raise runtime.denied("bootstrap review selects an unavailable Pack")
+    dependency_ids = {
+        dependency
+        for pack_id in closure_ids
+        for dependency in catalog.packs[pack_id]["requirements"]["pack_dependencies"]
+    }
+    # Keep optional roots out of the definition: promoting them to mandatory
+    # Packs would prevent the user from disabling them after the update.
+    additional_ids = tuple(sorted(selected_ids - declared_ids - dependency_ids))
+    return (
+        runtime.catalog_with_profiles(catalog, {**catalog.profiles, profile_id: candidate}),
+        additional_ids,
+    )
 
 
 def register_bootstrap_definition(
