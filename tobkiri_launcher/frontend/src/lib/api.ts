@@ -736,11 +736,16 @@ export async function apiFetch<T>(
   if (method === 'GET') {
     const mode = requestPolicy.mode ?? 'foreground';
     const timeoutMs = requestPolicy.timeoutMs ?? FOREGROUND_GET_TIMEOUT_MS;
-    const executeGet = (allowInvalidationRetry: boolean): Promise<T> => (
-      getRequestCoordinator.request({
+    const deadline = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Date.now() + timeoutMs : null;
+    const executeGet = (allowInvalidationRetry: boolean): Promise<T> => {
+      const remaining = deadline === null ? timeoutMs : deadline - Date.now();
+      if (deadline !== null && remaining <= 0) {
+        return Promise.reject(new ApiRequestTimeoutError(method, path, timeoutMs));
+      }
+      return getRequestCoordinator.request({
         key: `${method}:${url}`,
         mode,
-        timeoutMs,
+        timeoutMs: remaining,
         factory: (signal) => fetchRequest(true, signal),
       }).catch((error) => {
         if (
@@ -751,8 +756,8 @@ export async function apiFetch<T>(
           return executeGet(false);
         }
         throw error;
-      })
-    );
+      });
+    };
     return executeGet(true);
   }
 

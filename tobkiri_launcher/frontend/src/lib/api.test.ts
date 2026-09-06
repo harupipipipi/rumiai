@@ -765,6 +765,25 @@ test('Setup connection recovery remains bounded and does not retry integrity err
   assert.equal(reads, 1);
 });
 
+test('a late session invalidation cannot restart the Setup verification deadline', async (context) => {
+  context.mock.timers.enable({apis: ['setTimeout', 'Date'], now: 0});
+  let reads = 0;
+  fetchHandler = async (_input, init) => {
+    reads += 1;
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {once: true});
+    });
+  };
+  const bounded = assert.rejects(fetchDefaultsSetupState({waitForRestart: true}), /request timed out/);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  context.mock.timers.tick(59_000);
+  clearApiPrefetchCache();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(reads, 2);
+  context.mock.timers.tick(1_000);
+  await bounded;
+});
+
 test('presentation wrappers use Launcher-owned Tauri commands', async () => {
   await fetchPresentationState();
   await selectPresentation({
