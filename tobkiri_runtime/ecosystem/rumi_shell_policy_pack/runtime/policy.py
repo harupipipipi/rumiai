@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import ntpath
-import os
 import shlex
 from typing import Any, Callable, Mapping
 
@@ -150,7 +149,8 @@ def _contains_absolute_path(command: Any) -> bool:
     for token in argv[1:]:
         if token.startswith("-"):
             continue
-        expanded = os.path.expanduser(token)
-        if os.path.isabs(expanded) or ntpath.isabs(token):
+        # Home expansion belongs to execution, not inspection. Treat it as
+        # outside the workspace without consulting environment or user records.
+        if token.startswith("~") or ntpath.isabs(token):
             return True
     return False

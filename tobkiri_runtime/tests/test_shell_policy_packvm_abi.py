@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,6 +12,23 @@ from typing import Any, Mapping
 import pytest
 
 from ecosystem.rumi_shell_policy_pack.runtime import policy
+
+
+@pytest.mark.parametrize("path", ("~/notes.txt", "~root/notes.txt", "~unknown"))
+def test_home_paths_are_classified_without_host_user_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    """Home paths stay approval-aware even without a WASI user database."""
+
+    def reject_lookup(value: str) -> str:
+        raise AssertionError("pure classification must not resolve Host homes")
+
+    monkeypatch.setattr(os.path, "expanduser", reject_lookup)
+    result = policy.classify({"command": ["cat", path]})
+    assert result["approval_required"] is True
+    assert result["executed"] is False
+    assert "outside_workspace_path" in result["risk_reasons"]
 
 
 def test_packvm_shell_policy_uses_exact_catalog_and_service_operations(

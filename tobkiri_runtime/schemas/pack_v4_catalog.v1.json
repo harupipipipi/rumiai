@@ -12675,7 +12675,7 @@
             {
               "entrypoint_id": "shell-inspect",
               "id": "rumi_shell_policy_pack.shell-inspect",
-              "implementation_digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed"
+              "implementation_digest": "sha256:5a78251d3a9fab747006b2019b3d41c55f7d4cfa8db0c82f57ddcf482ae57b21"
             }
           ],
           "owner": "rumi_shell_policy_pack",
@@ -12698,7 +12698,7 @@
       "required_contracts": [],
       "runtime_artifacts": [
         {
-          "digest": "sha256:416d5f2b739f31f241c55c18665e66bb9362a0e293c08d4dc321d97373085bed",
+          "digest": "sha256:5a78251d3a9fab747006b2019b3d41c55f7d4cfa8db0c82f57ddcf482ae57b21",
           "kind": "executable",
           "path": "runtime/policy.py"
         }
