@@ -413,6 +413,7 @@ def provisioner_fixture(tmp_path: Path) -> tuple[MacOSVZProvisioner, MacOSVZAsse
         platform_system="darwin",
         machine="arm64",
         clone_file=shutil.copyfile,
+        disk_usage=lambda _path: SimpleNamespace(free=16 * 1024**3),
         efi_store_preparer=prepare_efi,
         helper_identity_verifier=lambda _manifest: (True, None),
     )
