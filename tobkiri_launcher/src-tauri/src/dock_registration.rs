@@ -1603,6 +1603,15 @@ mod tests {
             .unwrap(),
             "http://127.0.0.1:8766/workspace?code=one-time%2Bcode%2F1%3D"
         );
+        assert_eq!(
+            application_url_with_bootstrap_code(
+                DEFAULTSPACK_DEFAULT_PORT,
+                "/chat",
+                "one-time+code/1="
+            )
+            .unwrap(),
+            "http://127.0.0.1:8766/chat?code=one-time%2Bcode%2F1%3D"
+        );
     }
 
     #[test]

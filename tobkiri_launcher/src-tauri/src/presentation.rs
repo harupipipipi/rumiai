@@ -664,7 +664,7 @@ fn launch_verified_target_once(
     // URL never crosses argv or the environment; only an owner-only one-shot
     // handoff path is passed to the presentation process.
     let prepared_runtime =
-        crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config, "/")?;
+        crate::dock_registration::prepare_defaultspack_shell_runtime_url(app, config, "/chat")?;
     if Instant::now() >= deadline {
         bail!("verified Shell launch deadline elapsed during runtime preparation");
     }
