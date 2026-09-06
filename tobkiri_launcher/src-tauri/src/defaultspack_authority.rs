@@ -1209,19 +1209,32 @@ fn profile_pack_migration_is_admissible(
     // `read_only` describes the retained legacy compatibility projection; it
     // is not an execution trust level. The v4 Pack remains authoritative and
     // reaches this check only after its bytes and bundle role are digest-locked.
-    // Keep this narrower than execution admission: selected Host Extensions
-    // and inert optional Application metadata may retain the projection.
+    // Keep this narrower than execution admission: selected providers retain
+    // the projection only with their declared Host, sandbox, or inert boundary.
     match value_str(pack, "/migration/compatibility") {
         Some("none") => true,
         Some("read_only") => {
             if selected_profile_pack_role(selected, pack_id) != Some("provider") {
                 return false;
             }
-            value_str(pack, "/pack/kind") == Some("host_extension")
-                || (value_str(pack, "/pack/kind") == Some("application")
-                    && value_str(pack, "/requirements/execution_boundary")
-                        == Some("declarative_only")
-                    && [
+            match value_str(pack, "/pack/kind") {
+                Some("host_extension") => true,
+                Some("application" | "normal_sandbox")
+                    if value_str(pack, "/requirements/execution_boundary") == Some("sandbox") =>
+                {
+                    pack.get("functions")
+                        .and_then(Value::as_array)
+                        .is_some_and(|functions| {
+                            functions
+                                .iter()
+                                .all(|function| value_str(function, "/role") == Some("brokered"))
+                        })
+                }
+                Some("application")
+                    if value_str(pack, "/requirements/execution_boundary")
+                        == Some("declarative_only") =>
+                {
+                    [
                         "contracts",
                         "functions",
                         "operation_catalog",
@@ -1232,7 +1245,10 @@ fn profile_pack_migration_is_admissible(
                         pack.get(key)
                             .and_then(Value::as_array)
                             .is_some_and(Vec::is_empty)
-                    }))
+                    })
+                }
+                _ => false,
+            }
         }
         _ => false,
     }
@@ -4261,6 +4277,21 @@ mod tests {
             "provider.migration",
             &ordinary_sandbox
         ));
+        ordinary_sandbox["requirements"] = serde_json::json!({
+            "execution_boundary": "sandbox"
+        });
+        ordinary_sandbox["functions"] = serde_json::json!([{"role": "brokered"}]);
+        assert!(profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &ordinary_sandbox
+        ));
+        ordinary_sandbox["functions"][0]["role"] = serde_json::json!("host_capability_provider");
+        assert!(!profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &ordinary_sandbox
+        ));
 
         let mut unknown_compatibility = host_extension;
         unknown_compatibility["migration"]["compatibility"] = Value::String("legacy".into());
@@ -4269,6 +4300,49 @@ mod tests {
             "provider.migration",
             &unknown_compatibility
         ));
+    }
+
+    #[test]
+    fn canonical_optional_pack_migrations_remain_admissible_after_enable() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tobkiri_runtime/ecosystem/defaultspack/v4/packs");
+        let packs: Vec<Value> = fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().ends_with(".pack.v4.json"))
+            .map(|path| read_json(&path, "canonical Pack fixture").unwrap())
+            .filter(|pack| !matches!(value_str(pack, "/pack/kind"), Some("base" | "shell")))
+            .collect();
+        assert!(!packs.is_empty());
+        let mut profile = generic_profile("profile.catalog", "application.catalog");
+        for pack in &packs {
+            profile["packs"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "pack_id": value_str(pack, "/pack/id").unwrap(),
+                    "role": "provider"
+                }));
+        }
+        let selected = selected_profile_from_documents(
+            profile.clone(),
+            None,
+            None,
+            "profile.catalog".into(),
+            canonical_value_digest(&profile).unwrap(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        for pack in packs {
+            let pack_id = value_str(&pack, "/pack/id").unwrap();
+            assert!(
+                profile_pack_migration_is_admissible(&selected, pack_id, &pack),
+                "canonical optional Pack cannot survive Launcher restart: {pack_id}"
+            );
+        }
     }
 
     #[test]
