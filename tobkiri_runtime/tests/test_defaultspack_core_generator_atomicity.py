@@ -164,7 +164,11 @@ def test_canonical_pack_projections_are_generator_owned_derivatives() -> None:
         if output != source
     ]
 
-    assert len(projections) == 65
+    records = json.loads(generator.PACK_SOURCE_CATALOG.read_text())["packs"]
+    assert {source.parent.name for _, source in projections} == {
+        record["pack_id"] for record in records
+        if record["kind"] not in {"base", "shell"}
+    }
     assert any(
         source.parent.name == "rumi_command_protocol_pack"
         for _, source in projections
