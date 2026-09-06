@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError
 import contextvars
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -28,6 +28,7 @@ from .effects import (
     raise_ambiguous,
 )
 from .errors import (
+    AdmissionError,
     AmbiguousEffectError,
     AuditUnavailableError,
     AuthorizationError,
@@ -396,6 +397,15 @@ class RequestBroker:
         except Exception as exc:
             raise AuthorizationError("static authorization failed") from exc
         estimate = self._admission.estimate(context, binding, payload)
+        backend = self._backends.select(binding, production=self._production)
+        if isinstance(backend, RequestScopedBackend):
+            floor = backend.memory_reservation_bytes
+            if isinstance(floor, bool) or not isinstance(floor, int) or floor <= 0:
+                raise AdmissionError("request worker memory reservation is invalid")
+            estimate = replace(
+                estimate,
+                backend_overhead_bytes=max(estimate.backend_overhead_bytes, floor),
+            )
         remaining = deadline - monotonic_clock()
         if remaining <= 0:
             raise RequestTimedOutError("deadline expired before queue admission")
@@ -414,9 +424,7 @@ class RequestBroker:
             min(30.0, remaining),
         )
         lease_issued = False
-        backend: ExecutionBackend | None = None
         try:
-            backend = self._backends.select(binding, production=self._production)
             workload_key = WorkloadInstanceKey(
                 profile_id=context.profile_id,
                 activation_id=context.activation_id,

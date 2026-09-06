@@ -79,6 +79,8 @@ class ExecutionBackend(Protocol):
 class RequestScopedBackend(ExecutionBackend, Protocol):
     """Backend whose workers are paid for by one Broker request reservation."""
 
+    memory_reservation_bytes: int
+
     def release_materialization(self, reservation_id: str) -> None:
         """Confirm all workers for this reservation have exited before returning.
 

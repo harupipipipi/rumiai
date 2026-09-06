@@ -598,10 +598,14 @@ def test_provider_rejection_always_releases_submitted_future() -> None:
 
 
 @pytest.mark.parametrize("failure_at", (None, "materialize", "authorize", "release"))
+@pytest.mark.parametrize("worker_memory", (1, 1024 * 1024))
 def test_request_scoped_worker_cleanup_precedes_resource_release(
     failure_at: str | None,
+    worker_memory: int,
 ) -> None:
     class WorkerBackend(FakeBackend):
+        memory_reservation_bytes = worker_memory
+
         def materialize(self, binding, reservation_id) -> RuntimeEvidence:
             evidence = super().materialize(binding, reservation_id)
             if failure_at == "materialize":
@@ -615,6 +619,13 @@ def test_request_scoped_worker_cleanup_precedes_resource_release(
                 raise RuntimeError("worker exit could not be confirmed")
 
     fixture = make_broker(backend=WorkerBackend([]))
+    acquire = fixture.admission.acquire
+
+    def acquire_worker(scope, estimate, wait_timeout_seconds):
+        assert estimate.charge().memory_bytes == max(10, worker_memory)
+        return acquire(scope, estimate, wait_timeout_seconds)
+
+    fixture.admission.acquire = acquire_worker
     if failure_at == "authorize":
 
         def deny(query: object) -> None:
@@ -638,6 +649,26 @@ def test_request_scoped_worker_cleanup_precedes_resource_release(
         assert fixture.events.index("worker_cleanup") < fixture.events.index("reservation_released")
     if failure_at in ("materialize", "authorize"):
         assert fixture.backend.invocations == 0
+
+
+@pytest.mark.parametrize("worker_memory", (0, -1, True, "1024"))
+def test_invalid_worker_memory_reservation_never_starts_or_charges(worker_memory) -> None:
+    from tobkiri_host.errors import AdmissionError
+
+    class WorkerBackend(FakeBackend):
+        memory_reservation_bytes = worker_memory
+
+        def release_materialization(self, reservation_id: str) -> None:
+            raise AssertionError("no worker or reservation should exist")
+
+    fixture = make_broker(backend=WorkerBackend([]))
+    try:
+        with pytest.raises(AdmissionError, match="memory reservation is invalid"):
+            fixture.broker.invoke(frame(), context(), effect_scope={"user": "u1"})
+    finally:
+        fixture.broker.close()
+    assert fixture.backend.starts == 0
+    assert "queue_reserved" not in fixture.events
 
 
 def test_singleflight_materialization_never_merges_distinct_principals() -> None:
