@@ -333,3 +333,98 @@ def test_cross_server_no_dispatch_rejects_live_code_and_cookie_without_mutation(
         assert manager._active_sessions == sessions_before
     finally:
         uncaptured_server.stop()
+
+
+def test_capture_reauthorization_preserves_journal_owner_and_rotates_credentials() -> None:
+    """A new desktop code plus the old cookie retains only journal ownership."""
+    from dataclasses import replace
+
+    manager = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
+    first = _binding(activation_id="first", security_epoch=7)
+    second = replace(first, activation_id="second", profile_revision="sha256:" + "3" * 64)
+    original = manager.exchange_code(str(manager.issue_login_code(first)["code"]), first)
+    assert original is not None
+    cookie = str(original["session_id"])
+    owner = manager.verify_session(cookie, first)
+    assert owner is not None
+    assert manager.verify_session(cookie, second) is None
+    assert manager.exchange_code("invalid", second, previous_session=cookie) is None
+    assert manager.verify_session(cookie, first) == owner
+
+    code = str(manager.issue_login_code(second)["code"])
+    renewed = manager.exchange_code(code, second, previous_session=cookie)
+    assert renewed is not None
+    assert renewed["session_id"] != cookie
+    assert renewed["csrf_token"] != original["csrf_token"]
+    assert manager.verify_session(cookie, first) is None
+    assert manager.verify_session(str(renewed["session_id"]), first) is None
+    current = manager.verify_session(str(renewed["session_id"]), second)
+    assert current is not None
+    assert current["session_id"] == owner["session_id"]
+    assert manager.exchange_code(code, second, previous_session=cookie) is None
+
+
+def test_reauthorization_does_not_inherit_unrelated_or_expired_session() -> None:
+    """Epoch changes, Profile changes and invalid cookies sever ownership."""
+    from dataclasses import replace
+
+    first = _binding(activation_id="first", security_epoch=7)
+    for case in ("epoch", "profile", "expired", "revoked", "unknown"):
+        manager = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
+        original = manager.exchange_code(str(manager.issue_login_code(first)["code"]), first)
+        assert original is not None
+        cookie = str(original["session_id"])
+        owner = manager.verify_session(cookie, first)
+        assert owner is not None
+        second = replace(first, activation_id="second")
+        if case == "epoch":
+            second = replace(second, security_epoch=8)
+        elif case == "profile":
+            second = replace(second, profile_id="other")
+        elif case == "expired":
+            manager._active_sessions[manager._hash_value(cookie)]["expires_at"] = 0
+        elif case == "revoked":
+            manager.revoke_session(cookie)
+        else:
+            cookie = "unrecognized-cookie"
+        renewed = manager.exchange_code(
+            str(manager.issue_login_code(second)["code"]), second, previous_session=cookie,
+        )
+        assert renewed is not None
+        current = manager.verify_session(str(renewed["session_id"]), second)
+        assert current is not None
+        assert current["session_id"] != owner["session_id"], case
+
+
+def test_http_exchange_carries_cookie_ownership_across_capture_refresh() -> None:
+    """The real HTTP exchange passes the HttpOnly cookie to reauthorization."""
+    first = _binding(activation_id="first", security_epoch=7)
+    second = _binding(activation_id="second", security_epoch=7)
+    current = [first]
+    manager = PanelAuthManager(bootstrap_secret="desktop-bootstrap")
+    original = manager.exchange_code(str(manager.issue_login_code(first)["code"]), first)
+    assert original is not None
+    owner = manager.verify_session(str(original["session_id"]), first)
+    server = PackAPIServer(
+        port=0, panel_auth_manager=manager,
+        dispatch_session=_CapturedDispatch(first, current),
+    )
+    server.start()
+    try:
+        current[0] = second
+        _publish_capture(server, _CapturedDispatch(second, current))
+        status, response, headers = _request(
+            server, "POST", "/api/panel/auth/exchange",
+            body={"code": manager.issue_login_code(second)["code"]},
+            headers={
+                "Origin": f"http://127.0.0.1:{server.port}",
+                "Cookie": f"rumi_panel_session={original['session_id']}",
+            },
+        )
+        assert status == 200, response
+        cookie = next(value for key, value in headers if key.lower() == "set-cookie")
+        renewed = manager.verify_session(cookie.split(";", 1)[0].split("=", 1)[1], second)
+        assert renewed is not None and owner is not None
+        assert renewed["session_id"] == owner["session_id"]
+    finally:
+        server.stop()

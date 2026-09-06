@@ -119,6 +119,8 @@ class PanelAuthManager:
         self,
         code: str,
         binding: PanelAuthBinding,
+        *,
+        previous_session: str = "",
     ) -> Optional[Dict[str, Any]]:
         if not code:
             return None
@@ -137,7 +139,22 @@ class PanelAuthManager:
             csrf_token = self._generate_secret_token()
             session_hash = self._hash_value(session_id)
             expires_at = now + self._session_ttl_seconds
+            previous_hash = self._hash_value(previous_session)
+            previous = self._active_sessions.get(previous_hash)
+            previous_binding = previous.get("binding") if previous else None
+            # A fresh desktop code authorizes the new capture. The still-live
+            # HttpOnly cookie only carries journal ownership across a Profile
+            # revision; it cannot authorize the new capture by itself.
+            journal_session = session_hash
+            if (
+                isinstance(previous_binding, PanelAuthBinding)
+                and previous_binding.profile_id == binding.profile_id
+                and previous_binding.security_epoch == binding.security_epoch
+            ):
+                journal_session = previous.get("journal_session", previous_hash)
+                del self._active_sessions[previous_hash]
             self._active_sessions[session_hash] = {
+                "journal_session": journal_session,
                 "csrf_token": csrf_token,
                 "issued_at": now,
                 "expires_at": expires_at,
@@ -167,7 +184,7 @@ class PanelAuthManager:
                 return None
             session_info["expires_at"] = now + self._session_ttl_seconds
             return {
-                "session_id": session_hash,
+                "session_id": session_info.get("journal_session", session_hash),
                 "csrf_token": session_info["csrf_token"],
                 "expires_in": self._session_ttl_seconds,
             }

@@ -1845,7 +1845,11 @@ class PackAPIHandler(
         code = code_value.strip() if isinstance(code_value, str) else ""
         binding = self._current_panel_auth_binding()
         exchange = (
-            manager.exchange_code(code, binding)
+            manager.exchange_code(
+                code,
+                binding,
+                previous_session=self._parse_cookie_header().get("rumi_panel_session", ""),
+            )
             if manager is not None and binding is not None
             else None
         )
