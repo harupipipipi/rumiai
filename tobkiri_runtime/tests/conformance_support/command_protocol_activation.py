@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
+from tempfile import TemporaryDirectory
 from urllib.parse import unquote
 
 
@@ -83,9 +84,19 @@ def load_current_signed_application_bindings() -> tuple[Any, ...]:
         defaultspack_runtime_capture_inputs,
     )
     from ecosystem.defaultspack.domain.runtime_v4 import BundledCatalog
+    from core_runtime.bootstrap.profile_capture import (
+        capture_default_profile,
+        prepare_default_profile_confirmation,
+        runtime_user_data_scope,
+    )
 
     runtime_root = Path(__file__).resolve().parents[2]
-    capture = defaultspack_runtime_capture_inputs()
+    with TemporaryDirectory(prefix="tobkiri-route-map-") as user_data:
+        with runtime_user_data_scope(Path(user_data)):
+            active = capture_default_profile(
+                confirmation=prepare_default_profile_confirmation()
+            )
+            capture = defaultspack_runtime_capture_inputs(active)
     catalog = BundledCatalog.load(capture.bundle_root)
     bindings = tuple(capture.contract_bindings)
     application_ids = {binding.application_id for binding in bindings}
