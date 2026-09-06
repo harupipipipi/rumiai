@@ -90,7 +90,7 @@ export function buildNamedProfileView(
   };
   // Registered source definitions remain unresolved after activation. The Host's
   // verified active snapshot, not that source lifecycle, determines launch readiness.
-  if (activeSnapshotReady) return ready;
+  if (activeSnapshotReady && (state === 'needs_resolution' || state === 'resolved')) return ready;
   if (state !== 'resolved') {
     return withDisplayName(profileError(
       basePackId,

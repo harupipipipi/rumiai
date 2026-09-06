@@ -68,6 +68,10 @@ test('a verified active snapshot is ready even while its registered source needs
   assert.equal(buildNamedProfileView(source).status, 'error');
   assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'ready');
   assert.equal(buildNamedProfileView(source, {activeSnapshotReady: false}).status, 'error');
+  source.profile.state = 'unknown';
+  assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'error');
+  source.profile.state = null;
+  assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'error');
   source.profile.state = 'retired';
   assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'error');
 });
