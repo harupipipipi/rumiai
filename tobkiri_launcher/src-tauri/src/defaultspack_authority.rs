@@ -3716,8 +3716,10 @@ mod tests {
             expected_sidecars
         );
         for sidecar in verified.sidecar_digests.keys() {
-            let authority = sidecar.replace(".executables.v4.json", ".pack.v4.json");
-            assert!(verified.authority_digests.contains_key(&authority));
+            let catalog = read_json(&source_bundle.join(sidecar), "canonical sidecar").unwrap();
+            let pack_id = value_str(&catalog, "/pack_id").unwrap();
+            let authority = &verified.pack_paths[pack_id];
+            assert!(verified.authority_digests.contains_key(authority));
         }
         assert!(verified
             .sidecar_digests
