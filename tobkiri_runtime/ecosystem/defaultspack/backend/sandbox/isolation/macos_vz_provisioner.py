@@ -868,8 +868,7 @@ class MacOSVZProvisioner:
         with self.operation_gate("stop", {"attestation_digest": str(state["attestation_digest"])}):
             self._verify_state_bindings(state, self._require_manifest())
             state["stopped"] = True
-            state["authentication"] = self._sign_state(state)
-            _atomic_private_json(self.state_path, state)
+            state = self._write_attested_state(state)
             self._audit("stopped", str(state["attestation_digest"]))
 
     def allocate(
@@ -1279,7 +1278,12 @@ class MacOSVZProvisioner:
         with self.operation_gate(
             "cleanup", {"attestation_digest": str(state["attestation_digest"])}
         ):
-            self._verify_state_bindings(state, self._require_manifest())
+            self._require_manifest()
+            # Cleanup authenticates ownership of the old instance, not its
+            # ability to execute under the newly installed release.
+            for key, value in self.recovery_identity().items():
+                if key != "vz_provisioner_digest" and state.get(key) != value:
+                    raise ValueError(f"PackVM VZ {key} changed")
             self._remove_empty_domains_root()
             self._remove_exact_instance(Path(str(state["instance_root"])), state)
             self._audit("deleted", str(state["attestation_digest"]))
@@ -1368,9 +1372,7 @@ class MacOSVZProvisioner:
                 "created_unix": int(time.time()),
                 **self.recovery_identity(),
             }
-            state["attestation_digest"] = _canonical_digest(state)
-            state["authentication"] = self._sign_state(state)
-            _atomic_private_json(self.state_path, state)
+            state = self._write_attested_state(state)
             self.recovery_path.unlink(missing_ok=True)
             self._audit("provisioned", str(state["attestation_digest"]))
             return self.doctor()
@@ -1767,6 +1769,17 @@ class MacOSVZProvisioner:
         key = generate_or_load_signing_key(self._state_dir / "packvm-vz-attestation.key")
         unsigned = {key: value for key, value in state.items() if key != "authentication"}
         return hmac.new(key, _canonical_bytes(unsigned), hashlib.sha256).hexdigest()
+
+    def _write_attested_state(self, state: Mapping[str, Any]) -> dict[str, Any]:
+        """Atomically bind both integrity layers to the same updated state."""
+        updated = {
+            key: value for key, value in state.items()
+            if key not in {"authentication", "attestation_digest"}
+        }
+        updated["attestation_digest"] = _canonical_digest(updated)
+        updated["authentication"] = self._sign_state(updated)
+        _atomic_private_json(self.state_path, updated)
+        return updated
 
     def _load_state(self) -> dict[str, Any]:
         raw = _read_private_file(self.state_path, _MAX_STATE_BYTES)
