@@ -147,7 +147,8 @@ class PanelAuthManager:
             # revision; it cannot authorize the new capture by itself.
             journal_session = session_hash
             if (
-                isinstance(previous_binding, PanelAuthBinding)
+                previous is not None
+                and isinstance(previous_binding, PanelAuthBinding)
                 and previous_binding.profile_id == binding.profile_id
                 and previous_binding.security_epoch == binding.security_epoch
             ):
