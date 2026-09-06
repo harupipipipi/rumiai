@@ -84,7 +84,7 @@ test("keeps /chat on the scoped Pack v4 unavailable screen instead of the legacy
   const markup = renderToStaticMarkup(
     <HostBootstrapFallback
       route="/chat"
-      reason="The active profile does not provide a Pack v4 conversation."
+      reason="The conversation is not ready. Check the active profile and PackVM status in Tobkiri Launcher, then retry."
       onRetry={() => undefined}
       fallback={<div data-legacy-chat-app="">Legacy ChatApp</div>}
     />,

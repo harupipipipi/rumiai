@@ -168,7 +168,7 @@ export function HostBootstrap({
       <HostBootstrapFallback
         fallback={fallback}
         onRetry={retry}
-        reason="The active profile does not provide a Pack v4 conversation."
+        reason="The conversation is not ready. Check the active profile and PackVM status in Tobkiri Launcher, then retry."
         route={route}
       />
     );
