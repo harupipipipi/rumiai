@@ -151,6 +151,6 @@ def _contains_absolute_path(command: Any) -> bool:
             continue
         # Home expansion belongs to execution, not inspection. Treat it as
         # outside the workspace without consulting environment or user records.
-        if token.startswith("~") or ntpath.isabs(token):
+        if token.startswith(("~", "/", "\\")) or ntpath.isabs(token):
             return True
     return False

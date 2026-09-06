@@ -14,12 +14,25 @@ import pytest
 from ecosystem.rumi_shell_policy_pack.runtime import policy
 
 
-@pytest.mark.parametrize("path", ("~/notes.txt", "~root/notes.txt", "~unknown"))
-def test_home_paths_are_classified_without_host_user_lookup(
+@pytest.mark.parametrize(
+    "path",
+    (
+        "~/notes.txt",
+        "~root/notes.txt",
+        "~unknown",
+        "/etc/passwd",
+        "//server/share/file",
+        "C:/Users/notes.txt",
+        r"C:\Users\notes.txt",
+        r"\Windows\notes.txt",
+        r"\\server\share\file",
+    ),
+)
+def test_outside_paths_are_classified_without_host_user_lookup(
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
-    """Home paths stay approval-aware even without a WASI user database."""
+    """POSIX and Windows paths require approval without a WASI user database."""
 
     def reject_lookup(value: str) -> str:
         raise AssertionError("pure classification must not resolve Host homes")
