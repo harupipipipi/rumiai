@@ -1,0 +1,8 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "pack_id": "rumi_meeting_intelligence_pack",
+  "source_identity": "sha256:e6553579ca1b91915e18f248bd93b8b28ed483daba05510294c1ce4f8ef6e386",
+  "variants": [],
+  "materialization_catalog_digest": "sha256:fcbbf40283a00c892e03332ddb860d9a3886560ee8efeb2c83b26a88512f4b54",
+  "catalog_digest": "sha256:83b58dd1d2c7daa2ae33f147f3e72df0d95f988142287c599abd323f1c6f97aa"
+}

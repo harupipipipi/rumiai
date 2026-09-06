@@ -1,0 +1,8 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "pack_id": "rumi_runtime_benchmark_pack",
+  "source_identity": "sha256:8537c0fe1fbdfaf2b04628b0d928a6cf1e2be1470acbbb7df5df36be8b735d09",
+  "variants": [],
+  "materialization_catalog_digest": "sha256:82cfb3f2451398b8c209c9f8331eace996fb801fce49b1ccbb7df533fdf48716",
+  "catalog_digest": "sha256:faaf1e7384434e4b590b14ce6256946b582edc492b728990a81d191edff5077e"
+}

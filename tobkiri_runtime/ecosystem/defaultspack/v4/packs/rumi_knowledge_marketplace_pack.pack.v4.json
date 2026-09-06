@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:a6cf04c81735ecc997fd1bf4a6ed0a85a8c8168d38e86d4f460687d4d2a3dabe",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:38971f45942121c007de06b4010f41eae758ffef823e36c4cbc1c68e34e966ef",
+    "artifact_set_digest": "sha256:501419d804f7ae6b1928513974b85bf5e02e3d4b6efe93e18e6b9ccc38be60b6",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_knowledge_marketplace_pack",
+      "rumi_knowledge_marketplace_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:ae11e5127c0bb4a1dab5f1a763c5f9b87378b27454f74ef80a9a27613e6ab6b1",
+    "display_name": "Rumi Knowledge Marketplace Pack",
+    "id": "rumi_knowledge_marketplace_pack",
+    "kind": "application",
+    "version": "0.2.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_knowledge_marketplace_pack/pack.v4.json",
+    "source_digest": "sha256:38971f45942121c007de06b4010f41eae758ffef823e36c4cbc1c68e34e966ef",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:ab1fb5face7023c2dcf112fc4be42472e50cb471636f969d41733c0db77b3c0b",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:ee907fe9c5b9465b51fa41481aaab1f535a3e4d518b9c51924d03f75b7a00c8e",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_knowledge_marketplace_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:38971f45942121c007de06b4010f41eae758ffef823e36c4cbc1c68e34e966ef"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

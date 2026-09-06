@@ -159,8 +159,8 @@ def _render_staged_profile_release(rendered: Mapping[Path, bytes]) -> dict[Path,
             shutil.rmtree(stage)
 
 
-def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
-    """Return the deterministic Host Extension catalog selection and closure."""
+def _canonical_catalog_pack_ids() -> tuple[str, ...]:
+    """Return optional catalog Packs; Base and Shell use their role projections."""
 
     payload = json.loads(PACK_SOURCE_CATALOG.read_text(encoding="utf-8"))
     records = payload.get("packs")
@@ -175,13 +175,7 @@ def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
             raise ValueError(f"canonical Pack source catalog has an invalid Pack ID: {pack_id!r}")
         by_id[pack_id] = record
 
-    selected = {
-        pack_id for pack_id, record in by_id.items() if record.get("kind") == "host_extension"
-    }
-    pending = sorted(selected)
-    while pending:
-        pack_id = pending.pop(0)
-        record = by_id[pack_id]
+    for pack_id, record in by_id.items():
         dependencies = record.get("dependencies")
         if not isinstance(dependencies, dict):
             raise ValueError(f"Pack dependencies are malformed: {pack_id}")
@@ -191,11 +185,10 @@ def _canonical_optional_host_extension_ids() -> tuple[str, ...]:
                     f"canonical Pack source catalog has an unknown dependency: "
                     f"{pack_id} -> {dependency_id}"
                 )
-            if dependency_id not in selected:
-                selected.add(dependency_id)
-                pending.append(dependency_id)
-        pending.sort()
-    return tuple(sorted(selected))
+    return tuple(sorted(
+        pack_id for pack_id, record in by_id.items()
+        if record.get("kind") not in {"base", "shell"}
+    ))
 
 
 def _canonical_pack_sources() -> dict[Path, Path]:
@@ -206,7 +199,7 @@ def _canonical_pack_sources() -> dict[Path, Path]:
     canonical_names = {
         source.parent.name: output.name for output, source in sources.items() if source.parent.name
     }
-    for pack_id in _canonical_optional_host_extension_ids():
+    for pack_id in _canonical_catalog_pack_ids():
         output_name = canonical_names.get(pack_id, f"{pack_id}.pack.v4.json")
         sources[PACKS / output_name] = ROOT / "ecosystem" / pack_id / "pack.v4.json"
     return sources

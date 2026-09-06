@@ -1,0 +1,8 @@
+{
+  "catalog_api_version": "io.tobkiri.executable-catalog.v4",
+  "pack_id": "rumi_study_coach_pack",
+  "source_identity": "sha256:552f5477c4223eb15b4f7b964c35e5d46e032c5d7bca4250032437d5c49db0a8",
+  "variants": [],
+  "materialization_catalog_digest": "sha256:e456ce89882ae2f5d992bb864620067751c0b7d82e557dea747794ba8cb9d7cf",
+  "catalog_digest": "sha256:2d279ed50f12b32668942cfb3a4c3b31040c82ccb60ef21eb5750bf33962841a"
+}

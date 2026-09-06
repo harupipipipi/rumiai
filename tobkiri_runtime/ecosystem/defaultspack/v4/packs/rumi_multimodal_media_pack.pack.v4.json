@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:3df8080412eda77320f8c078b5ad6a34500f2a73087a7dd6f78a1d30b036e38d",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:67cfc9ee3490172dc8dc64272349f3670b8d720bbc89476ea0934ed26aa6ded4",
+    "artifact_set_digest": "sha256:7b0179aa1fcf66b20d09f0cec1defa817c66fbb799a43771016b10f48f9466ea",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_multimodal_media_pack",
+      "rumi_multimodal_media_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:48bf045b23433409db5702202a72482c138ecbfa3ffca7db1c4dfcddedcf2df3",
+    "display_name": "Rumi Multimodal Media Pack",
+    "id": "rumi_multimodal_media_pack",
+    "kind": "application",
+    "version": "0.1.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_multimodal_media_pack/pack.v4.json",
+    "source_digest": "sha256:67cfc9ee3490172dc8dc64272349f3670b8d720bbc89476ea0934ed26aa6ded4",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:6c0a531bf1f825266b99224ad127fc4fe470c3f98c7a4f73bb33acb3bd9673dc",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:ab319573194e57e7c2d8556a5f218423973553cc618442f2ad3998d147e2206f",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_multimodal_media_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:67cfc9ee3490172dc8dc64272349f3670b8d720bbc89476ea0934ed26aa6ded4"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}

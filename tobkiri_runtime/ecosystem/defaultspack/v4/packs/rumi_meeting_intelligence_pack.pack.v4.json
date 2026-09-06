@@ -1,0 +1,75 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:83e9a097fd052e38c236e4599d26b1f4ccf15401b52225acc96fca3d96c73c97",
+      "kind": "sidecar",
+      "path": "executables.v4.json"
+    }
+  ],
+  "contracts": [],
+  "functions": [],
+  "integrity": {
+    "source_identity": "sha256:e6553579ca1b91915e18f248bd93b8b28ed483daba05510294c1ce4f8ef6e386",
+    "artifact_set_digest": "sha256:5f345d2b1fea845dc499e540743432dba3d93894e224ad3028c1125178f081e2",
+    "contract_catalog_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "migration": {
+    "compatibility": "read_only",
+    "legacy_ids": [
+      "rumi:ecosystem/rumi_meeting_intelligence_pack",
+      "rumi_meeting_intelligence_pack"
+    ],
+    "removal_wave": 10,
+    "sunset_at": "2099-01-01"
+  },
+  "operation_catalog": [],
+  "pack": {
+    "artifact_digest": "sha256:343eab2a3b11b681bbb1bbfde3f9a51f23eb1994e907f4b0a608b01fdbca7fe4",
+    "display_name": "Rumi Meeting Intelligence Pack",
+    "id": "rumi_meeting_intelligence_pack",
+    "kind": "application",
+    "version": "0.1.0"
+  },
+  "pack_api_version": "io.tobkiri.pack.v4",
+  "provenance": {
+    "schema": "io.tobkiri.provenance.v2",
+    "source_kind": "generated",
+    "source_path": "ecosystem/rumi_meeting_intelligence_pack/pack.v4.json",
+    "source_digest": "sha256:e6553579ca1b91915e18f248bd93b8b28ed483daba05510294c1ce4f8ef6e386",
+    "repository_commit": "1329f300cd2a8e15170edb1accce8d7c3167882b",
+    "repository_commit_trusted": false,
+    "content_root_digest": "sha256:3fffee7fcee0835aaaaa5811844f8b6d47e293e57c16ddcaa64810351b136cc8",
+    "generator": "tobkiri.scripts.generate_defaultspack_v4_bundle",
+    "generator_version": "2.1.0",
+    "generator_path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+    "generator_digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943",
+    "input_inventory_digest": "sha256:4bedf8a7965f6f7e36b7f79a77eb7f5e8834b637c2b5f6de28d1418250046093",
+    "normative": true,
+    "evidence": [
+      {
+        "path": "tobkiri_runtime/scripts/generate_defaultspack_v4_bundle.py",
+        "rule_id": "normative-generator-bytes",
+        "digest": "sha256:b12bf4b488bc71de3b95715bc86cbf1791181392e922d1e8e6be926f08288943"
+      },
+      {
+        "path": "ecosystem/rumi_meeting_intelligence_pack/pack.v4.json",
+        "rule_id": "normative-input-bytes",
+        "digest": "sha256:e6553579ca1b91915e18f248bd93b8b28ed483daba05510294c1ce4f8ef6e386"
+      }
+    ]
+  },
+  "provider_catalog": [],
+  "requirements": {
+    "approval_policy": "none",
+    "capabilities": [],
+    "contract_dependencies": [],
+    "execution_boundary": "declarative_only",
+    "network": {
+      "allowed_domains": [],
+      "allowed_ports": []
+    },
+    "pack_dependencies": {},
+    "secrets": [],
+    "workspace_boundary": "pack_local"
+  }
+}
