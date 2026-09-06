@@ -77,7 +77,11 @@ class ExecutionBackend(Protocol):
 
 @runtime_checkable
 class RequestScopedBackend(ExecutionBackend, Protocol):
-    """Backend whose workers are paid for by one Broker request reservation."""
+    """Backend whose workers are paid for by one Broker request reservation.
+
+    The memory floor is Host-owned and covers compilation and guest execution;
+    a lower Pack declaration must not reduce the reserved amount.
+    """
 
     memory_reservation_bytes: int
 

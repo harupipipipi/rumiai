@@ -54,6 +54,10 @@ validation. Before production registration, the supervisor must implement the
 releases the reservation, including failed starts and denied authorization.
 If exit cannot be confirmed, the reservation remains charged and the request is
 fenced. Concurrent reservations cannot share materialization evidence.
+The backend's positive `memory_reservation_bytes` floor is applied before queue
+admission and materialization; higher existing estimates remain in force.
+This is accounting, not an OS memory limit: the supervisor must also enforce
+its worker budget. Do not report a reservation as proof of physical containment.
 
 References: [Wasmtime sandboxing](https://docs.wasmtime.dev/security.html) and
 [componentize-py](https://github.com/bytecodealliance/componentize-py).
