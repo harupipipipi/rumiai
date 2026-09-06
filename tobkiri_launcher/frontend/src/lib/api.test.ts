@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {beforeEach, test} from 'node:test';
 
 import {
@@ -35,6 +36,7 @@ import {
   RUNTIME_SURFACE_API_VERSION,
 } from './runtimeSurface.ts';
 import {GENERATED_FRONTEND_CONTRACT_MAP} from './generatedFrontendContractMap.ts';
+import {fetchDefaultsSetupState} from './defaultsSetup.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -696,6 +698,27 @@ test('unsafe frontend requests time out and reject instead of leaving lifecycle 
     apiFetch('/api/v4/packvm/prepare', {method: 'POST'}, {timeoutMs: 1}),
     /POST request timed out after 1ms: \/api\/v4\/packvm\/prepare/,
   );
+});
+
+test('activation verification waits through a slow restart without submitting another mutation', async (context) => {
+  context.mock.timers.enable({apis: ['setTimeout']});
+  const fixture = JSON.parse(readFileSync(new URL(
+    '../../../../tobkiri_runtime/tobkiri_protocol/fixtures/defaults_setup_v4.canonical.json', import.meta.url,
+  ), 'utf8'));
+  let reads = 0;
+  fetchHandler = async (input, init) => {
+    assert.equal(String(input), '/api/setup/packs');
+    assert.equal(init?.method, 'GET');
+    reads += 1;
+    return new Promise<Response>((resolve) => setTimeout(() => resolve(
+      new Response(JSON.stringify({success: true, data: fixture})),
+    ), 11_000));
+  };
+  const pending = fetchDefaultsSetupState({waitForRestart: true});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  context.mock.timers.tick(11_000);
+  assert.equal((await pending).state, fixture.state);
+  assert.equal(reads, 1);
 });
 
 test('presentation wrappers use Launcher-owned Tauri commands', async () => {

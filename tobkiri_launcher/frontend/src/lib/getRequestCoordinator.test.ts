@@ -11,6 +11,18 @@ const request = <T>(
   timeoutMs = 1_000,
 ) => coordinator.request({factory, key, mode, timeoutMs});
 
+test('an explicit restart read budget is not cut short by the default transport timeout', async (context) => {
+  context.mock.timers.enable({apis: ['setTimeout']});
+  const coordinator = new GetRequestCoordinator({hardTimeoutMs: 10});
+  const pending = request(coordinator, '/setup', 'foreground', (signal) => new Promise<string>((resolve, reject) => {
+    signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+    setTimeout(() => resolve('active'), 20);
+  }), 60);
+  await Promise.resolve();
+  context.mock.timers.tick(20);
+  assert.equal(await pending, 'active');
+});
+
 test('prefetch is consumed once by the first foreground request', async () => {
   const coordinator = new GetRequestCoordinator();
   let count = 0;

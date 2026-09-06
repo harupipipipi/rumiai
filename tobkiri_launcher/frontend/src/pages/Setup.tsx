@@ -192,7 +192,7 @@ export function Setup() {
     setSetupError(null);
     try {
       const result = await recoverDefaultsActivation({
-        fetchAuthoritativeSetup: fetchDefaultsSetupState,
+        fetchAuthoritativeSetup: () => fetchDefaultsSetupState({waitForRestart: true}),
         reconcileActiveRuntime,
       });
       await applyRecoveryResult(result);
@@ -211,7 +211,7 @@ export function Setup() {
     try {
       const result = await activateDefaultsWithRecovery({
         submitActivation: () => activateDefaultsProfile(setup.recommended_default_profile.confirmation),
-        fetchAuthoritativeSetup: fetchDefaultsSetupState,
+        fetchAuthoritativeSetup: () => fetchDefaultsSetupState({waitForRestart: true}),
         reconcileActiveRuntime,
       });
       await applyRecoveryResult(result);

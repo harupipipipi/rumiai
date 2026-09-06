@@ -689,6 +689,7 @@ fn launch_verified_target_once(
         config,
         &target.catalog,
         &target.selection,
+        &target.artifact,
         Some(&prepared_runtime.identity),
     )?;
     let ticket = crate::shell_handoff::create_shell_handoff(
@@ -1897,13 +1898,20 @@ fn write_selection(
     catalog: &PresentationCatalog,
     selection: &PresentationSelection,
 ) -> AnyResult<()> {
-    write_selection_with_identity(config, catalog, selection, None)
+    let artifact = catalog
+        .shell_providers
+        .iter()
+        .find(|shell| shell.provider_id == selection.shell_provider_id)
+        .and_then(|shell| shell.artifact.as_ref())
+        .context("selected Shell artifact was not materialized")?;
+    write_selection_with_identity(config, catalog, selection, artifact, None)
 }
 
 fn write_selection_with_identity(
     config: &AppConfig,
     catalog: &PresentationCatalog,
     selection: &PresentationSelection,
+    artifact: &PresentationArtifact,
     execution_identity: Option<&crate::host_contract::ExecutionProfileIdentity>,
 ) -> AnyResult<()> {
     let base = catalog
@@ -1916,11 +1924,16 @@ fn write_selection_with_identity(
         .iter()
         .find(|item| item.provider_id == selection.shell_provider_id)
         .context("selected Shell disappeared before persistence")?;
-    let artifact = shell
-        .artifact
-        .as_ref()
-        .context("selected Shell artifact was not materialized")?;
     validate_production_artifact(artifact)?;
+    if !shell.artifact_variants.iter().any(|variant| {
+        variant.artifact_id == artifact.artifact_id
+            && variant.sha256 == artifact.sha256
+            && variant.platform == artifact.platform
+            && variant.architecture == artifact.architecture
+            && variant.path == artifact.path
+    }) {
+        bail!("verified Shell artifact does not match the selected catalog variant");
+    }
     let stored = StoredProfileSelection {
         schema: SELECTION_SCHEMA.to_string(),
         catalog_revision: catalog_revision(catalog)?,
@@ -2095,8 +2108,7 @@ fn read_stored_selection(
                 && shell.artifact.as_ref().is_some_and(|artifact| {
                     artifact.artifact_id == stored.shell_artifact_id
                         && artifact.status == "verified"
-                        && artifact.sha256.as_deref()
-                            == Some(stored.shell_artifact_digest.as_str())
+                        && artifact.sha256.as_deref() == Some(stored.shell_artifact_digest.as_str())
                 });
             if !catalog_digest_matches && !development_digest_matches {
                 return Ok(None);
@@ -3103,6 +3115,50 @@ mod tests {
         let selection = catalog.default_selection.clone();
         let selected =
             build_state_from_catalog(&config, catalog.clone(), Some(selection.clone())).unwrap();
+        let verified_artifact = selected.materialization.artifact.as_ref().unwrap();
+        let identity = crate::host_contract::ExecutionProfileIdentity::new(
+            "defaults",
+            format!("sha256:{}", "1".repeat(64)),
+            "activation:defaults-launch-test",
+            format!("sha256:{}", "2".repeat(64)),
+        )
+        .unwrap();
+        // The launch resolver keeps its verified artifact separate from the raw
+        // catalog. Persist that exact artifact without relying on UI hydration.
+        assert!(catalog
+            .shell_providers
+            .iter()
+            .all(|shell| shell.artifact.is_none()));
+        write_selection_with_identity(
+            &config,
+            &catalog,
+            &selection,
+            verified_artifact,
+            Some(&identity),
+        )
+        .unwrap();
+        let selection_path = config
+            .user_data_dir
+            .join(SELECTION_DIR)
+            .join(SELECTION_FILE);
+        let persisted = fs::read(&selection_path).unwrap();
+        let stored: StoredProfileSelection = serde_json::from_slice(&persisted).unwrap();
+        assert_eq!(stored.execution_identity, Some(identity));
+        assert_eq!(
+            stored.shell_artifact_digest,
+            verified_artifact.sha256.clone().unwrap()
+        );
+        let mut mismatched_artifact = verified_artifact.clone();
+        mismatched_artifact.artifact_id = "unselected-shell".to_string();
+        assert!(write_selection_with_identity(
+            &config,
+            &catalog,
+            &selection,
+            &mismatched_artifact,
+            None,
+        )
+        .is_err());
+        assert_eq!(fs::read(&selection_path).unwrap(), persisted);
         write_selection(&config, &selected.catalog, &selection).unwrap();
         assert_eq!(selected.materialization.status, "materialized");
         assert_eq!(

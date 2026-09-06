@@ -125,11 +125,15 @@ export class GetRequestCoordinator {
       promise: Promise.resolve(undefined),
     };
 
+    // An explicitly longer foreground budget must also cover its transport.
+    const hardTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.max(this.hardTimeoutMs, timeoutMs)
+      : this.hardTimeoutMs;
     const hardTimeout = globalThis.setTimeout(() => {
       abortController.abort(new RequestTimeoutError(
-        `Shared GET request exceeded ${this.hardTimeoutMs}ms: ${key}`,
+        `Shared GET request exceeded ${hardTimeoutMs}ms: ${key}`,
       ));
-    }, this.hardTimeoutMs);
+    }, hardTimeoutMs);
 
     const entry = shared;
     entry.promise = Promise.resolve()

@@ -362,8 +362,14 @@ export function parseDefaultsSetupState(value: unknown): DefaultsSetupState {
   return value as DefaultsSetupState;
 }
 
-export async function fetchDefaultsSetupState(): Promise<DefaultsSetupState> {
-  return parseDefaultsSetupState(await apiFetch<unknown>('/api/setup/packs'));
+export async function fetchDefaultsSetupState(
+  options: {waitForRestart?: boolean} = {},
+): Promise<DefaultsSetupState> {
+  // Activation rotates the Kernel and panel session. Keep that one read alive
+  // for the same bounded restart window instead of abandoning it after 10 s.
+  return parseDefaultsSetupState(await apiFetch<unknown>(
+    '/api/setup/packs', {}, options.waitForRestart ? {timeoutMs: 60_000} : {},
+  ));
 }
 
 export function parseDefaultsActivationResponse(
