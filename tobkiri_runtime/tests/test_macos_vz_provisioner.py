@@ -429,6 +429,102 @@ def provisioner_fixture(tmp_path: Path) -> tuple[MacOSVZProvisioner, MacOSVZAsse
     return provisioner, manifest, base
 
 
+@pytest.fixture
+def attested_provisioner(
+    provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+) -> tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path]:
+    """Use real authenticated lifecycle state with tiny verified assets."""
+    provisioner, manifest, base = provisioner_fixture
+    del provisioner._load_state
+    del provisioner._verify_state_bindings
+    provisioner._ensure_state_root()
+    root = provisioner.state_path.parent / "instances" / macos_vz_provisioner.VZ_INSTANCE
+    root.mkdir(mode=0o700)
+    _private_file(root / "base-image.json", b"{}")
+    state = {
+        "version": macos_vz_provisioner.VZ_STATE_VERSION,
+        "backend_id": macos_vz_provisioner.PACKVM_BACKEND_ID,
+        "platform": macos_vz_provisioner.VZ_PLATFORM,
+        "instance": macos_vz_provisioner.VZ_INSTANCE,
+        "image_digest": manifest.image_digest,
+        "image_source": manifest.image_source,
+        "cloud_template_digest": manifest.config_digest,
+        "helper_digest": manifest.helper_digest,
+        "guest_runner_digest": manifest.agent_digest,
+        "bubblewrap_digest": manifest.bubblewrap_digest,
+        "host_build_digest": manifest.helper_digest,
+        "instance_root": str(root),
+        "instance_root_device": root.stat().st_dev,
+        "instance_root_inode": root.stat().st_ino,
+        "base_image_path": str(base),
+        "stopped": False,
+        **provisioner.recovery_identity(),
+    }
+    state["attestation_digest"] = macos_vz_provisioner._canonical_digest(state)
+    state["authentication"] = provisioner._sign_state(state)
+    macos_vz_provisioner._atomic_private_json(provisioner.state_path, state)
+    return provisioner, manifest, root
+
+
+def test_stopped_instance_remains_authenticated_and_can_be_cleaned(
+    attested_provisioner: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+) -> None:
+    """Stopping must not corrupt the state needed for subsequent cleanup."""
+    provisioner, _manifest, root = attested_provisioner
+    provisioner.stop(
+        f"{macos_vz_provisioner.PACKVM_STOP_PREFIX} {macos_vz_provisioner.VZ_INSTANCE}"
+    )
+    assert provisioner._load_state()["stopped"] is True
+    assert provisioner.doctor().ready is False
+    provisioner.cleanup(
+        f"{macos_vz_provisioner.PACKVM_CLEANUP_PREFIX} {macos_vz_provisioner.VZ_INSTANCE}"
+    )
+    assert not root.exists()
+    assert not provisioner.state_path.exists()
+
+
+def test_updated_assets_do_not_trap_authenticated_old_instance(
+    attested_provisioner: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+) -> None:
+    """A release update blocks execution but must permit exact explicit cleanup."""
+    provisioner, manifest, root = attested_provisioner
+    provisioner._require_manifest = lambda: replace(
+        manifest, config_digest=_digest(b"new release template")
+    )
+    assert provisioner.doctor().ready is False
+    provisioner.cleanup(
+        f"{macos_vz_provisioner.PACKVM_CLEANUP_PREFIX} {macos_vz_provisioner.VZ_INSTANCE}"
+    )
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("failure", ["tampered_state", "replaced_root", "live_domain"])
+def test_lifecycle_cleanup_retains_unverified_or_live_resources(
+    attested_provisioner: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+    failure: str,
+) -> None:
+    """Release recovery must retain authentication, ownership and live-domain fences."""
+    provisioner, _manifest, root = attested_provisioner
+    if failure == "tampered_state":
+        state = json.loads(provisioner.state_path.read_text())
+        state["stopped"] = True
+        macos_vz_provisioner._atomic_private_json(provisioner.state_path, state)
+    elif failure == "replaced_root":
+        root.rename(root.with_name("original-retained"))
+        root.mkdir(mode=0o700)
+        _private_file(root / "foreign", b"preserve")
+    else:
+        domains = provisioner.state_path.parent / "domains"
+        domains.mkdir(mode=0o700)
+        (domains / "active").mkdir(mode=0o700)
+    with pytest.raises(ValueError):
+        provisioner.cleanup(
+            f"{macos_vz_provisioner.PACKVM_CLEANUP_PREFIX} {macos_vz_provisioner.VZ_INSTANCE}"
+        )
+    assert root.exists()
+    assert provisioner.state_path.exists()
+
+
 def test_operation_gate_adopts_only_an_exact_stale_owner_claim(
     provisioner_fixture: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
     monkeypatch: pytest.MonkeyPatch,
