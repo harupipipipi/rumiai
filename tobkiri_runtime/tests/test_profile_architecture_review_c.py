@@ -351,6 +351,8 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from core_runtime.bootstrap import profile_capture
+    from core_runtime.bootstrap.profile_registry import register_bootstrap_definition
+    from core_runtime.profile_definition_store_v4 import ProfileDefinitionStore
 
     predecessor_catalog = _packaged_catalog_revision(tmp_path / "predecessor", b"predecessor")
     successor_catalog = _packaged_catalog_revision(tmp_path / "successor", b"successor")
@@ -361,17 +363,23 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
     workspace.mkdir(parents=True)
     state = workspace / "activation"
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
-        ActivationStore(
+        predecessor_store = ActivationStore(
             state,
             workspace,
             profile_id="defaults",
             authority=authority,
             catalog=predecessor_catalog,
-        ).activate(
+        )
+        predecessor_store.activate(
             predecessor,
             activation_id="activation:defaults-capture-predecessor",
             created_at="2026-08-12T00:00:00Z",
         )
+        active_predecessor = predecessor_store.load_active_snapshot()
+    register_bootstrap_definition(user_data, predecessor_catalog.profiles["defaults"])
+    profile_capture._publish_host_active_pointer(
+        active_predecessor, user_data=user_data, replace_existing=False
+    )
     confirmation = {
         "operation_id": "defaults.activate",
         "confirmation_digest": "sha256:" + "a" * 64,
@@ -387,6 +395,31 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
         "_resolve_bootstrap_candidate",
         lambda **_kwargs: (successor, confirmation),
     )
+
+    definitions_before = ProfileDefinitionStore(user_data).snapshot()
+    pointer_before = (user_data / "profiles" / "active.json").read_bytes()
+    with pytest.raises(ProfileReconfirmationRequired, match="superseded"):
+        profile_capture.capture_active_profile()
+    assert ProfileDefinitionStore(user_data).snapshot() == definitions_before
+    assert (user_data / "profiles" / "active.json").read_bytes() == pointer_before
+
+    from dataclasses import replace
+    from core_runtime.active_profile_store_v4 import ActiveProfileStore
+    from core_runtime.bootstrap.profile_registry import verify_registered_bootstrap_successor
+    from core_runtime.profile_runtime_port import require_profile_runtime
+
+    pointer = ActiveProfileStore(user_data).require(verify_snapshot=True)
+    registered = predecessor_catalog.profiles["defaults"]
+    with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+        for candidate_pointer, candidate_source in (
+            (replace(pointer, activation_id="activation:other"), registered),
+            (pointer, {**registered, "profile_id": "other"}),
+        ):
+            verify_registered_bootstrap_successor(
+                runtime=require_profile_runtime(), catalog=successor_catalog,
+                registered=candidate_source, pointer=candidate_pointer,
+                workspace=workspace, authority=authority,
+            )
 
     with pytest.raises(ProfileReconfirmationRequired, match="superseded"):
         profile_capture.capture_default_profile()

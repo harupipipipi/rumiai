@@ -59,6 +59,7 @@ class ProfileReconfirmationRequired(ProfileResolutionDenied):
     """Raised when a valid predecessor cannot authorize a changed Profile."""
 
     verified_profile_definition_digest: str | None = None
+    verified_activation_identity: tuple[str, str, str, str] | None = None
 
 
 class ActivationLockTimeout(ProfileResolutionDenied):
@@ -1998,9 +1999,15 @@ class ActivationStore:
             )
         except ProfileReconfirmationRequired as error:
             # The record graph and current Authority reservation were verified
-            # above. Expose only its source identity for the explicit ceremony;
+            # above. Expose their source and activation identities for the ceremony;
             # the predecessor still cannot be captured for execution.
             error.verified_profile_definition_digest = str(plan["profile_definition_digest"])
+            error.verified_activation_identity = (
+                str(plan["profile_revision"]),
+                str(activation["activation_id"]),
+                str(plan["plan_digest"]),
+                str(lock["lock_digest"]),
+            )
             raise
         return ActiveDefaultProfile(
             resolved=ResolvedDefaultProfile(profile=profile, lock=lock, plan=plan),

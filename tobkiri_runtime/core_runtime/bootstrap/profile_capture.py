@@ -30,6 +30,7 @@ from ..profile_runtime_port import require_profile_runtime
 from .profile_registry import (
     recover_bootstrap_definition,
     register_bootstrap_definition,
+    verify_registered_bootstrap_successor,
 )
 
 
@@ -824,7 +825,25 @@ def capture_active_profile(*, base_dir: Path | None = None) -> Any:
             authority=authority,
             catalog=catalog,
         )
-        active = store.load_active_snapshot()
+        try:
+            active = store.load_active_snapshot()
+        except Exception as error:
+            runtime = require_profile_runtime()
+            registered = catalog.profiles.get(pointer.profile_id)
+            if (
+                runtime.is_resolution_denied(error)
+                and pointer.profile_id == _bootstrap_profile_id()
+                and isinstance(registered, Mapping)
+            ):
+                verify_registered_bootstrap_successor(
+                    runtime=runtime,
+                    catalog=runtime.load_catalog(_bundle_root(base_dir)),
+                    registered=registered,
+                    pointer=pointer,
+                    workspace=workspace,
+                    authority=authority,
+                )
+            raise
     identity = (
         str(active.resolved.plan["profile_revision"]),
         str(active.activation["activation_id"]),

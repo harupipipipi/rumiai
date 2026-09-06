@@ -27,9 +27,7 @@ def register_bootstrap_definition(
             definitions.create_profile(source, expected_store_generation=generation)
             return
         except ProfileDefinitionStoreConflict:
-            existing = definitions.get_profile(
-                str(source["profile_id"]), include_tombstone=True
-            )
+            existing = definitions.get_profile(str(source["profile_id"]), include_tombstone=True)
             if existing is None:
                 raise
     if (
@@ -88,3 +86,39 @@ def recover_bootstrap_definition(
     ):
         raise runtime.denied("bootstrap definition differs from its committed source")
     register_bootstrap_definition(user_data, source)
+
+
+def verify_registered_bootstrap_successor(
+    *,
+    runtime: Any,
+    catalog: Any,
+    registered: Mapping[str, Any],
+    pointer: Any,
+    workspace: Path,
+    authority: Any,
+) -> None:
+    """Surface a verified update of the selected source without changing state."""
+    try:
+        runtime.activation_store(
+            root=workspace / "activation",
+            workspace=workspace,
+            profile_id=pointer.profile_id,
+            authority=authority,
+            catalog=catalog,
+        ).load_active_snapshot()
+    except Exception as error:
+        if (
+            runtime.is_reconfirmation_required(error)
+            and getattr(error, "verified_profile_definition_digest", None)
+            == canonical_digest(registered)
+            and getattr(error, "verified_activation_identity", None)
+            == (
+                pointer.profile_revision,
+                pointer.activation_id,
+                pointer.plan_digest,
+                pointer.lock_digest,
+            )
+        ):
+            raise
+        # This is only a recovery classification; the caller retains its
+        # original denial unless this exact predecessor was verified.
