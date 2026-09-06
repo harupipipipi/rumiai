@@ -397,7 +397,9 @@ fn development_packvm_bundle_root(config: &AppConfig) -> Option<PathBuf> {
         || resources.file_name()? != "Resources"
         || contents.file_name()? != "Contents"
         || bundle.extension()? != "app"
-        || !bundle.join("Contents/MacOS/tobkiri-packvm-vz-helper").is_file()
+        || !bundle
+            .join("Contents/MacOS/tobkiri-packvm-vz-helper")
+            .is_file()
         || !bundle
             .join("Contents/Resources/packvm-vz-provisioning.v1.json")
             .is_file()
@@ -3219,9 +3221,7 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource_dir, root.join("appdata")).unwrap();
         let error = ensure_python_env_with_progress(&config, |_| {}).unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("development venv is missing"));
+        assert!(error.to_string().contains("development venv is missing"));
         assert!(error.to_string().contains(".venv"));
         fs::remove_dir_all(root).ok();
     }

@@ -2103,11 +2103,7 @@ pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &s
             Ok(panel_code) => {
                 if let Some(win) = handle.get_webview_window(&label) {
                     if let Err(error) =
-                        navigate_window_to_panel_session(
-                            &win,
-                            config.kernel_port,
-                            &panel_code,
-                        )
+                        navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
                     {
                         error!("Failed to refresh panel session for {label}: {error}");
                     }
@@ -2316,11 +2312,8 @@ fn spawn_kernel_exit_monitor(
             }) {
                 Ok(panel_code) => {
                     if let Some(win) = app.get_webview_window("main") {
-                        if let Err(error) = navigate_window_to_panel_session(
-                            &win,
-                            config.kernel_port,
-                            &panel_code,
-                        )
+                        if let Err(error) =
+                            navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
                         {
                             error!("Failed to refresh panel after Kernel restart: {error}");
                         }
@@ -4267,8 +4260,7 @@ mod tests {
             "http://localhost:8765/panel/",
             "http://127.0.0.1:8765/panel/packs/defaults?code=secret",
         ] {
-            validate_panel_session_caller_context("main", &Url::parse(url).unwrap(), 8765)
-                .unwrap();
+            validate_panel_session_caller_context("main", &Url::parse(url).unwrap(), 8765).unwrap();
         }
     }
 

@@ -71,10 +71,8 @@ impl AppConfig {
         // map intentionally omits `gen/app`; the target-path check covers
         // Cargo's direct and app-bundle resource layouts in tests and local
         // builds. A staged app remains the runtime boundary for an app bundle.
-        let prefer_dev_runtime =
-            (is_debug_artifact && !is_app_bundle)
-                || (is_explicit_local_development_workspace_build()
-                    && !staged_app_dir.exists());
+        let prefer_dev_runtime = (is_debug_artifact && !is_app_bundle)
+            || (is_explicit_local_development_workspace_build() && !staged_app_dir.exists());
         let dev_workspace_root = if is_debug_artifact {
             detected_workspace_root.clone()
         } else if staged_app_dir.exists() {
@@ -111,13 +109,13 @@ impl AppConfig {
             dev_workspace_root
                 .as_ref()
                 .map(|workspace_root| {
-                workspace_root
-                    .join("tobkiri_launcher")
-                    .join("src-tauri")
-                    .join("target")
-                    .join("dev-state")
-                    .join("runs")
-                    .join(std::process::id().to_string())
+                    workspace_root
+                        .join("tobkiri_launcher")
+                        .join("src-tauri")
+                        .join("target")
+                        .join("dev-state")
+                        .join("runs")
+                        .join(std::process::id().to_string())
                 })
                 .unwrap_or(app_data_dir)
         };
@@ -130,9 +128,7 @@ impl AppConfig {
         };
         let venv_dir = dev_workspace_root
             .as_ref()
-            .map(|workspace_root| {
-                development_venv_dir(&app_dir, workspace_root, is_app_bundle)
-            })
+            .map(|workspace_root| development_venv_dir(&app_dir, workspace_root, is_app_bundle))
             .unwrap_or_else(|| writable_root.join("venv"));
         let user_data_dir = writable_root.join("user_data");
         let log_dir = writable_root.join("logs");
@@ -353,11 +349,7 @@ fn is_explicit_local_development_workspace_build() -> bool {
 /// therefore use the checkout's `.venv`. A debug `.app` that contains a
 /// staged runtime instead uses the staged development venv copied beside that
 /// runtime. Production launches never call this helper.
-fn development_venv_dir(
-    app_dir: &Path,
-    workspace_root: &Path,
-    is_app_bundle: bool,
-) -> PathBuf {
+fn development_venv_dir(app_dir: &Path, workspace_root: &Path, is_app_bundle: bool) -> PathBuf {
     let workspace_runtime = workspace_root.join("tobkiri_runtime");
     if !is_app_bundle || app_dir == workspace_runtime {
         workspace_root.join(".venv")
@@ -606,8 +598,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("tobkiri_launcher_config_target_{unique}"));
-        let resource = root
-            .join("tobkiri_launcher/src-tauri/target/aarch64-apple-darwin/debug");
+        let resource = root.join("tobkiri_launcher/src-tauri/target/aarch64-apple-darwin/debug");
         let staged_app_py = resource.join("app/app.py");
         let repo_app_py = root.join("tobkiri_runtime/app.py");
         fs::create_dir_all(staged_app_py.parent().unwrap()).unwrap();
@@ -615,8 +606,7 @@ mod tests {
         fs::write(&staged_app_py, "print('staged')\n").unwrap();
         fs::write(&repo_app_py, "print('repo')\n").unwrap();
 
-        let config =
-            AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, root.join("tobkiri_runtime"));
         assert_eq!(config.venv_dir, root.join(".venv"));
@@ -644,8 +634,7 @@ mod tests {
         fs::write(&staged_app_py, "print('staged')\n").unwrap();
         fs::write(&repo_app_py, "print('repo')\n").unwrap();
 
-        let config =
-            AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
+        let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
         assert_eq!(config.app_dir, resource.join("app"));
         assert_eq!(config.dev_workspace_root, Some(root.clone()));

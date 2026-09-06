@@ -3700,8 +3700,25 @@ mod tests {
         }
         let canonical_bundle = bundle.canonicalize().unwrap();
         let verified = verify_bundle_lock(&canonical_bundle).unwrap();
-        assert_eq!(verified.sidecar_digests.len(), 65);
-        assert_eq!(verified.authority_digests.len(), 74);
+        let expected_sidecars: BTreeSet<String> = fs::read_dir(source_bundle.join("packs"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.ends_with(".executables.v4.json"))
+            .map(|name| format!("packs/{name}"))
+            .collect();
+        assert!(!expected_sidecars.is_empty());
+        assert_eq!(
+            verified
+                .sidecar_digests
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+            expected_sidecars
+        );
+        for sidecar in verified.sidecar_digests.keys() {
+            let authority = sidecar.replace(".executables.v4.json", ".pack.v4.json");
+            assert!(verified.authority_digests.contains_key(&authority));
+        }
         assert!(verified
             .sidecar_digests
             .contains_key("packs/defaultspack.executables.v4.json"));

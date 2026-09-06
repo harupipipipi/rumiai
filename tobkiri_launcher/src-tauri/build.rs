@@ -5593,7 +5593,10 @@ fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
             if !resolved.is_file() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("development venv symlink is not a file: {}", source_path.display()),
+                    format!(
+                        "development venv symlink is not a file: {}",
+                        source_path.display()
+                    ),
                 ));
             }
             copy_file(&resolved, &destination_path)?;
@@ -5604,7 +5607,10 @@ fn copy_development_venv_tree(src: &Path, dst: &Path) -> io::Result<()> {
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("development venv contains an unsupported entry: {}", source_path.display()),
+                format!(
+                    "development venv contains an unsupported entry: {}",
+                    source_path.display()
+                ),
             ));
         }
     }
@@ -5621,7 +5627,10 @@ fn write_development_runtime_path(venv_root: &Path) -> io::Result<()> {
     } else {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("development venv site-packages not found below {}", venv_root.display()),
+            format!(
+                "development venv site-packages not found below {}",
+                venv_root.display()
+            ),
         ));
     };
     for entry in fs::read_dir(&site_packages)? {
