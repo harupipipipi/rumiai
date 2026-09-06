@@ -75,7 +75,7 @@ test('setup activation is explicit and followed by selected presentation materia
   assert.match(setupSource, /runtimeStatus.*runtime_ready/);
   assert.match(setupSource, /activateDefaultsWithRecovery/);
   assert.match(setupSource, /recoverDefaultsActivation/);
-  assert.match(setupSource, /fetchAuthoritativeSetup: fetchDefaultsSetupState/);
+  assert.match(setupSource, /fetchAuthoritativeSetup: \(\) => fetchDefaultsSetupState\(\{waitForRestart: true\}\)/);
 });
 
 test('activation denial remains visible and disables confirmation controls', () => {
