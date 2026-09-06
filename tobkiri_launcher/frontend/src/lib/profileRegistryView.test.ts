@@ -62,6 +62,16 @@ test('v4 Profile documents expose honest ready and error states', () => {
   assert.match(retired.statusDescription ?? '', /retired/i);
 });
 
+test('a verified active snapshot is ready even while its registered source needs resolution', () => {
+  const source = profileRecord('defaults', 'Tobkiri Defaults', 'needs_resolution', 0, 1);
+  source.profile.profile_api_version = 'io.tobkiri.profile.v5';
+  assert.equal(buildNamedProfileView(source).status, 'error');
+  assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'ready');
+  assert.equal(buildNamedProfileView(source, {activeSnapshotReady: false}).status, 'error');
+  source.profile.state = 'retired';
+  assert.equal(buildNamedProfileView(source, {activeSnapshotReady: true}).status, 'error');
+});
+
 test('Profile search covers IDs, names, base Packs, and original recommended ordering', () => {
   const profiles = [
     profileRecord('unresolved', 'Research', 'needs_resolution', 0, 100),

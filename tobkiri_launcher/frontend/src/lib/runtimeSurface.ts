@@ -165,6 +165,11 @@ export interface RuntimeProfileCatalogProjection {
   bundle_lock_digest: string;
   catalog_ref: string;
   active_profile_id: string | null;
+  selection?: {
+    state: 'active_execution' | 'browsing';
+    selected_profile_id: string;
+    execution_profile_id: string | null;
+  };
   count: number;
   profiles: RuntimeProfileCatalogEntry[];
 }
@@ -932,6 +937,17 @@ function relativeSourcePath(value: unknown): value is string {
     && !value.split('/').some((part) => part === '.' || part === '..');
 }
 
+function profileDefinitionSourcePath(value: unknown, provenance: unknown): value is string {
+  if (relativeSourcePath(value)) return true;
+  // Migration provenance names the original local file. It is display evidence,
+  // never a path the frontend opens or uses to select an executable artifact.
+  return validString(value) && isRecord(provenance)
+    && provenance.source_kind === 'migration' && provenance.source_path === value
+    && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value))
+    && !/[\u0000-\u001f]/.test(value)
+    && !value.split(/[\\/]/).some((part) => part === '.' || part === '..');
+}
+
 function nullableDateTime(value: unknown): string | null {
   return value === null ? null : isDateTime(value) ? value : null;
 }
@@ -1047,7 +1063,7 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
     || !canonicalReference(value.definition.ref)
     || value.definition.ref !== `profile-v4://${value.profile_id}/${value.definition.digest}`
     || (value.definition.catalog_revision !== null && catalogRevision === null)
-    || !relativeSourcePath(value.definition.source_path)
+    || !profileDefinitionSourcePath(value.definition.source_path, value.definition.provenance)
     || !isRecord(value.definition.provenance)
   ) {
     return null;
@@ -1202,6 +1218,7 @@ function parseProfileCatalogEntry(value: unknown): RuntimeProfileCatalogEntry | 
 }
 
 export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalogProjection | null {
+  const hasSelection = isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'selection');
   if (!exactObject(value, [
     'catalog_api_version',
     'catalog_digest',
@@ -1210,6 +1227,7 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     'active_profile_id',
     'count',
     'profiles',
+    ...(hasSelection ? ['selection'] : []),
   ])) {
     return null;
   }
@@ -1245,6 +1263,21 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     return null;
   }
   if (activeCount > 1) return null;
+  let selection: RuntimeProfileCatalogProjection['selection'];
+  if (hasSelection) {
+    const selected = value.selection;
+    if (!exactObject(selected, ['state', 'selected_profile_id', 'execution_profile_id'])
+      || !validString(selected.selected_profile_id)
+      || !profileIds.has(selected.selected_profile_id)
+      || selected.execution_profile_id !== value.active_profile_id
+      || selected.state !== (selected.selected_profile_id === value.active_profile_id
+        ? 'active_execution' : 'browsing')) return null;
+    selection = {
+      state: selected.state as 'active_execution' | 'browsing',
+      selected_profile_id: selected.selected_profile_id,
+      execution_profile_id: selected.execution_profile_id as string | null,
+    };
+  }
   return {
     catalog_api_version: value.catalog_api_version,
     catalog_digest: value.catalog_digest,
@@ -1253,6 +1286,7 @@ export function extractExactProfileCatalog(value: unknown): RuntimeProfileCatalo
     active_profile_id: value.active_profile_id as string | null,
     count: value.count,
     profiles,
+    ...(selection ? {selection} : {}),
   };
 }
 

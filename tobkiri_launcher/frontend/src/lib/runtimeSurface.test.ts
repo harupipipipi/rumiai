@@ -329,6 +329,31 @@ test('Profile catalog tamper, unknown active marker, and extra fields fail close
   assert.equal(extractExactProfileCatalog(extraField), null);
 });
 
+test('Host catalog selection and migrated local provenance survive projection validation', () => {
+  const fixture = {
+    ...profileCatalogData(),
+    selection: {state: 'active_execution', selected_profile_id: 'defaults', execution_profile_id: 'defaults'},
+  };
+  const definition = fixture.profiles[1].definition;
+  for (const sourcePath of ['/Users/example/Application Support/startup_profiles.json', 'C:\\Users\\example\\startup_profiles.json']) {
+    definition.source_path = sourcePath;
+    definition.provenance = {source_kind: 'migration', source_path: sourcePath} as typeof definition.provenance;
+    assert.doesNotThrow(() => validateRuntimeSurfaceEnvelope('profiles', envelope('profiles', fixture)));
+  }
+  fixture.selection = {state: 'browsing', selected_profile_id: 'alternate', execution_profile_id: 'defaults'};
+  assert.ok(extractExactProfileCatalog(fixture));
+  for (const selection of [
+    {...fixture.selection, state: 'active_execution'},
+    {...fixture.selection, execution_profile_id: 'alternate'},
+    {...fixture.selection, selected_profile_id: 'missing'},
+    {...fixture.selection, approved: true},
+  ]) assert.equal(extractExactProfileCatalog({...fixture, selection}), null);
+  definition.provenance = {source_kind: 'repository'};
+  assert.equal(extractExactProfileCatalog(fixture), null);
+  definition.provenance = {source_kind: 'migration', source_path: '/different/file'} as typeof definition.provenance;
+  assert.equal(extractExactProfileCatalog(fixture), null);
+});
+
 test('real v4 read fixture accepts evidence refs and full Profile records only in profile data', () => {
   const accepted = validateRuntimeSurfaceEnvelope('profile', envelope('profile', profileData()));
 

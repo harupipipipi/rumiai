@@ -52,7 +52,10 @@ function profileError(
  * needs. The registry remains the authority; this helper only interprets the
  * v4/v5 Profile document lifecycle and never performs a runtime action.
  */
-export function buildNamedProfileView(entry: NamedProfileRecord): NamedProfileView {
+export function buildNamedProfileView(
+  entry: NamedProfileRecord,
+  {activeSnapshotReady = false}: {activeSnapshotReady?: boolean} = {},
+): NamedProfileView {
   const profile = entry.profile;
   const displayName = namedProfileDisplayName(entry);
   const base = isRecord(profile.base) ? profile.base : null;
@@ -79,6 +82,15 @@ export function buildNamedProfileView(entry: NamedProfileRecord): NamedProfileVi
   if (state === 'retired') {
     return withDisplayName(profileError(basePackId, packIds, 'This Profile is retired.'));
   }
+  if (!basePackId) {
+    return withDisplayName(profileError(basePackId, packIds, 'The v4 Base Pack is missing.'));
+  }
+  const ready: NamedProfileView = {
+    basePackId, displayName, packIds, status: 'ready', statusDescription: null, statusLabel: 'Ready',
+  };
+  // Registered source definitions remain unresolved after activation. The Host's
+  // verified active snapshot, not that source lifecycle, determines launch readiness.
+  if (activeSnapshotReady) return ready;
   if (state !== 'resolved') {
     return withDisplayName(profileError(
       basePackId,
@@ -87,9 +99,6 @@ export function buildNamedProfileView(entry: NamedProfileRecord): NamedProfileVi
     ));
   }
 
-  if (!basePackId) {
-    return withDisplayName(profileError(basePackId, packIds, 'The v4 Base Pack is missing.'));
-  }
   if (!resolvedReference(profile.catalog_revision)) {
     return withDisplayName(profileError(basePackId, packIds, 'The Profile catalog revision is missing.'));
   }
@@ -124,14 +133,7 @@ export function buildNamedProfileView(entry: NamedProfileRecord): NamedProfileVi
     ));
   }
 
-  return {
-    basePackId,
-    displayName,
-    packIds,
-    status: 'ready',
-    statusDescription: null,
-    statusLabel: 'Ready',
-  };
+  return ready;
 }
 
 function recommendedScore(
