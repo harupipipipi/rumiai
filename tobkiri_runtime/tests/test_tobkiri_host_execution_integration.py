@@ -639,6 +639,38 @@ def test_singleflight_materialization_never_merges_distinct_principals() -> None
     assert backend.starts == 2
 
 
+def test_singleflight_keeps_concurrent_resource_reservations_separate() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    barrier = Barrier(2)
+
+    class ReservedBackend(FakeBackend):
+        def materialize(self, binding, reservation_id) -> RuntimeEvidence:
+            barrier.wait(timeout=2)
+            evidence = super().materialize(binding, reservation_id)
+            return replace(evidence, resource_reservation_id=reservation_id)
+
+    backend = ReservedBackend([])
+    coordinator = MaterializationCoordinator()
+    binding = fixture_catalog(fixture_artifact()).resolve(
+        "io.tobkiri.notification.v1", "send", ">=1"
+    )
+    key = WorkloadInstanceKey(
+        "profile-1", "activation-1", binding.principal_ref, "wasm.effect.v1", 9
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(coordinator.materialize, key, backend, binding, reservation)
+            for reservation in ("first-reservation", "second-reservation")
+        ]
+        evidence = [future.result(timeout=3) for future in futures]
+    assert [item.resource_reservation_id for item in evidence] == [
+        "first-reservation",
+        "second-reservation",
+    ]
+    assert backend.starts == 2
+
+
 def test_trigger_kernel_deduplicates_and_issues_one_shot_lease() -> None:
     events: list[str] = []
     authority = FakeAuthority(events)
