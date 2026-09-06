@@ -1136,14 +1136,6 @@ pub(crate) fn spawn_defaultspack_local_server(
                         .join("frontend_settings.json"),
                 )
                 .env("RUMI_LOG_DIR", &config.log_dir)
-                .env(
-                    "RUMI_ENVIRONMENT",
-                    if cfg!(debug_assertions) || config.is_dev_workspace() {
-                        "development"
-                    } else {
-                        "production"
-                    },
-                )
                 .env("PYTHONDONTWRITEBYTECODE", "1")
                 .env(
                     viewer_host_broker_connection_env_key(),
@@ -1223,7 +1215,9 @@ fn apply_defaultspack_metadata_environment(
     environment: &[(String, String)],
 ) {
     if development_workspace {
-        command.envs(environment.iter().map(|(key, value)| (key, value)));
+        command
+            .envs(environment.iter().map(|(key, value)| (key, value)))
+            .env("RUMI_ENVIRONMENT", "development");
     }
 }
 
@@ -1278,7 +1272,15 @@ mod tests {
             true,
             &metadata_environment,
         );
-        assert_eq!(development.get_envs().count(), 2);
+        assert_eq!(development.get_envs().count(), 3);
+        assert_eq!(
+            development
+                .get_envs()
+                .find(|(key, _)| *key == "RUMI_ENVIRONMENT")
+                .unwrap()
+                .1,
+            Some(std::ffi::OsStr::new("development")),
+        );
     }
 
     #[test]

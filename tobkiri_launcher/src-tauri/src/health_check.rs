@@ -83,7 +83,11 @@ fn hmac_sha256_hex(secret: &str, message: &str) -> String {
 fn health_client() -> &'static reqwest::blocking::Client {
     HEALTH_CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(800))
+            .connect_timeout(Duration::from_millis(800))
+            // Health verifies the durable Profile, which can exceed 800 ms on
+            // a cold start. Abandoning it sooner leaves that work running while
+            // polling starts more captures against the same activation lock.
+            .timeout(Duration::from_secs(5))
             .build()
             .expect("failed to build health-check HTTP client")
     })
@@ -350,9 +354,13 @@ pub fn check_authenticated_runtime_ready(port: u16, bootstrap_secret: &str) -> R
 /// Returns `Ok(true)` if the Kernel responded with HTTP 200,
 /// `Ok(false)` for any other status or a connection error.
 pub fn check_health(port: u16) -> Result<bool> {
+    check_health_with_timeout(port, Duration::from_secs(5))
+}
+
+fn check_health_with_timeout(port: u16, timeout: Duration) -> Result<bool> {
     let url = format!("http://127.0.0.1:{port}/health");
 
-    match health_client().get(&url).send() {
+    match health_client().get(&url).timeout(timeout).send() {
         Ok(resp) => {
             if !resp.status().is_success() {
                 return Ok(false);
@@ -387,11 +395,15 @@ pub fn wait_for_healthy(port: u16, timeout_secs: u64) -> Result<()> {
     let interval = Duration::from_millis(200);
 
     while start.elapsed() < timeout {
-        if check_health(port)? {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        if check_health_with_timeout(port, remaining.min(Duration::from_secs(5)))? {
             info!("Kernel healthy after ~{:?}", start.elapsed());
             return Ok(());
         }
-        std::thread::sleep(interval);
+        std::thread::sleep(interval.min(timeout.saturating_sub(start.elapsed())));
     }
 
     bail!("Kernel did not become healthy within {timeout_secs}s on port {port}")
@@ -400,6 +412,46 @@ pub fn wait_for_healthy(port: u16, timeout_secs: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_waits_for_inflight_profile_verification() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        for bounded_wait in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0];
+                while !request.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                std::thread::sleep(Duration::from_millis(1100));
+                let body = r#"{"success":true,"data":{"panel_ready":true}}"#;
+                let response = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                if !bounded_wait {
+                    response.unwrap();
+                }
+            });
+            if bounded_wait {
+                assert!(wait_for_healthy(port, 1).is_err());
+            } else {
+                assert!(check_health(port).unwrap());
+            }
+            server.join().unwrap();
+        }
+    }
 
     #[test]
     fn check_health_unreachable_port() {

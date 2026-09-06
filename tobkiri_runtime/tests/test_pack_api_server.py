@@ -1433,6 +1433,33 @@ def test_health_is_public_and_typed(
     assert payload["data"] == {"status": "ok", "runtime_ready": True}
 
 
+def test_health_shares_capture_between_readiness_and_identity_only_within_request(
+    live_server: tuple[PackAPIServer, _Dispatch],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core_runtime.bootstrap import profile_capture
+
+    server, dispatch = live_server
+    scopes: list[object] = []
+
+    def health(_self: _Lifecycle) -> dict[str, object]:
+        scopes.append(profile_capture._PROFILE_CAPTURE_SCOPE.get())
+        return {"status": "ok", "runtime_ready": True}
+
+    def assert_current() -> None:
+        scopes.append(profile_capture._PROFILE_CAPTURE_SCOPE.get())
+
+    monkeypatch.setattr(_Lifecycle, "get_health", health)
+    monkeypatch.setattr(dispatch, "assert_current", assert_current)
+    for _ in range(2):
+        assert _request(server, "GET", "/health")[0] == 200
+    assert len(scopes) == 4
+    assert scopes[0] is not None and scopes[0] is scopes[1]
+    assert scopes[2] is not None and scopes[2] is scopes[3]
+    assert scopes[0] is not scopes[2]
+    assert profile_capture._PROFILE_CAPTURE_SCOPE.get() is None
+
+
 def test_panel_bootstrap_rejects_wrong_secret(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:

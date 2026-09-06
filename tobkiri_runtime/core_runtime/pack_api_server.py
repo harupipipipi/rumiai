@@ -2105,7 +2105,12 @@ headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code}})}})
             self._handle_retired_setup_complete()
             return
         if path == "/health":
-            self._handle_health()
+            from .bootstrap.profile_capture import profile_capture_scope
+
+            # Readiness and the authenticated session identity must use the
+            # same request-local capture, just like canonical Contract reads.
+            with profile_capture_scope():
+                self._handle_health()
             return
         if path == "/":
             self.send_response(302)
