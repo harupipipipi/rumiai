@@ -412,7 +412,7 @@ def test_capture_flow_reconfirms_valid_artifact_successor_and_persists_restart(
     registered = predecessor_catalog.profiles["defaults"]
     with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
         for candidate_pointer, candidate_source in (
-            (replace(pointer, activation_id="activation:defaults-other"), registered),
+            (replace(pointer, plan_digest="sha256:" + "f" * 64), registered),
             (pointer, {**registered, "profile_id": "other"}),
         ):
             verify_registered_bootstrap_successor(
