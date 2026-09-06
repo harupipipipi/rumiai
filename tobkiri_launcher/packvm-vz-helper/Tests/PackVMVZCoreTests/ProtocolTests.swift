@@ -129,6 +129,43 @@ struct ProtocolTests {
     }
 
     @Test
+    func directOperationalFailureUsesTheBoundAuthenticatedEnvelope() throws {
+        let binding: [String: Any] = [
+            "domain_id": "domain.provider.conversation",
+            "kind": "tobkiri.macos-vz.launch-binding.v1",
+            "version": 1,
+        ]
+        let request = try DirectSupervisorRequest.parse(
+            [
+                "kind": directSupervisorRequestKind,
+                "protocol": directSupervisorProtocol,
+                "version": 1,
+                "operation": "launch",
+                "host_nonce": String(repeating: "d", count: 64),
+                "domain_id": "domain.provider.conversation",
+                "launch_binding_digest": try CanonicalJSON.sha256(
+                    CanonicalJSON.data(binding)
+                ),
+                "launch_binding": binding,
+                "guest_challenge": String(repeating: "e", count: 64),
+            ],
+            replayGuard: NonceReplayGuard()
+        )
+
+        let response = try DirectSupervisorAuthenticator.makeFailure(
+            request: request,
+            error: HelperError.invalidAsset("DISK_DIGEST_MISMATCH"),
+            key: key
+        )
+
+        #expect(try DirectSupervisorAuthenticator.verifyResponse(response, key: key))
+        #expect((response["payload"] as? [String: Any])?["kind"] as? String
+            == directSupervisorFailureKind)
+        #expect((response["payload"] as? [String: Any])?["code"] as? String
+            == "DISK_DIGEST_MISMATCH")
+    }
+
+    @Test
     func directGuestResponseRequiresTheAllocationBoundEd25519Signature() throws {
         let key = Curve25519.Signing.PrivateKey()
         let bindings = ["domain": "sha256:" + String(repeating: "a", count: 64)]

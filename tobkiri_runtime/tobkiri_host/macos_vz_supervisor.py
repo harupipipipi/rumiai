@@ -75,6 +75,7 @@ from .platform_backends import (
 
 _REQUEST_KIND = "tobkiri.macos-vz.supervisor.request.v1"
 _RESPONSE_KIND = "tobkiri.macos-vz.supervisor.response.v1"
+_FAILURE_KIND = "tobkiri.macos-vz.supervisor.failure.v1"
 _SUPERVISOR_PROTOCOL = "io.tobkiri.macos-vz-supervisor.v1"
 _BRIDGE_PROTOCOL = "io.tobkiri.packvm.bridge.v1"
 _GUEST_RESPONSE_KIND = "tobkiri.packvm.guest.response.v1"
@@ -1107,6 +1108,21 @@ class MacOSVZSupervisorDriver:
         if not isinstance(mac, str) or not hmac.compare_digest(mac, expected_mac):
             self._compromise("macOS VZ helper MAC verification failed")
             raise BackendUnavailableError("macOS VZ helper MAC verification failed")
+        payload = response["payload"]
+        if payload.get("kind") == _FAILURE_KIND:
+            code = payload.get("code")
+            if (
+                set(payload) != {"kind", "code"}
+                or not isinstance(code, str)
+                or _BRIDGE_ERROR_CODE.fullmatch(code) is None
+            ):
+                self._compromise("macOS VZ native helper failure is invalid")
+                raise BackendUnavailableError(
+                    "macOS VZ native helper failure is invalid"
+                )
+            raise BackendUnavailableError(
+                f"macOS VZ native helper rejected {expected_operation}: {code}"
+            )
         return response
 
     def _new_host_nonce(self) -> str:

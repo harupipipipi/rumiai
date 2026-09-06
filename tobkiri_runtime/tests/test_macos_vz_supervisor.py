@@ -250,6 +250,7 @@ class _Transport:
         self.tamper_guest_binding = False
         self.guest_rejection = False
         self.pending_bridge = False
+        self.helper_failure: str | None = None
         self.replay_host_nonce: str | None = None
         self.closed = False
         self.enrollment: tuple[str, str, str] | None = None
@@ -318,7 +319,12 @@ class _Transport:
         )
         self.requests.append(request)
         operation = request["operation"]
-        if operation == "launch":
+        if self.helper_failure is not None:
+            payload = {
+                "kind": "tobkiri.macos-vz.supervisor.failure.v1",
+                "code": self.helper_failure,
+            }
+        elif operation == "launch":
             self.binding_digests = request["launch_binding"]["binding_digests"]
             payload = self._guest(
                 request,
@@ -554,6 +560,31 @@ def test_hmac_and_nested_guest_signature_tamper_fail_closed(tmp_path: Path) -> N
     with pytest.raises(BackendUnavailableError, match="guest response signature"):
         _launch(signature_driver)
     assert signature_driver.capability()[0] is False
+
+
+def test_authenticated_helper_failure_is_typed_without_compromising_driver(
+    tmp_path: Path,
+) -> None:
+    driver, allocator = _driver(tmp_path)
+    original = allocator.transport_for
+
+    def failure_factory(allocation: MacOSVZDomainAllocation) -> _Transport:
+        transport = original(allocation)
+        transport.helper_failure = "VZ_CONFIGURATION_REJECTED"
+        return transport
+
+    driver._transport_factory = failure_factory  # type: ignore[attr-defined]
+
+    with pytest.raises(
+        BackendUnavailableError,
+        match="native helper rejected launch: VZ_CONFIGURATION_REJECTED",
+    ):
+        _launch(driver)
+
+    assert driver.capability() == (True, None)
+    assert allocator.released == [
+        allocator.transports["domain.provider.conversation"].allocation
+    ]
 
 
 def test_guest_binding_tamper_fails_but_signed_guest_rejection_does_not_compromise(
