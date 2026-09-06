@@ -34,5 +34,26 @@ with no imports and working fuel/memory rejection. CPython component compilation
 used roughly 0.5–0.7 GiB resident/peak memory locally, so this result does not yet
 establish a memory advantage over VM execution.
 
+`tobkiri_runtime/tobkiri_host/wasm_component.py` supplies the worker's private
+engine. It verifies the input digest, rejects all imports, uses Pulley with fuel
+and epoch interruption, limits the guest to one 128 MiB memory, and consumes
+each engine for one request only. It does not bound compilation memory or start
+an isolated worker itself. Those remain supervisor responsibilities.
+
+With Wasmtime 48.0.0 and pytest installed in the test environment, run from
+`tobkiri_runtime/`:
+
+```sh
+python -B -m pytest tests/test_wasm_component.py -q
+```
+
+These tests execute real components, including an infinite loop interrupted by
+cancellation. The suite skips when Wasmtime is absent; a skip is not engine
+validation. Before production registration, the supervisor must implement the
+`RequestScopedBackend` cleanup contract: it confirms worker exit before Broker
+releases the reservation, including failed starts and denied authorization.
+If exit cannot be confirmed, the reservation remains charged and the request is
+fenced. Concurrent reservations cannot share materialization evidence.
+
 References: [Wasmtime sandboxing](https://docs.wasmtime.dev/security.html) and
 [componentize-py](https://github.com/bytecodealliance/componentize-py).
