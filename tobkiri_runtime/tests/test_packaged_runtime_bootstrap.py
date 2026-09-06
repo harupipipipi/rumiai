@@ -744,9 +744,9 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
     else:
-        confirmation = capture.prepare_default_profile_confirmation()
+        review_catalog, confirmation = capture.prepare_bootstrap_profile_review()
         review = runtime.setup_listing(
-            capture.bootstrap_catalog_for_review(),
+            review_catalog,
             confirmation,
             active=False,
             activation_denied=False,

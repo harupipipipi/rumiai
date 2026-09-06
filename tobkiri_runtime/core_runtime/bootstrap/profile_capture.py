@@ -412,13 +412,16 @@ def bootstrap_catalog_for_review(*, base_dir: Path | None = None) -> Any:
     )
 
 
-def _resolve_bootstrap_candidate(*, base_dir: Path | None = None) -> tuple[Any, dict[str, Any]]:
+def _resolve_bootstrap_candidate(
+    *, base_dir: Path | None = None, catalog: Any | None = None
+) -> tuple[Any, dict[str, Any]]:
     """Resolve the finite Pack-selected bootstrap candidate without writing."""
 
     user_data = _user_data_root(base_dir)
     bundle_root = _bundle_root(base_dir)
     runtime = require_profile_runtime()
-    catalog = bootstrap_catalog_for_review(base_dir=base_dir)
+    if catalog is None:
+        catalog = bootstrap_catalog_for_review(base_dir=base_dir)
     bundle_lock_digest = (
         "sha256:" + hashlib.sha256((bundle_root / "bundle.lock.json").read_bytes()).hexdigest()
     )
@@ -544,6 +547,15 @@ def prepare_bootstrap_profile_confirmation(*, base_dir: Path | None = None) -> d
 
     _resolved, confirmation = _resolve_bootstrap_candidate(base_dir=base_dir)
     return confirmation
+
+
+def prepare_bootstrap_profile_review(
+    *, base_dir: Path | None = None
+) -> tuple[Any, dict[str, Any]]:
+    """Bind the displayed Pack selection and confirmation to one captured candidate."""
+    catalog = bootstrap_catalog_for_review(base_dir=base_dir)
+    _resolved, confirmation = _resolve_bootstrap_candidate(base_dir=base_dir, catalog=catalog)
+    return catalog, confirmation
 
 
 def prepare_default_profile_confirmation(*, base_dir: Path | None = None) -> dict[str, Any]:
@@ -939,7 +951,7 @@ def capture_bootstrap_profile(
         resolved_reconciliation: Any | None = None
         if confirmation is not None:
             resolved_reconciliation, expected_confirmation = _resolve_bootstrap_candidate(
-                base_dir=base_dir
+                base_dir=base_dir, catalog=catalog
             )
             if dict(confirmation) != expected_confirmation:
                 raise ProfileResolutionDenied(
