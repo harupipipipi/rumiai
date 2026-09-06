@@ -705,9 +705,9 @@ def test_initial_setup_review_does_not_create_profile_or_authority_state(
 
 
 @pytest.mark.parametrize("customized", [False, True])
-@pytest.mark.parametrize("extra_pack", [False, True])
+@pytest.mark.parametrize("extra_pack", [None, "approved", "revoked", "tampered"])
 def test_confirmed_bootstrap_upgrade_preserves_definition_history(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool, extra_pack: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool, extra_pack: str | None
 ) -> None:
     """Only the verified predecessor may receive a confirmed source successor."""
     import core_runtime.bootstrap.profile_capture as capture
@@ -730,37 +730,35 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         confirmation=capture.prepare_default_profile_confirmation()
     )
     if extra_pack:
-        from core_runtime.pack_control_v4 import activate_resolved_profile_pack_set
+        from tests.test_pack_control_v4 import _capture_control_session, _invoke
 
-        snapshot = first.resolved.plan["profile_authority_snapshot_digest"]
-        edges = [
-            *catalog.profiles["defaults"]["requested_edges"],
-            *runtime.dynamic_profile_edges(catalog, "defaults", ("rumi_agent_workroom_pack",)),
-        ]
-        enabled = runtime.resolve_profile(
-            catalog,
-            "defaults",
-            approved_artifact_digests={
-                p["pack"]["artifact_digest"] for p in catalog.packs.values()
-            },
-            authority_snapshot_digest=snapshot,
-            authority_bindings={
-                capture._edge_key(edge): capture._authority_reference(edge, snapshot)
-                for edge in edges
-            },
-            security_epoch=first.activation["security_epoch"],
-            additional_pack_ids=("rumi_agent_workroom_pack",),
-        )
-        activate_resolved_profile_pack_set(
-            enabled,
-            activation_id="activation:defaults-workroom-before-update",
-            expected_profile_revision=first.resolved.plan["profile_revision"],
-            expected_plan_digest=first.resolved.plan["plan_digest"],
-            expected_activation_id=first.activation["activation_id"],
-            bundle_root=catalog.root,
-            user_data_root=user_data,
-        )
+        session = _capture_control_session()
+        pack_id = "rumi_agent_workroom_pack"
+        _invoke(session, "pack.install", {"pack_id": pack_id})
+        candidate = _invoke(session, "approval.candidate", {"pack_id": pack_id})
+        _invoke(session, "approval.approve", {
+            "pack_id": pack_id, "candidate_id": candidate["candidate_id"],
+        })
+        assert _invoke(session, "pack.enable", {"pack_id": pack_id})["enabled"]
         first = capture.capture_active_profile()
+        approval_path = user_data / "pack_control" / "approvals" / "defaults" / f"{pack_id}.json"
+        approval = json.loads(approval_path.read_text())
+        if extra_pack == "revoked":
+            # Model a committed revocation whose subsequent deactivation failed.
+            from core_runtime.authority.v4 import AuthorityStore
+
+            with AuthorityStore(user_data / "authority" / "v4.sqlite3") as authority:
+                authority.revoke_pack_approval(
+                    pack_id=pack_id,
+                    approval_revision=approval["approval_revision"],
+                    profile_id="defaults",
+                    activation_id=first.activation["activation_id"],
+                    artifact_digest=catalog.packs[pack_id]["pack"]["artifact_digest"],
+                    reason="test interrupted Pack revocation",
+                )
+        elif extra_pack == "tampered":
+            approval["signature"] = "invalid"
+            approval_path.write_text(json.dumps(approval))
     definitions = ProfileDefinitionStore(user_data)
     original = definitions.get_profile("defaults")
     if customized:
@@ -775,6 +773,13 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
             capture.prepare_default_profile_confirmation()
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
+    elif extra_pack in {"revoked", "tampered"}:
+        from core_runtime.pack_control_v4 import PackControlDenied
+
+        with pytest.raises(PackControlDenied, match="approval_(revoked|signature_invalid)"):
+            capture.prepare_bootstrap_profile_review()
+        assert definitions.snapshot() == before
+        assert pointer_path.read_bytes() == pointer_before
     else:
         review_catalog, confirmation = capture.prepare_bootstrap_profile_review()
         review = runtime.setup_listing(
@@ -787,7 +792,7 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         assert (
             "rumi_agent_workroom_pack"
             in {pack["pack_id"] for pack in review["recommended_default_profile"]["packs"]}
-        ) == extra_pack
+        ) == bool(extra_pack)
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
         upgraded = capture.capture_default_profile(confirmation=confirmation)
@@ -800,7 +805,7 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         assert (
             "rumi_agent_workroom_pack"
             in {pack["pack_id"] for pack in upgraded.resolved.profile["packs"]}
-        ) == extra_pack
+        ) == bool(extra_pack)
         assert current.parent_revision == original.profile_revision
         entry = next(p for p in definitions.snapshot()["profiles"] if p["profile_id"] == "defaults")
         assert entry["revisions"][0]["profile"] == dict(original.profile)

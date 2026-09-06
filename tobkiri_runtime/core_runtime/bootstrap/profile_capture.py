@@ -462,6 +462,10 @@ def _resolve_bootstrap_candidate(
         security_epoch=security_epoch,
         additional_pack_ids=additional_pack_ids,
     )
+    if additional_pack_ids:
+        from ..pack_control_v4 import verify_reconfirmed_pack_approvals
+
+        verify_reconfirmed_pack_approvals(resolved, catalog)
     return resolved, dict(
         runtime.bootstrap_confirmation(
             resolved=resolved,

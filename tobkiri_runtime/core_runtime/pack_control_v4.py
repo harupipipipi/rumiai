@@ -1199,6 +1199,7 @@ def _required_profile_pack_ids(
     profile_id: str,
     *,
     active_snapshot: Any | None = None,
+    catalog: Any | None = None,
 ) -> frozenset[str]:
     """Return the static Pack closure declared by one registry Profile.
 
@@ -1213,7 +1214,8 @@ def _required_profile_pack_ids(
             raise PackControlDigestMismatch("active Profile does not match the lifecycle binding")
     from .bootstrap.profile_capture import host_profile_catalog
 
-    catalog = host_profile_catalog()
+    if catalog is None:
+        catalog = host_profile_catalog()
     source = catalog.profiles.get(profile_id)
     if source is None:
         raise PackControlDigestMismatch("selected Profile is unavailable")
@@ -1388,6 +1390,30 @@ def _binding_for_resolved(resolved: Any) -> _Binding:
         plan_digest=str(plan["plan_digest"]),
         catalog_revision=control_catalog_revision(),
     )
+
+
+def verify_reconfirmed_pack_approvals(resolved: Any, catalog: Any) -> None:
+    """Require live install and approval receipts for preserved optional Packs."""
+    required = _required_profile_pack_ids(
+        str(resolved.profile["profile_id"]), catalog=catalog
+    )
+    optional = {str(item["pack_id"]) for item in resolved.profile["packs"]} - required
+    _verify_optional_pack_approvals(optional, _binding_for_resolved(resolved))
+
+
+def _verify_optional_pack_approvals(pack_ids: set[str], binding: _Binding) -> None:
+    installed = _read_control_state(binding.profile_id)
+    records = load_pack_catalog()
+    for pack_id in sorted(pack_ids):
+        record = records.get(pack_id)
+        if record is None:
+            raise PackControlDigestMismatch("optional Pack is absent from the catalog")
+        if pack_id not in installed:
+            raise PackControlConflict("Pack must be installed before activation")
+        _require_install_binding(pack_id, record, installed[pack_id], binding)
+        approved, reason = _approval_status(pack_id, record, binding)
+        if not approved:
+            _raise_approval_failure(reason)
 
 
 def _active_profile(
@@ -1596,22 +1622,9 @@ def resolve_profile_pack_set(
         for edge in runtime.dynamic_profile_edges(catalog, profile_id, additional_pack_ids):
             bindings[_edge_key(edge)] = _authority_reference(edge, snapshot_digest)
         approved_digests = {str(item["artifact_digest"]) for item in baseline.lock["effective_set"]}
-        installed = _read_control_state(profile_id)
-        binding = _binding_for_resolved(baseline)
         selected_optional = requested_closure - mandatory
+        _verify_optional_pack_approvals(selected_optional, _binding_for_resolved(baseline))
         for pack_id in sorted(selected_optional):
-            record = load_pack_catalog()[pack_id]
-            if pack_id not in installed:
-                raise PackControlConflict("Pack must be installed before activation")
-            _require_install_binding(
-                pack_id,
-                record,
-                installed[pack_id],
-                binding,
-            )
-            approved, reason = _approval_status(pack_id, record, binding)
-            if not approved:
-                _raise_approval_failure(reason)
             approved_digests.add(str(catalog.packs[pack_id]["pack"]["artifact_digest"]))
         resolved = runtime.resolve_profile(
             catalog,
