@@ -1209,13 +1209,30 @@ fn profile_pack_migration_is_admissible(
     // `read_only` describes the retained legacy compatibility projection; it
     // is not an execution trust level. The v4 Pack remains authoritative and
     // reaches this check only after its bytes and bundle role are digest-locked.
-    // Keep the exception narrower than execution admission: only an explicitly
-    // selected Host Extension provider may retain that projection metadata.
+    // Keep this narrower than execution admission: selected Host Extensions
+    // and inert optional Application metadata may retain the projection.
     match value_str(pack, "/migration/compatibility") {
         Some("none") => true,
         Some("read_only") => {
-            selected_profile_pack_role(selected, pack_id) == Some("provider")
-                && value_str(pack, "/pack/kind") == Some("host_extension")
+            if selected_profile_pack_role(selected, pack_id) != Some("provider") {
+                return false;
+            }
+            value_str(pack, "/pack/kind") == Some("host_extension")
+                || (value_str(pack, "/pack/kind") == Some("application")
+                    && value_str(pack, "/requirements/execution_boundary")
+                        == Some("declarative_only")
+                    && [
+                        "contracts",
+                        "functions",
+                        "operation_catalog",
+                        "provider_catalog",
+                    ]
+                    .iter()
+                    .all(|key| {
+                        pack.get(key)
+                            .and_then(Value::as_array)
+                            .is_some_and(Vec::is_empty)
+                    }))
         }
         _ => false,
     }
@@ -4153,7 +4170,7 @@ mod tests {
     }
 
     #[test]
-    fn read_only_migration_requires_selected_host_extension_provider() {
+    fn read_only_migration_requires_selected_provider_with_admissible_execution_kind() {
         let mut profile = generic_profile("profile.migration", "application.migration");
         profile["packs"]
             .as_array_mut()
@@ -4203,6 +4220,39 @@ mod tests {
             "provider.migration",
             &ordinary_application
         ));
+
+        let mut declarative = host_extension.clone();
+        declarative["pack"]["kind"] = serde_json::json!("application");
+        declarative["requirements"] = serde_json::json!({
+            "execution_boundary": "declarative_only"
+        });
+        for key in [
+            "contracts",
+            "functions",
+            "operation_catalog",
+            "provider_catalog",
+        ] {
+            declarative[key] = serde_json::json!([]);
+        }
+        assert!(profile_pack_migration_is_admissible(
+            &selected,
+            "provider.migration",
+            &declarative
+        ));
+        for key in [
+            "contracts",
+            "functions",
+            "operation_catalog",
+            "provider_catalog",
+        ] {
+            let mut executable = declarative.clone();
+            executable[key] = serde_json::json!([{"id": "forged-execution"}]);
+            assert!(!profile_pack_migration_is_admissible(
+                &selected,
+                "provider.migration",
+                &executable
+            ));
+        }
 
         let mut ordinary_sandbox = host_extension.clone();
         ordinary_sandbox["pack"]["kind"] = Value::String("normal_sandbox".into());
