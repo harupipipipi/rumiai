@@ -2031,30 +2031,15 @@ fn ensure_kernel_ready_for_panel_auth(
     config: &AppConfig,
     km: &Arc<Mutex<KernelManager>>,
 ) -> AnyResult<()> {
-    let port = config.kernel_port;
-    let kernel_is_running = km
-        .lock()
-        .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?
-        .is_running();
-    if kernel_is_running && health_check::check_health(port)? {
-        return Ok(());
-    }
-
-    if kernel_is_running && health_check::wait_for_healthy(port, 5).is_ok() {
-        return Ok(());
-    }
-
     let mut kernel = km
         .lock()
         .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?;
-    if kernel.is_running() {
-        kernel.restart()?;
-    } else {
-        kernel.start()?;
-    }
+    // start() preserves a live child, including one just replaced by the exit
+    // monitor. Session renewal must not restart that child while it warms up.
+    kernel.start()?;
     drop(kernel);
 
-    health_check::wait_for_healthy(port, 60)?;
+    health_check::wait_for_healthy(config.kernel_port, 60)?;
     Ok(())
 }
 

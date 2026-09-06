@@ -808,6 +808,74 @@ mod tests {
         assert!(!km.is_running());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn panel_reauthorization_preserves_a_kernel_with_slow_health_readiness() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let config = AppConfig {
+            app_dir: PathBuf::new(),
+            rumi_home: PathBuf::new(),
+            python_dir: PathBuf::new(),
+            uv_path: PathBuf::new(),
+            venv_dir: PathBuf::new(),
+            user_data_dir: PathBuf::new(),
+            log_dir: PathBuf::new(),
+            kernel_port: listener.local_addr().unwrap().port(),
+            dev_workspace_root: None,
+        };
+        let server = std::thread::spawn(move || {
+            let started = Instant::now();
+            while started.elapsed() < Duration::from_secs(15) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0; 2048];
+                        let _ = stream.read(&mut request);
+                        let ready = started.elapsed() >= Duration::from_secs(7);
+                        let status = if ready { "200 OK" } else { "503 Unavailable" };
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        );
+                        if ready {
+                            return;
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("health fixture failed: {error}"),
+                }
+            }
+        });
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut manager = KernelManager::new(&config, "test-bootstrap".into());
+        manager.child = Some(crate::python_env::PythonChild::development(child));
+        let manager = Arc::new(Mutex::new(manager));
+
+        let result = crate::ensure_kernel_ready_for_panel_auth(&config, &manager);
+        let mut kernel = manager.lock().unwrap();
+        let retained_pid = kernel.child.as_ref().map(|child| child.id());
+        let still_running = kernel.is_running();
+        kernel.stop().unwrap();
+        server.join().unwrap();
+        result.unwrap();
+        assert_eq!(retained_pid, Some(pid));
+        assert!(still_running);
+    }
+
     #[test]
     fn stop_without_start_is_ok() {
         let config = test_config();
