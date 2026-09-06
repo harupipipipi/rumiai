@@ -1427,10 +1427,17 @@ def test_unknown_api_route_is_physically_absent(
 def test_health_is_public_and_typed(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:
-    server, _ = live_server
+    server, dispatch = live_server
     status, payload, _ = _request(server, "GET", "/health")
     assert status == 200
-    assert payload["data"] == {"status": "ok", "runtime_ready": True}
+    assert payload["data"] == {
+        "status": "ok",
+        "runtime_ready": True,
+        "profile_id": dispatch.profile_id,
+        "profile_revision": dispatch.profile_revision,
+        "activation_id": dispatch.activation_id,
+        "plan_digest": dispatch.plan_digest,
+    }
 
 
 def test_health_shares_capture_between_readiness_and_identity_only_within_request(
