@@ -1160,6 +1160,105 @@ def test_home_and_pack_workflow_use_only_real_broker_contracts(
         assert len(current_authority.audit_events()) == audit_before_legacy
 
 
+def test_pack_enable_keeps_journal_success_when_runtime_refresh_fails(
+    production_server,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed Pack enable is not rewritten by a failed runtime refresh."""
+
+    server, session, _authority = production_server
+    cookie, csrf, origin = _authenticate(server)
+    headers = {
+        "Cookie": cookie,
+        "Origin": origin,
+        "X-Rumi-CSRF": csrf,
+    }
+
+    def post(
+        target: str,
+        body: Mapping[str, object],
+        *,
+        request_id: str | None = None,
+    ) -> tuple[str, int, dict[str, object]]:
+        current_request_id = request_id or str(uuid.uuid4())
+        status, payload, _ = _request(
+            server,
+            "POST",
+            _contract("POST", target),
+            body=body,
+            headers={
+                **headers,
+                "X-Tobkiri-Request-ID": current_request_id,
+            },
+        )
+        return current_request_id, status, payload
+
+    pack_id = "tobkiri_workflow_pack"
+    _, status, installed = post("/api/pack-control/install", {"pack_id": pack_id})
+    assert status == 200, installed
+    _, status, candidate = post(
+        "/api/pack-control/approval-candidate",
+        {"pack_id": pack_id},
+    )
+    assert status == 200, candidate
+    _, status, approved = post(
+        "/api/pack-control/approval-approve",
+        {
+            "pack_id": pack_id,
+            "candidate_id": candidate["data"]["candidate_id"],
+        },
+    )
+    assert status == 200, approved
+
+    handler = server.handler_class
+    assert handler is not None
+    binding = handler._current_panel_auth_binding()
+    assert binding is not None
+    raw_session_id = cookie.split("=", 1)[1]
+    verified_session = server._panel_auth_manager.verify_session(
+        raw_session_id,
+        binding,
+    )
+    assert verified_session is not None
+    refresh_attempts = 0
+
+    def fail_refresh(_session: object | None = None) -> None:
+        nonlocal refresh_attempts
+        refresh_attempts += 1
+        raise RuntimeError("stale Host contract")
+
+    monkeypatch.setattr(handler, "_runtime_refresh", staticmethod(fail_refresh))
+
+    dispatch_calls = 0
+    original_broker_invoke = session.broker.invoke
+
+    def counted_broker_invoke(*args: object, **kwargs: object) -> object:
+        nonlocal dispatch_calls
+        dispatch_calls += 1
+        return original_broker_invoke(*args, **kwargs)
+
+    monkeypatch.setattr(session.broker, "invoke", counted_broker_invoke)
+    request_id = str(uuid.uuid4())
+    _, status, enabled = post(
+        "/api/pack-control/enable",
+        {"pack_id": pack_id},
+        request_id=request_id,
+    )
+    assert status == 200, enabled
+    assert enabled["data"]["enabled"] is True
+    assert refresh_attempts == 1
+    assert dispatch_calls == 1
+
+    journal = server._operation_journal
+    assert journal is not None
+    operation = journal.operation_status(
+        request_id,
+        session_id=str(verified_session["session_id"]),
+    )
+    assert operation["state"] == "succeeded"
+    assert operation["result"]["enabled"] is True
+
+
 def test_revoke_denials_respond_before_logging_and_release_for_retry(
     production_server,
 ) -> None:
