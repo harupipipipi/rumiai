@@ -866,6 +866,7 @@ class MacOSVZProvisioner:
             raise ValueError(f"PackVM stop requires exact confirmation: {expected}")
         state = self._load_state()
         with self.operation_gate("stop", {"attestation_digest": str(state["attestation_digest"])}):
+            self._assert_state_current(state)
             self._verify_state_bindings(state, self._require_manifest())
             state["stopped"] = True
             state = self._write_attested_state(state)
@@ -1278,6 +1279,7 @@ class MacOSVZProvisioner:
         with self.operation_gate(
             "cleanup", {"attestation_digest": str(state["attestation_digest"])}
         ):
+            self._assert_state_current(state)
             self._require_manifest()
             # Cleanup authenticates ownership of the old instance, not its
             # ability to execute under the newly installed release.
@@ -1780,6 +1782,12 @@ class MacOSVZProvisioner:
         updated["authentication"] = self._sign_state(updated)
         _atomic_private_json(self.state_path, updated)
         return updated
+
+    def _assert_state_current(self, state: Mapping[str, Any]) -> None:
+        """Recheck the selected state after acquiring the lifecycle lock."""
+        current = self._load_state()
+        if current["attestation_digest"] != state["attestation_digest"]:
+            raise ValueError("PackVM VZ lifecycle state changed before mutation")
 
     def _load_state(self) -> dict[str, Any]:
         raw = _read_private_file(self.state_path, _MAX_STATE_BYTES)

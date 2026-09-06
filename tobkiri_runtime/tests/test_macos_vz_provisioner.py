@@ -9,7 +9,9 @@ import importlib.util
 import io
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import replace
+from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import threading
@@ -524,6 +526,37 @@ def test_lifecycle_cleanup_retains_unverified_or_live_resources(
         )
     assert root.exists()
     assert provisioner.state_path.exists()
+
+
+@pytest.mark.parametrize("operation", ["stop", "cleanup"])
+def test_lifecycle_rechecks_state_after_acquiring_mutation_lock(
+    attested_provisioner: tuple[MacOSVZProvisioner, MacOSVZAssetManifest, Path],
+    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An authenticated state replacement cannot inherit an older mutation claim."""
+    provisioner, _manifest, root = attested_provisioner
+    gate = provisioner.operation_gate
+
+    @contextmanager
+    def gate_after_state_rotation(
+        name: str, binding: dict[str, str | int],
+    ) -> Iterator[None]:
+        with gate(name, binding):
+            updated = provisioner._load_state()
+            updated["created_unix"] = 123
+            provisioner._write_attested_state(updated)
+            yield
+
+    monkeypatch.setattr(provisioner, "operation_gate", gate_after_state_rotation)
+    prefix = (
+        macos_vz_provisioner.PACKVM_STOP_PREFIX if operation == "stop"
+        else macos_vz_provisioner.PACKVM_CLEANUP_PREFIX
+    )
+    with pytest.raises(ValueError, match="lifecycle state changed"):
+        getattr(provisioner, operation)(f"{prefix} {macos_vz_provisioner.VZ_INSTANCE}")
+    assert root.exists()
+    assert provisioner._load_state()["stopped"] is False
 
 
 def test_operation_gate_adopts_only_an_exact_stale_owner_claim(
