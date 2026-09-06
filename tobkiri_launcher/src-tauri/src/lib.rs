@@ -1757,8 +1757,16 @@ fn secure_panel_bootstrap_secret_file(path: &std::path::Path) -> AnyResult<fs::F
 }
 
 fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
+    request_panel_bootstrap_code_with_timeout(port, bootstrap_secret, Duration::from_secs(10))
+}
+
+fn request_panel_bootstrap_code_with_timeout(
+    port: u16,
+    bootstrap_secret: &str,
+    timeout: Duration,
+) -> AnyResult<String> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
+        .timeout(timeout)
         .build()
         .context("failed to build bootstrap HTTP client")?;
     let url = format!("http://127.0.0.1:{port}/api/panel/auth/bootstrap");
@@ -1793,25 +1801,30 @@ fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<
 }
 
 fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
-    let max_attempts = 10;
+    // A committed activation can replace the Kernel between health and this
+    // request. Fast connection refusals must not exhaust the recovery budget
+    // before the replacement finishes its verified cold capture.
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     let retry_delay = Duration::from_millis(500);
-    let mut last_error = None;
-
-    for attempt in 1..=max_attempts {
-        match request_panel_bootstrap_code(port, bootstrap_secret) {
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            bail!("panel bootstrap recovery timed out");
+        }
+        match request_panel_bootstrap_code_with_timeout(
+            port,
+            bootstrap_secret,
+            remaining.min(Duration::from_secs(10)),
+        ) {
             Ok(code) => return Ok(code),
             Err(error) => {
-                last_error = Some(error);
-                if attempt < max_attempts {
-                    thread::sleep(retry_delay);
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    return Err(error);
                 }
+                thread::sleep(retry_delay.min(remaining));
             }
         }
-    }
-
-    match last_error {
-        Some(error) => Err(error),
-        None => bail!("panel bootstrap retry finished without making a request"),
     }
 }
 
@@ -3218,6 +3231,44 @@ fn run_launcher(context: tauri::Context<tauri::Wry>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_bootstrap_waits_through_kernel_replacement() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for attempt in 0..=10 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
+                assert!(request.starts_with("post /api/panel/auth/bootstrap "));
+                assert!(request.contains("x-rumi-desktop-bootstrap: test-bootstrap-secret"));
+                let (status, body) = if attempt < 10 {
+                    ("503 Service Unavailable", "{}")
+                } else {
+                    (
+                        "200 OK",
+                        r#"{"success":true,"data":{"code":"replacement-code"}}"#,
+                    )
+                };
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        assert_eq!(
+            super::request_panel_bootstrap_code_with_retry(port, "test-bootstrap-secret").unwrap(),
+            "replacement-code"
+        );
+        server.join().unwrap();
+    }
     use super::*;
     use std::path::PathBuf;
     use std::sync::Mutex;
