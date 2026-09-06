@@ -2052,6 +2052,8 @@ fn request_fresh_panel_session_code(
     ensure_kernel_ready_for_panel_auth(config, km)?;
     let bootstrap_secret = load_or_create_panel_bootstrap_secret(config)
         .context("failed to load persisted panel bootstrap secret")?;
+    kernel_manager::write_kernel_host_contract(config, &bootstrap_secret)
+        .context("failed to publish verified panel Host contract")?;
     request_panel_bootstrap_code_with_retry(config.kernel_port, &bootstrap_secret)
 }
 

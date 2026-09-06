@@ -1311,7 +1311,6 @@ class PackAPIHandler(
                         else None
                     ),
                 )
-            self._refresh_after_operation(target.operation_id, safe_result)
         except (
             HostCoreError,
             KeyError,
@@ -1365,6 +1364,19 @@ class PackAPIHandler(
                     exc_info=error,
                 )
             return True
+        try:
+            self._refresh_after_operation(target.operation_id, safe_result)
+        except (HostCoreError, KeyError, OSError, RuntimeError, ValueError) as error:
+            # Activation has already committed. A stale Host contract must not
+            # change its durable outcome or cause the client to replay it.
+            self._defer_response_log(
+                logger,
+                logging.WARNING,
+                "Runtime capture refresh pending after %s/%s",
+                target.contract_id,
+                target.operation_id,
+                exc_info=error,
+            )
         self._send_contract_outcome(route_binding, safe_result)
         return True
 
@@ -1795,10 +1807,8 @@ class PackAPIHandler(
     def _handle_panel_bootstrap(self) -> None:
         manager = self._panel_auth_manager
         secret = self.headers.get("X-Rumi-Desktop-Bootstrap", "")
-        binding = self._current_panel_auth_binding()
         if (
             manager is None
-            or binding is None
             or not self._is_loopback_client(self.client_address)
             or not manager.validate_bootstrap_secret(secret)
         ):
@@ -1806,6 +1816,24 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         self._discard_request_body()
+        binding = self._current_panel_auth_binding()
+        if binding is None:
+            # Only the authenticated Launcher may trigger this recovery. It
+            # republishes a verified contract before requesting a fresh code.
+            # This request still belongs to the old capture; the Launcher's
+            # bootstrap retry will reach the newly published handler.
+            if self._runtime_refresh is not None:
+                try:
+                    self._runtime_refresh(None)
+                except (HostCoreError, KeyError, OSError, RuntimeError, ValueError) as error:
+                    self._defer_response_log(
+                        logger,
+                        logging.WARNING,
+                        "Authenticated panel runtime refresh failed",
+                        exc_info=error,
+                    )
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
         self._send_response(APIResponse(True, data=manager.issue_login_code(binding)))
 
     def _handle_panel_exchange(self, body: Mapping[str, object]) -> None:

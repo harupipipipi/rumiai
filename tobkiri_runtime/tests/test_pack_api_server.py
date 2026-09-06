@@ -1481,6 +1481,56 @@ def test_panel_bootstrap_rejects_wrong_secret(
     assert status == 401
 
 
+
+@pytest.mark.parametrize("refresh_fails", [False, True])
+def test_authenticated_bootstrap_refreshes_stale_capture_without_issuing_old_code(
+    live_server: tuple[PackAPIServer, _Dispatch],
+    monkeypatch: pytest.MonkeyPatch,
+    refresh_fails: bool,
+) -> None:
+    """Only authenticated retry may recover; no stale identity gets a code."""
+    import core_runtime.di_container as di_container_module
+    import tobkiri_host.runtime as host_runtime_module
+
+    server, stale = live_server
+    current = _Dispatch()
+    current.activation_id = "activation:successor"
+    refreshes: list[object] = []
+    server._runtime_capture_factory = _test_runtime_capture_inputs
+    monkeypatch.setattr(di_container_module, "get_container", object)
+    monkeypatch.setattr(
+        host_runtime_module, "install_dispatch_session", lambda *_args: None
+    )
+
+    def reject_stale() -> None:
+        raise RuntimeError("execution identity changed")
+
+    def refresh(session: object) -> None:
+        refreshes.append(session)
+        if refresh_fails:
+            raise RuntimeError("Host contract identity mismatch")
+        server._refresh_runtime_capture(
+            current, lifecycle_generation=server._lifecycle_generation
+        )
+
+    monkeypatch.setattr(stale, "assert_current", reject_stale)
+    assert server.handler_class is not None
+    monkeypatch.setattr(server.handler_class, "_runtime_refresh", staticmethod(refresh))
+    for secret, expected_refreshes in [("wrong", []), ("verified-desktop", [None])]:
+        status, payload, _ = _request(
+            server, "POST", "/api/panel/auth/bootstrap", body={},
+            headers={"X-Rumi-Desktop-Bootstrap": secret},
+        )
+        assert status == 401
+        assert payload["data"] is None
+        assert refreshes == expected_refreshes
+    if not refresh_fails:
+        cookie, _, _ = _panel_session(server)
+        assert cookie.startswith("rumi_panel_session=")
+        assert server._dispatch_session is current
+        assert refreshes == [None]
+
+
 def test_panel_auth_shell_waits_for_dom_before_touching_body(
     live_server: tuple[PackAPIServer, _Dispatch],
 ) -> None:

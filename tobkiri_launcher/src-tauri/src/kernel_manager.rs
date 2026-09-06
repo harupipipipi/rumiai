@@ -90,7 +90,11 @@ fn verified_active_application_authority(
     }
 }
 
-fn write_kernel_host_contract(config: &AppConfig, bootstrap_secret: &str) -> Result<PathBuf> {
+/// Publish contributions only from the independently verified active Application.
+pub(crate) fn write_kernel_host_contract(
+    config: &AppConfig,
+    bootstrap_secret: &str,
+) -> Result<PathBuf> {
     match verified_active_application_authority(config)? {
         Some(authority) => {
             let identity = authority
