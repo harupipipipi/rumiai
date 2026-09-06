@@ -94,6 +94,26 @@ def _catalog_operation(pack: dict, contract_id: str, operation_id: str) -> dict:
     )
 
 
+def test_catalog_separates_admission_and_active_pack_digests(captured_session) -> None:
+    """Execution joins use verified plan artifacts; approvals retain record identity."""
+    session, _state_path, _user_data = captured_session
+    catalog = _invoke(session, "catalog.read")
+    active = capture_default_profile()
+    artifacts = {
+        item["identity"]: item["artifact_digest"]
+        for item in active.resolved.plan["effective_set"]
+    }
+    records = pack_control.load_pack_catalog()
+    for row in catalog["packs"]:
+        pack_id = row["pack_id"]
+        assert row["artifact_digest"] == pack_control._record_digest(records[pack_id])
+        assert row["pack_artifact_digest"] == artifacts.get(pack_id)
+    required = _catalog_pack(catalog, REQUIRED_PACK)
+    assert required["pack_artifact_digest"] is not None
+    assert required["pack_artifact_digest"] != required["artifact_digest"]
+    assert _catalog_pack(catalog, TARGET_PACK)["pack_artifact_digest"] is None
+
+
 def test_catalog_install_approve_enable_and_restart_read_back(captured_session) -> None:
     """The positive lifecycle survives a fresh captured session."""
     session, _state_path, user_data = captured_session

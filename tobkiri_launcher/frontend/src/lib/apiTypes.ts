@@ -47,6 +47,8 @@ export interface ApiPack extends PackControlBinding {
   installed: boolean;
   enabled: boolean;
   artifact_digest: string;
+  /** Pack artifact in the verified active snapshot; distinct from the admission record digest. */
+  pack_artifact_digest?: string | null;
   approval_status?: string;
   approval_reason?: string | null;
   approved?: boolean;

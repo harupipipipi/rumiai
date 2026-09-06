@@ -1108,6 +1108,10 @@ def _catalog_payload(
     installed = _read_control_state(binding.profile_id)
     state, active_profile = _active_profile(active_snapshot)
     active = set(active_profile.get("packs") or [])
+    active_artifacts = {
+        str(item["identity"]): str(item["artifact_digest"])
+        for item in state["resolved_plan"]["effective_set"]
+    }
     active_grant_bindings = _active_grant_bindings(state)
     required_pack_ids = _required_profile_pack_ids(
         binding.profile_id,
@@ -1174,6 +1178,10 @@ def _catalog_payload(
                 "critical_changed": reason == "hash_mismatch",
                 "approval_issues": [] if approved else [reason or "approval_required"],
                 "artifact_digest": _record_digest(record),
+                # The admission record and executable Pack have distinct
+                # identities. Keep approval inputs bound to the former and
+                # project the latter only from the verified active snapshot.
+                "pack_artifact_digest": active_artifacts.get(pack_id),
                 "capabilities": _capability_projection(record),
                 "flows": [str(operation["operation_id"]) for operation in declared_operations],
                 "dependencies": sorted(

@@ -30,14 +30,16 @@ export function exactPackControlCatalogBinding(
 
 /** Require an active Pack row to match the control catalog's exact artifact/state. */
 export function exactActivePackJoin(
-  pack: Pick<Pack, 'id' | 'version' | 'artifactDigest' | 'installed' | 'enabled' | 'approved' | 'required'>,
+  pack: Pick<Pack, 'id' | 'version' | 'packArtifactDigest' | 'installed' | 'enabled' | 'approved' | 'required'>,
   activeRow: Pick<RuntimePackDescriptor, 'pack_id' | 'version' | 'artifact_digest' | 'installed' | 'enabled' | 'approved' | 'required'> | undefined,
 ): boolean {
   return Boolean(
     activeRow
     && activeRow.pack_id === pack.id
     && activeRow.version === pack.version
-    && activeRow.artifact_digest === pack.artifactDigest
+    && typeof pack.packArtifactDigest === 'string'
+    && /^sha256:[0-9a-f]{64}$/.test(pack.packArtifactDigest)
+    && activeRow.artifact_digest === pack.packArtifactDigest
     && activeRow.installed === pack.installed
     && activeRow.enabled === pack.enabled
     && activeRow.approved === pack.approved

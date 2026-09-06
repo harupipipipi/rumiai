@@ -106,6 +106,7 @@ export interface Pack {
   enabled: boolean;
   description: string;
   artifactDigest: string;
+  packArtifactDigest?: string | null;
   profileId: string;
   workspaceId: string;
   profileRevision: string;
