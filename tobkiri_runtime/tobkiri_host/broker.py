@@ -14,7 +14,7 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .admission import AdmissionEstimate, QueueScope, ResourceReservation
-from .backends import BackendRegistry, ExecutionBackend
+from .backends import BackendRegistry, ExecutionBackend, RequestScopedBackend
 from .contracts import (
     AdapterExecutor,
     AdapterPlanner,
@@ -414,6 +414,7 @@ class RequestBroker:
             min(30.0, remaining),
         )
         lease_issued = False
+        backend: ExecutionBackend | None = None
         try:
             backend = self._backends.select(binding, production=self._production)
             workload_key = WorkloadInstanceKey(
@@ -470,6 +471,12 @@ class RequestBroker:
                 self._authority.fence_request(context.request_id)
             raise
         finally:
+            if isinstance(backend, RequestScopedBackend):
+                try:
+                    backend.release_materialization(ticket.reservation.reservation_id)
+                except Exception:
+                    self._authority.fence_request(context.request_id)
+                    raise
             self._admission.release(ticket)
 
     def prepare(

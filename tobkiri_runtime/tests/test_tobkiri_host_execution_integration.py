@@ -597,6 +597,49 @@ def test_provider_rejection_always_releases_submitted_future() -> None:
     assert fixture.audit.failures == [("provider_failed", False)]
 
 
+@pytest.mark.parametrize("failure_at", (None, "materialize", "authorize", "release"))
+def test_request_scoped_worker_cleanup_precedes_resource_release(
+    failure_at: str | None,
+) -> None:
+    class WorkerBackend(FakeBackend):
+        def materialize(self, binding, reservation_id) -> RuntimeEvidence:
+            evidence = super().materialize(binding, reservation_id)
+            if failure_at == "materialize":
+                raise RuntimeError("partial worker start failed")
+            return evidence
+
+        def release_materialization(self, reservation_id: str) -> None:
+            assert reservation_id == "reservation-1"
+            self.events.append("worker_cleanup")
+            if failure_at == "release":
+                raise RuntimeError("worker exit could not be confirmed")
+
+    fixture = make_broker(backend=WorkerBackend([]))
+    if failure_at == "authorize":
+
+        def deny(query: object) -> None:
+            raise PermissionError("final authorization denied")
+
+        fixture.authority.authorize_and_issue_lease = deny
+    try:
+        if failure_at:
+            expected = AuthorizationError if failure_at == "authorize" else RuntimeError
+            with pytest.raises(expected):
+                fixture.broker.invoke(frame(), context(), effect_scope={"user": "u1"})
+        else:
+            fixture.broker.invoke(frame(), context(), effect_scope={"user": "u1"})
+    finally:
+        fixture.broker.close()
+    assert fixture.events.count("worker_cleanup") == 1
+    if failure_at == "release":
+        assert not fixture.admission.released
+        assert "request-1" in fixture.authority.fenced
+    else:
+        assert fixture.events.index("worker_cleanup") < fixture.events.index("reservation_released")
+    if failure_at in ("materialize", "authorize"):
+        assert fixture.backend.invocations == 0
+
+
 def test_singleflight_materialization_never_merges_distinct_principals() -> None:
     events: list[str] = []
 
