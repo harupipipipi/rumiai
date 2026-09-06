@@ -705,7 +705,9 @@ def test_initial_setup_review_does_not_create_profile_or_authority_state(
 
 
 @pytest.mark.parametrize("customized", [False, True])
-@pytest.mark.parametrize("extra_pack", [None, "approved", "revoked", "tampered"])
+@pytest.mark.parametrize(
+    "extra_pack", [None, "approved", "revoked", "tampered", "foreign_root", "missing_key"]
+)
 def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, customized: bool, extra_pack: str | None
 ) -> None:
@@ -759,6 +761,8 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         elif extra_pack == "tampered":
             approval["signature"] = "invalid"
             approval_path.write_text(json.dumps(approval))
+        elif extra_pack == "missing_key":
+            (user_data / "pack_control" / ".authority_key").unlink()
     definitions = ProfileDefinitionStore(user_data)
     original = definitions.get_profile("defaults")
     if customized:
@@ -768,15 +772,25 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
     pointer_before = pointer_path.read_bytes()
     catalog = _packaged_catalog_revision(tmp_path / "new", b"new")
     successor_source = catalog.profiles["defaults"]
+    if extra_pack == "foreign_root":
+        # The lifecycle captured this root explicitly; ambient readers must not
+        # accidentally verify a different user's optional Pack receipts.
+        monkeypatch.setattr(capture, "_user_data_root", lambda _base=None: user_data)
+        monkeypatch.setenv("TOBKIRI_USER_DATA", str(tmp_path / "unrelated"))
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "unrelated"))
+    control_before = {
+        str(path.relative_to(user_data)): path.read_bytes()
+        for path in (user_data / "pack_control").rglob("*") if path.is_file()
+    }
     if customized:
         with pytest.raises(ProfileDefinitionStoreConflict):
             capture.prepare_default_profile_confirmation()
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
-    elif extra_pack in {"revoked", "tampered"}:
+    elif extra_pack in {"revoked", "tampered", "missing_key"}:
         from core_runtime.pack_control_v4 import PackControlDenied
 
-        with pytest.raises(PackControlDenied, match="approval_(revoked|signature_invalid)"):
+        with pytest.raises(PackControlDenied, match="approval_(revoked|signature_invalid|authority_unavailable)"):
             capture.prepare_bootstrap_profile_review()
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
@@ -795,6 +809,10 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         ) == bool(extra_pack)
         assert definitions.snapshot() == before
         assert pointer_path.read_bytes() == pointer_before
+        assert control_before == {
+            str(path.relative_to(user_data)): path.read_bytes()
+            for path in (user_data / "pack_control").rglob("*") if path.is_file()
+        }
         upgraded = capture.capture_default_profile(confirmation=confirmation)
         assert upgraded.activation["activation_id"] != first.activation["activation_id"]
         current = definitions.get_profile("defaults")
@@ -810,3 +828,10 @@ def test_confirmed_bootstrap_upgrade_preserves_definition_history(
         entry = next(p for p in definitions.snapshot()["profiles"] if p["profile_id"] == "defaults")
         assert entry["revisions"][0]["profile"] == dict(original.profile)
         assert capture.capture_active_profile().activation == upgraded.activation
+
+    assert not (tmp_path / "unrelated").exists()
+    if extra_pack in {"revoked", "tampered", "missing_key"}:
+        assert control_before == {
+            str(path.relative_to(user_data)): path.read_bytes()
+            for path in (user_data / "pack_control").rglob("*") if path.is_file()
+        }

@@ -1398,11 +1398,18 @@ def verify_reconfirmed_pack_approvals(resolved: Any, catalog: Any) -> None:
         str(resolved.profile["profile_id"]), catalog=catalog
     )
     optional = {str(item["pack_id"]) for item in resolved.profile["packs"]} - required
-    _verify_optional_pack_approvals(optional, _binding_for_resolved(resolved))
+    _verify_optional_pack_approvals(
+        optional, _binding_for_resolved(resolved), read_only=True
+    )
+    for pack_id in optional:
+        if _pack_manifest_artifact_digest(pack_id) != catalog.packs[pack_id]["pack"]["artifact_digest"]:
+            raise PackControlDigestMismatch("reviewed Pack differs from its installed artifact")
 
 
-def _verify_optional_pack_approvals(pack_ids: set[str], binding: _Binding) -> None:
-    installed = _read_control_state(binding.profile_id)
+def _verify_optional_pack_approvals(
+    pack_ids: set[str], binding: _Binding, *, read_only: bool = False
+) -> None:
+    installed = _read_control_state(binding.profile_id, read_only=read_only)
     records = load_pack_catalog()
     for pack_id in sorted(pack_ids):
         record = records.get(pack_id)
@@ -1411,7 +1418,7 @@ def _verify_optional_pack_approvals(pack_ids: set[str], binding: _Binding) -> No
         if pack_id not in installed:
             raise PackControlConflict("Pack must be installed before activation")
         _require_install_binding(pack_id, record, installed[pack_id], binding)
-        approved, reason = _approval_status(pack_id, record, binding)
+        approved, reason = _approval_status(pack_id, record, binding, read_only=read_only)
         if not approved:
             _raise_approval_failure(reason)
 
@@ -1824,7 +1831,7 @@ def _control_state_path(profile_id: str) -> Path:
     return _user_data_root() / "pack_control" / f"{profile_id}.v4.json"
 
 
-def _persistence_store() -> SecureDirectory:
+def _persistence_store(*, create: bool = True) -> SecureDirectory:
     """Return the process-pinned Pack control persistence boundary."""
 
     root = (_user_data_root() / "pack_control").absolute()
@@ -1832,14 +1839,14 @@ def _persistence_store() -> SecureDirectory:
         store = _PERSISTENCE_STORES.get(root)
         if store is None:
             try:
-                store = SecureDirectory(root, create=True)
+                store = SecureDirectory(root, create=create)
             except (OSError, SecurePersistenceError) as error:
                 raise PackControlUnavailable("Pack control persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
         return store
 
 
-def _approval_store(profile_id: str) -> SecureDirectory:
+def _approval_store(profile_id: str, *, create: bool = True) -> SecureDirectory:
     """Return the process-pinned approval root for one canonical Profile."""
 
     _safe_identity(profile_id, "Profile ID")
@@ -1848,7 +1855,7 @@ def _approval_store(profile_id: str) -> SecureDirectory:
         store = _PERSISTENCE_STORES.get(root)
         if store is None:
             try:
-                store = SecureDirectory(root, create=True)
+                store = SecureDirectory(root, create=create)
             except (OSError, SecurePersistenceError) as error:
                 raise PackControlUnavailable("Pack approval persistence is unavailable") from error
             _PERSISTENCE_STORES[root] = store
@@ -1874,22 +1881,23 @@ def _panel_session_root(authority_session_id: str) -> str:
     return parts[0]
 
 
-def _read_control_state(profile_id: str) -> dict[str, Any]:
-    value = _read_control_envelope(profile_id)
+def _read_control_state(profile_id: str, *, read_only: bool = False) -> dict[str, Any]:
+    value = _read_control_envelope(profile_id, create=not read_only)
     if not value:
         return {}
-    value = _migrate_control_envelope(profile_id, value)
+    if not read_only:
+        value = _migrate_control_envelope(profile_id, value)
     installed = dict(value["installed"])
     if any(pack_id not in load_pack_catalog() for pack_id in installed):
         raise PackControlDigestMismatch("Pack control state contains an unknown Pack")
     return installed
 
 
-def _read_control_envelope(profile_id: str) -> dict[str, Any]:
+def _read_control_envelope(profile_id: str, *, create: bool = True) -> dict[str, Any]:
     """Read the complete Profile-scoped control envelope without projecting it."""
 
     try:
-        store = _persistence_store()
+        store = _persistence_store(create=create)
         relative = _control_state_relative(profile_id)
         if not store.exists(relative):
             return {}
@@ -2129,10 +2137,12 @@ def _approval_status(
     pack_id: str,
     record: Mapping[str, Any],
     binding: _Binding,
+    *,
+    read_only: bool = False,
 ) -> tuple[bool, str | None]:
     try:
         payload = json.loads(
-            _approval_store(binding.profile_id).read_bytes(
+            _approval_store(binding.profile_id, create=not read_only).read_bytes(
                 _approval_relative(binding.profile_id, pack_id)
             )
         )
@@ -2145,8 +2155,17 @@ def _approval_status(
     if payload.get("revoked") is True:
         return False, "approval_revoked"
     signature = str(payload.pop("signature", ""))
+    from .hmac_key_manager import SigningKeyError, load_signing_key
+
+    try:
+        key = (
+            load_signing_key(_user_data_root() / "pack_control" / ".authority_key")
+            if read_only else _authority_key()
+        )
+    except SigningKeyError:
+        return False, "approval_authority_unavailable"
     expected_signature = hmac.new(
-        _authority_key(),
+        key,
         _canonical_bytes(payload),
         hashlib.sha256,
     ).hexdigest()

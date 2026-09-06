@@ -51,6 +51,19 @@ _ProfileCaptureCacheEntry = tuple[Any, _ProfilePointerSignature]
 _PROFILE_CAPTURE_SCOPE: ContextVar[dict[Path, _ProfileCaptureCacheEntry] | None] = ContextVar(
     "tobkiri_profile_capture_scope", default=None
 )
+_RUNTIME_USER_DATA_SCOPE: ContextVar[Path | None] = ContextVar(
+    "tobkiri_runtime_user_data_scope", default=None
+)
+
+
+@contextmanager
+def runtime_user_data_scope(root: Path) -> Iterator[None]:
+    """Bind legacy Host state readers to one explicitly captured root."""
+    token = _RUNTIME_USER_DATA_SCOPE.set(root.resolve())
+    try:
+        yield
+    finally:
+        _RUNTIME_USER_DATA_SCOPE.reset(token)
 
 
 @contextmanager
@@ -117,6 +130,9 @@ def cache_active_profile(
 
 def runtime_user_data_root(base_dir: Path | None = None) -> Path:
     """Return the configured Host state root without an authority fallback."""
+    captured = _RUNTIME_USER_DATA_SCOPE.get()
+    if captured is not None:
+        return captured
     configured = read_migrated_env("TOBKIRI_USER_DATA", "RUMI_USER_DATA")
     if configured:
         return Path(configured).resolve()
@@ -465,7 +481,8 @@ def _resolve_bootstrap_candidate(
     if additional_pack_ids:
         from ..pack_control_v4 import verify_reconfirmed_pack_approvals
 
-        verify_reconfirmed_pack_approvals(resolved, catalog)
+        with runtime_user_data_scope(user_data):
+            verify_reconfirmed_pack_approvals(resolved, catalog)
     return resolved, dict(
         runtime.bootstrap_confirmation(
             resolved=resolved,

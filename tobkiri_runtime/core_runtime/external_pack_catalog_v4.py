@@ -24,7 +24,7 @@ from tobkiri_host.artifact_compiler import compile_pack_root
 from tobkiri_protocol.canonical import canonical_digest
 from tobkiri_protocol.validation import validate_document, validate_file
 
-from .hmac_key_manager import generate_or_load_signing_key
+from .hmac_key_manager import SigningKeyError, generate_or_load_signing_key, load_signing_key
 from .pack_artifact_integrity import (
     HostPolicyLock,
     exclusive_host_policy_lock,
@@ -1089,7 +1089,11 @@ def _read_authenticated_catalog(path: Path, *, allow_missing: bool) -> dict[str,
             "external Pack catalog schema validation failed"
         ) from error
     signature = str(value.pop("signature") or "")
-    expected = hmac.new(_catalog_key(), _canonical_bytes(value), hashlib.sha256).hexdigest()
+    try:
+        key = load_signing_key(path.parent / ".external_normal_pack_catalog_key")
+    except SigningKeyError as error:
+        raise ExternalPackCatalogDenied("external Normal Pack catalog key is unavailable") from error
+    expected = hmac.new(key, _canonical_bytes(value), hashlib.sha256).hexdigest()
     if not signature or not hmac.compare_digest(signature, expected):
         raise ExternalPackCatalogDenied("external Normal Pack catalog authentication failed")
     if (
